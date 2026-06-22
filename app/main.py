@@ -7,7 +7,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -109,5 +109,5 @@ if _frontend_dist.exists():
     # Catch-all: serve index.html for all non-API routes (SPA client-side routing)
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
-        index = _frontend_dist / "index.html"
-        return FileResponse(str(index))
+        if full_path.startswith("api/"):
+            raise HTTPExceptio
