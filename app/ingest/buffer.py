@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from app.config import get_settings
@@ -29,7 +29,7 @@ class IngestBuffer:
         self._flush_task: Optional[asyncio.Task] = None
         self._total_received: int = 0
         self._total_flushed: int = 0
-        self._last_flush: datetime = datetime.utcnow()
+        self._last_flush: datetime = datetime.now(tz=timezone.utc)
 
     @classmethod
     def get_instance(cls) -> "IngestBuffer":
@@ -75,7 +75,7 @@ class IngestBuffer:
             storage = get_storage()
             await storage.insert_flows(batch)
             self._total_flushed += len(batch)
-            self._last_flush = datetime.utcnow()
+            self._last_flush = datetime.now(tz=timezone.utc)
             log.debug(f"Flushed {len(batch)} records (total flushed: {self._total_flushed})")
         except Exception as e:
             log.error(f"Flush failed — {len(batch)} records lost: {e}")
@@ -91,5 +91,4 @@ class IngestBuffer:
             "buffered": len(self._buffer),
             "total_received": self._total_received,
             "total_flushed": self._total_flushed,
-            "last_flush": self._last_flush.isoformat(),
-        }
+            "last_flush": self._

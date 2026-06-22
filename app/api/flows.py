@@ -337,7 +337,7 @@ def _build_pcap_record(flow: FlowSearchResult) -> bytes:
     # Layer 4
     if flow.protocol == 6:          # TCP — 20 byte header
         l4 = struct.pack(
-            "!HHIIHHHH",
+            "<HHIIHHHH",
             flow.src_port & 0xFFFF,  # sport
             flow.dst_port & 0xFFFF,  # dport
             0,                       # seq
@@ -350,7 +350,7 @@ def _build_pcap_record(flow: FlowSearchResult) -> bytes:
     elif flow.protocol == 17:       # UDP — 8 byte header
         udp_len = 8
         l4 = struct.pack(
-            "!HHHH",
+            "<HHHH",
             flow.src_port & 0xFFFF,
             flow.dst_port & 0xFFFF,
             udp_len,
@@ -363,7 +363,7 @@ def _build_pcap_record(flow: FlowSearchResult) -> bytes:
 
     # IP header (no options, TTL=64)
     ip_header_no_checksum = struct.pack(
-        "!BBHHHBBH4s4s",
+        "<BBHHHBBH4s4s",
         0x45,                        # version=4, IHL=5
         0,                           # TOS
         total_len,
@@ -378,7 +378,7 @@ def _build_pcap_record(flow: FlowSearchResult) -> bytes:
     # Re-pack with real checksum
     chk = _ip_checksum(ip_header_no_checksum)
     ip_header = struct.pack(
-        "!BBHHHBBH4s4s",
+        "<BBHHHBBH4s4s",
         0x45,
         0,                           # TOS
         total_len,
@@ -400,7 +400,7 @@ def _build_pcap_record(flow: FlowSearchResult) -> bytes:
     ts_sec  = int(flow.timestamp.timestamp())
     ts_usec = flow.timestamp.microsecond
     pkt_len = len(packet)
-    rec_hdr = struct.pack("!IIII", ts_sec, ts_usec, pkt_len, pkt_len)
+    rec_hdr = struct.pack("<IIII", ts_sec, ts_usec, pkt_len, pkt_len)
 
     return rec_hdr + packet
 
@@ -427,7 +427,7 @@ async def export_pcap(
     flows = await _fetch_for_export(src_ip, dst_ip, src_port, dst_port, protocol, sampler_ip, window, start, end)
 
     # Global pcap header: magic, version 2.4, GMT offset 0, accuracy 0, snaplen 65535, Ethernet link type
-    global_hdr = struct.pack("!IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1)
+    global_hdr = struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1)
 
     def _generate():
         yield global_hdr
