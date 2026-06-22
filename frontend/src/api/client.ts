@@ -124,6 +124,9 @@ export const api = {
     request(`/users/${id}/reset-password`, { method: 'PATCH', body: JSON.stringify({ new_password: newPassword }) }),
   changeMyPassword: (currentPassword: string, newPassword: string) =>
     request('/users/me/password', { method: 'PATCH', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
+
+  restartService: () =>
+    request<{ status: string; message: string }>('/system/restart', { method: 'POST' }),
 }
 
 export interface DeviceSummary {

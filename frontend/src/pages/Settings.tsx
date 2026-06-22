@@ -70,6 +70,48 @@ function SelectInput({ value, onChange, options }: {
   )
 }
 
+function RestartServiceRow() {
+  const [state, setState] = useState<'idle' | 'restarting' | 'done' | 'error'>('idle')
+
+  const restart = async () => {
+    if (state === 'restarting') return
+    setState('restarting')
+    try {
+      await api.restartService()
+      setState('done')
+      // After a few seconds, show reconnecting state until page reload
+      setTimeout(() => setState('idle'), 8000)
+    } catch {
+      setState('error')
+      setTimeout(() => setState('idle'), 4000)
+    }
+  }
+
+  return (
+    <div className="grid grid-cols-3 gap-4 items-start py-4 border-b border-gray-800">
+      <div>
+        <p className="text-sm font-medium text-white">Restart Service</p>
+        <p className="text-xs text-gray-500 mt-0.5">Apply backend changes or recover from errors</p>
+      </div>
+      <div className="col-span-2 flex items-center gap-3">
+        <button
+          onClick={restart}
+          disabled={state === 'restarting'}
+          className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          {state === 'restarting' ? 'Restarting…' : 'Restart Service'}
+        </button>
+        {state === 'done' && (
+          <span className="text-sm text-amber-400">Service is restarting — reload the page in ~5 seconds</span>
+        )}
+        {state === 'error' && (
+          <span className="text-sm text-red-400">Restart failed — check server logs</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // Badge for "Phase 5" to mark not-yet-active features
 function Phase5Badge() {
   return (
@@ -273,16 +315,17 @@ export default function Settings() {
       {/* Storage */}
       {tab === 'storage' && (
         <Section title="Storage" onSave={storageSave.save} saving={storageSave.saving} saved={storageSave.saved} error={storageSave.error}>
-          <Field label="Backend" hint="ClickHouse recommended for production; DuckDB for lightweight installs">
+          <Field label="Backend" hint="DuckDB is the default; ClickHouse requires a separate installation. A service restart is required after changing this setting.">
             <SelectInput
-              value={str('storage_backend', 'clickhouse')}
+              value={str('storage_backend', 'duckdb')}
               onChange={v => set('storage_backend', v)}
               options={[
-                { value: 'clickhouse', label: 'ClickHouse (recommended)' },
-                { value: 'duckdb', label: 'DuckDB' },
+                { value: 'duckdb', label: 'DuckDB (default)' },
+                { value: 'clickhouse', label: 'ClickHouse (requires separate install)' },
               ]}
             />
           </Field>
+          <RestartServiceRow />
           <Field label="Raw flow retention" hint="Days to keep individual flow records">
             <div className="flex items-center gap-3">
               <NumberInput value={num('retention_days_raw', 90)} onChange={v => set('retention_days_raw', v)} min={1} max={3650} />
