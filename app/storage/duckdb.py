@@ -9,12 +9,18 @@ The database file lives at settings.duckdb_path (default: /mnt/software/pktflow/
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import threading
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import duckdb
+
+# All DuckDB operations run in this single-thread executor.
+# Using max_workers=1 means operations are always serialized — no concurrent
+# access to the DuckDB connection, no C-mutex contention.
+_DB_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="duckdb")
 
 from app.config import get_settings
 from app.models.flow import (
@@ -64,7 +70,8 @@ CREATE INDEX IF NOT EXISTS idx_flows_dst_ip      ON flows (dst_ip);
 class DuckDBBackend(StorageBackend):
 
     def __init__(self):
-        self._conn: Optional[duckdb.DuckDBPyConnection] = None
+        self._conn: Optional[duckdb.DuckDBPyConnection] = None       # write
+        self._rconn: Optional[duckdb.DuckDBPyConnection] = None      # read-only
         self._db_path: str = getattr(settings, "duckdb_path", "/mnt/software/pktflow/flows.duckdb")
 
     def _get_conn(self) -> duckdb.DuckDBPyConnection:
@@ -72,22 +79,40 @@ class DuckDBBackend(StorageBackend):
             raise RuntimeError("DuckDB not connected — call connect() first")
         return self._conn
 
+    def _get_rconn(self) -> duckdb.DuckDBPyConnection:
+        """Return the read-only connection, falling back to write conn if needed."""
+        return self._rconn if self._rconn is not None else self._get_conn()
+
     def _exec(self, sql: str, params=None):
-        conn = self._get_conn()
+        """Read query via the read-only connection — never blocks writes."""
+        cur = self._get_rconn().cursor()
         if params:
-            return conn.execute(sql, params).fetchall()
-        return conn.execute(sql).fetchall()
+            return cur.execute(sql, params).fetchall()
+        return cur.execute(sql).fetchall()
 
     def _exec_write(self, sql: str, params=None):
         """Execute a write with the lock held."""
         with _write_lock:
-            conn = self._get_conn()
+            cur = self._get_conn().cursor()
             if params:
-                conn.execute(sql, params)
+                cur.execute(sql, params)
             else:
-                conn.execute(sql)
+                cur.execute(sql)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    async def _run(self, fn):
+        """Run a blocking DuckDB function in the dedicated single-thread executor."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(_DB_EXECUTOR, fn)
+
+    async def _run_read(self, fn, timeout: float = 10.0):
+        """Run a read query with a timeout; return None on timeout."""
+        try:
+            return await asyncio.wait_for(self._run(fn), timeout=timeout)
+        except asyncio.TimeoutError:
+            log.warning("DuckDB read query timed out after %.1fs", timeout)
+            return None
 
     async def connect(self) -> None:
         def _open():
@@ -97,15 +122,15 @@ class DuckDBBackend(StorageBackend):
                 stmt = stmt.strip()
                 if stmt:
                     self._conn.execute(stmt)
-        await asyncio.to_thread(_open)
-        log.info(f"DuckDB connected: {self._db_path}")
+        await self._run(_open)
+        log.info(f"DuckDB connected (single-thread executor): {self._db_path}")
 
     async def close(self) -> None:
         def _close():
             if self._conn:
                 self._conn.close()
                 self._conn = None
-        await asyncio.to_thread(_close)
+        await self._run(_close)
 
     # ── Insert ────────────────────────────────────────────────────────────────
 
@@ -115,13 +140,13 @@ class DuckDBBackend(StorageBackend):
 
         def _insert():
             with _write_lock:
-                conn = self._get_conn()
+                cur = self._get_conn().cursor()
                 rows = [f.to_clickhouse_row() for f in flows]
-                conn.executemany(
+                cur.executemany(
                     """INSERT INTO flows VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     rows,
                 )
-        await asyncio.to_thread(_insert)
+        await self._run(_insert)
 
     # ── Dashboard ─────────────────────────────────────────────────────────────
 
@@ -144,7 +169,7 @@ class DuckDBBackend(StorageBackend):
                 ORDER BY sampler_name
             """, [cutoff_1h, cutoff_1h, cutoff_1h, cutoff_24h])
 
-        rows = await asyncio.to_thread(_query)
+        rows = await self._run_read(_query) or []
         result = []
         for row in rows:
             result.append(DeviceSummary(
@@ -184,7 +209,7 @@ class DuckDBBackend(StorageBackend):
                 LIMIT ?
             """, params)
 
-        rows = await asyncio.to_thread(_query)
+        rows = await self._run_read(_query) or []
         return [
             TopTalker(
                 src_ip=r[0], dst_ip=r[1],
@@ -223,7 +248,7 @@ class DuckDBBackend(StorageBackend):
                 ORDER BY ts
             """, [bucket_seconds, bucket_seconds] + params[1:])
 
-        rows = await asyncio.to_thread(_query)
+        rows = await self._run_read(_query) or []
         return [TimeSeriesPoint(timestamp=r[0], bytes=r[1], packets=r[2], flow_count=r[3]) for r in rows]
 
     # ── Flow search ───────────────────────────────────────────────────────────
@@ -273,7 +298,7 @@ class DuckDBBackend(StorageBackend):
                 LIMIT ? OFFSET ?
             """, params)
 
-        rows = await asyncio.to_thread(_query)
+        rows = await self._run_read(_query) or []
         return [
             FlowSearchResult(
                 timestamp=r[0], sampler_ip=r[1], sampler_name=r[2] or "",
@@ -295,7 +320,7 @@ class DuckDBBackend(StorageBackend):
             cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=60)
             return self._exec("SELECT COUNT(*) / 60.0 FROM flows WHERE timestamp >= ?", [cutoff])
 
-        rows = await asyncio.to_thread(_query)
+        rows = await self._run_read(_query)
         return float(rows[0][0]) if rows else 0.0
 
     async def get_sampler_last_seen(self) -> dict[str, datetime]:
@@ -306,7 +331,7 @@ class DuckDBBackend(StorageBackend):
                 [cutoff],
             )
 
-        rows = await asyncio.to_thread(_query)
+        rows = await self._run_read(_query) or []
         return {r[0]: r[1] for r in rows}
 
     # ── Retention ─────────────────────────────────────────────────────────────
@@ -315,13 +340,13 @@ class DuckDBBackend(StorageBackend):
         """DuckDB has no built-in TTL — delete rows older than `days` days."""
         def _delete():
             cutoff = datetime.now(tz=timezone.utc) - timedelta(days=days)
-            with _write_lock:
-                deleted = self._get_conn().execute(
-                    "DELETE FROM flows WHERE timestamp < ? RETURNING COUNT(*)", [cutoff]
-                ).fetchone()
+            cur = self._get_conn().cursor()
+            deleted = cur.execute(
+                "DELETE FROM flows WHERE timestamp < ?", [cutoff]
+            ).fetchone()
             return deleted[0] if deleted else 0
 
-        n = await asyncio.to_thread(_delete)
+        n = await self._run(_delete)
         log.info(f"DuckDB retention purge: removed {n} rows older than {days} days")
 
     # ── Topology ──────────────────────────────────────────────────────────────
@@ -364,7 +389,8 @@ class DuckDBBackend(StorageBackend):
 
             return edge_rows, sampler_rows
 
-        edge_rows, sampler_rows = await asyncio.to_thread(_query)
+        result = await self._run_read(_query)
+        edge_rows, sampler_rows = result if result else ([], [])
 
         sampler_map = {r[0]: {"name": r[1] or "", "site": r[2] or ""} for r in sampler_rows}
 
