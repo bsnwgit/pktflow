@@ -324,4 +324,4 @@ class AlertEngine:
     @staticmethod
     def notify_unknown_sampler(ip: str) -> None:
         """Called from ingest handler when an unrecognized source sends data."""
-     
+        _unknown_sampler_queue.append(ip)
