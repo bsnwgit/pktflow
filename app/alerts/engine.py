@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 import aiosqlite
 
@@ -20,11 +21,11 @@ _unknown_sampler_queue: list[str] = []
 
 
 class AlertEngine:
-    _instance: "AlertEngine | None" = None
+    _instance: "Optional[AlertEngine]" = None
 
     def __init__(self, interval_seconds: int = 60):
         self._interval = interval_seconds
-        self._task: asyncio.Task | None = None
+        self._task: Optional[asyncio.Task] = None
 
     async def start(self) -> None:
         AlertEngine._instance = self
@@ -71,7 +72,7 @@ class AlertEngine:
         from app.storage.factory import get_storage
 
         rule_type = rule["rule_type"]
-        fired_message: str | None = None
+        fired_message: Optional[str] = None
         details: dict = {}
 
         if rule_type == "data_gap":
@@ -323,4 +324,4 @@ class AlertEngine:
     @staticmethod
     def notify_unknown_sampler(ip: str) -> None:
         """Called from ingest handler when an unrecognized source sends data."""
-        _unknown_sampler_queue.append(ip)
+     

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
+from typing import Optional
 
 from app.config import get_settings
 from app.models.flow import FlowRecord
@@ -20,12 +21,12 @@ settings = get_settings()
 
 
 class IngestBuffer:
-    _instance: "IngestBuffer | None" = None
+    _instance: "Optional[IngestBuffer]" = None
 
     def __init__(self):
         self._buffer: list[FlowRecord] = []
         self._lock = asyncio.Lock()
-        self._flush_task: asyncio.Task | None = None
+        self._flush_task: Optional[asyncio.Task] = None
         self._total_received: int = 0
         self._total_flushed: int = 0
         self._last_flush: datetime = datetime.utcnow()
@@ -90,5 +91,4 @@ class IngestBuffer:
             "buffered": len(self._buffer),
             "total_received": self._total_received,
             "total_flushed": self._total_flushed,
-            "last_flush": self._last_flush.isoformat(),
-        }
+            "last_flush": self._

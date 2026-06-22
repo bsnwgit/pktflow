@@ -6,14 +6,15 @@ Falls back to ClickHouse on startup (before settings DB is available).
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 from app.storage.base import StorageBackend
 
 log = logging.getLogger("pktflow.storage")
-_instance: StorageBackend | None = None
+_instance: Optional[StorageBackend] = None
 
 
-async def init_storage(backend: str = "clickhouse") -> None:
+async def init_storage(backend: str = "duckdb") -> None:
     """Called on app startup. Backend can be overridden by runtime settings."""
     global _instance
 
@@ -45,5 +46,4 @@ async def init_storage(backend: str = "clickhouse") -> None:
 
 def get_storage() -> StorageBackend:
     if _instance is None:
-        raise RuntimeError("Storage not initialized — call init_storage() first")
-    return _instance
+        raise RuntimeError("Storage not initialized — call init_storage() fi
