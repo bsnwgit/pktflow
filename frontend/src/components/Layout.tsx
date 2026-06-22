@@ -5,13 +5,79 @@ import { api } from '../api/client'
 import AiAssistant from './AiAssistant'
 import clsx from 'clsx'
 
+// ─── Change Password Modal ────────────────────────────────────────────────────
+function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+  const [currentPw, setCurrentPw] = useState('')
+  const [newPw, setNewPw] = useState('')
+  const [confirmPw, setConfirmPw] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (newPw.length < 6) { setError('New password must be at least 6 characters'); return }
+    if (newPw !== confirmPw) { setError('Passwords do not match'); return }
+    setSaving(true)
+    setError('')
+    try {
+      await api.changeMyPassword(currentPw, newPw)
+      setSuccess(true)
+      setTimeout(onClose, 1200)
+    } catch (e: any) {
+      setError(e.message ?? 'Failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-white mb-5">Change Password</h2>
+        {success ? (
+          <p className="text-green-400 text-sm text-center py-4">Password updated successfully!</p>
+        ) : (
+          <form onSubmit={submit} className="space-y-4">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Current Password</label>
+              <input type="password" value={currentPw} onChange={e => setCurrentPw(e.target.value)} required autoFocus
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">New Password</label>
+              <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} required
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Confirm New Password</label>
+              <input type="password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} required
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" />
+            </div>
+            {error && <p className="text-red-400 text-xs">{error}</p>}
+            <div className="flex justify-end gap-3 pt-2">
+              <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">Cancel</button>
+              <button type="submit" disabled={saving}
+                className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors disabled:opacity-50">
+                {saving ? 'Saving…' : 'Update Password'}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const NAV = [
-  { to: '/',         label: 'Dashboard',     icon: '⬡' },
-  { to: '/devices',  label: 'Devices',       icon: '◈' },
-  { to: '/explorer', label: 'Flow Explorer', icon: '⊕' },
-  { to: '/topology', label: 'Topology',      icon: '⟳' },
-  { to: '/alerts',   label: 'Alerts',        icon: '△' },
-  { to: '/settings', label: 'Settings',      icon: '⚙' },
+  { to: '/',          label: 'Dashboard',     icon: '⬡', adminOnly: false },
+  { to: '/devices',   label: 'Devices',       icon: '◈', adminOnly: false },
+  { to: '/explorer',  label: 'Flow Explorer', icon: '⊕', adminOnly: false },
+  { to: '/analytics', label: 'Analytics',     icon: '◑', adminOnly: false },
+  { to: '/topology',  label: 'Topology',      icon: '⟳', adminOnly: false },
+  { to: '/alerts',    label: 'Alerts',        icon: '△', adminOnly: false },
+  { to: '/settings',  label: 'Settings',      icon: '⚙', adminOnly: false },
+  { to: '/users',     label: 'Users',         icon: '◎', adminOnly: true  },
 ]
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -19,8 +85,8 @@ export default function Layout({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
   const [fps, setFps] = useState<number>(0)
   const [unacked, setUnacked] = useState<number>(0)
+  const [showChangePw, setShowChangePw] = useState(false)
 
-  // Live flow rate + unacked alert count — poll every 10 seconds
   useEffect(() => {
     const tick = async () => {
       try {
@@ -44,9 +110,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-screen bg-gray-950 text-white overflow-hidden">
-      {/* Sidebar */}
       <aside className="w-52 flex-shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col">
-        {/* Logo */}
         <div className="flex items-center gap-2 px-4 py-5 border-b border-gray-800">
           <svg className="w-5 h-5 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M3 12h4l3-9 4 18 3-9h4" strokeLinecap="round" strokeLinejoin="round"/>
@@ -54,9 +118,8 @@ export default function Layout({ children }: { children: ReactNode }) {
           <span className="font-bold text-white tracking-tight">pktFlow</span>
         </div>
 
-        {/* Nav */}
         <nav className="flex-1 px-2 py-4 space-y-0.5">
-          {NAV.map(({ to, label, icon }) => (
+          {NAV.filter(n => !n.adminOnly || user?.role === 'admin').map(({ to, label, icon }) => (
             <NavLink
               key={to}
               to={to}
@@ -79,7 +142,6 @@ export default function Layout({ children }: { children: ReactNode }) {
           ))}
         </nav>
 
-        {/* User */}
         <div className="px-3 py-3 border-t border-gray-800">
           <div className="flex items-center gap-2 px-2 py-1.5">
             <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold">
@@ -89,6 +151,11 @@ export default function Layout({ children }: { children: ReactNode }) {
               <p className="text-xs font-medium text-white truncate">{user?.username}</p>
               <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
             </div>
+            <button onClick={() => setShowChangePw(true)} title="Change password" className="text-gray-500 hover:text-gray-300">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/>
+              </svg>
+            </button>
             <button onClick={handleLogout} title="Sign out" className="text-gray-500 hover:text-gray-300">
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" strokeLinecap="round" strokeLinejoin="round"/>
@@ -98,9 +165,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header bar */}
         <header className="h-12 flex-shrink-0 bg-gray-900 border-b border-gray-800 flex items-center px-5 gap-4">
           <div className="flex items-center gap-1.5 text-sm">
             <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
@@ -110,14 +175,13 @@ export default function Layout({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        {/* Page content */}
         <main className="flex-1 overflow-auto p-5">
           {children}
         </main>
       </div>
 
-      {/* AI assistant — available on all pages */}
       <AiAssistant />
+      {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
     </div>
   )
 }

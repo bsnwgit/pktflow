@@ -134,6 +134,15 @@ class FlowSearchResult(BaseModel):
     flow_dir: int = 2
 
 
+class ProtocolStat(BaseModel):
+    protocol: int
+    name: str
+    bytes: int
+    packets: int
+    flow_count: int
+    pct_bytes: float
+
+
 class TopologyNode(BaseModel):
     id: str                        # IP address
     sampler_name: str = ""

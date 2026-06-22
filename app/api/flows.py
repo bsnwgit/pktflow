@@ -16,7 +16,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
 from app.dependencies import CurrentUser
-from app.models.flow import TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge
+from app.models.flow import TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge, ProtocolStat
 from app.storage.factory import get_storage
 
 router = APIRouter()
@@ -149,6 +149,24 @@ async def sampler_last_seen(_: CurrentUser):
     """Dict of sampler_ip → last flow timestamp."""
     data = await get_storage().get_sampler_last_seen()
     return {ip: ts.isoformat() for ip, ts in data.items()}
+
+
+# ── Protocol distribution ─────────────────────────────────────────────────────
+
+@router.get("/protocols", response_model=list[ProtocolStat])
+async def protocol_distribution(
+    _: CurrentUser,
+    window: str = Query("1h"),
+    sampler_ip: Optional[str] = Query(None),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None),
+):
+    """Protocol breakdown by byte volume — for pie/bar charts."""
+    if start and end:
+        s, e = start, end
+    else:
+        s, e = _parse_window(window)
+    return await get_storage().get_protocol_distribution(s, e, sampler_ip)
 
 
 # ── Topology ──────────────────────────────────────────────────────────────────
