@@ -40,7 +40,6 @@ async function request<T>(
   const res = await fetch(`/api${path}`, { ...options, headers })
 
   if (res.status === 401) {
-    // Try silent refresh
     const refreshed = await tryRefresh()
     if (refreshed) {
       headers['Authorization'] = `Bearer ${_accessToken}`
@@ -75,7 +74,6 @@ async function tryRefresh(): Promise<boolean> {
 }
 
 export const api = {
-  // Auth
   login: (username: string, password: string) =>
     request<{ access_token: string; role: string }>('/auth/login', {
       method: 'POST',
@@ -83,7 +81,6 @@ export const api = {
     }),
   logout: () => request('/auth/logout', { method: 'POST' }),
 
-  // Flows
   getDeviceSummaries: () => request<DeviceSummary[]>('/flows/devices'),
   getFlowRate: () => request<{ flows_per_sec: number }>('/flows/rate'),
   getTimeSeries: (params: TimeSeriesParams) =>
@@ -95,34 +92,39 @@ export const api = {
   getLastSeen: () => request<Record<string, string>>('/flows/last-seen'),
   getTopology: (params: TopologyParams) =>
     request<TopologyResponse>(`/flows/topology?${new URLSearchParams(params as any)}`),
+  getProtocolStats: (params: { window?: string; sampler_ip?: string }) =>
+    request<ProtocolStat[]>(`/flows/protocols?${new URLSearchParams(params as any)}`),
 
-  // Devices
   getDevices: () => request<Device[]>('/devices/'),
   createDevice: (d: DeviceIn) => request<Device>('/devices/', { method: 'POST', body: JSON.stringify(d) }),
   updateDevice: (id: number, d: DeviceIn) =>
     request<Device>(`/devices/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   deleteDevice: (id: number) => request(`/devices/${id}`, { method: 'DELETE' }),
 
-  // Alerts
   getAlertRules: () => request<AlertRule[]>('/alerts/rules'),
   getAlertEvents: (unackedOnly = false) =>
     request<AlertEvent[]>(`/alerts/events?unacked_only=${unackedOnly}`),
   ackEvent: (id: number) => request(`/alerts/events/${id}/ack`, { method: 'POST' }),
   ackAllEvents: () => request('/alerts/events/ack-all', { method: 'POST' }),
 
-  // Settings
   getSettings: () => request<Record<string, unknown>>('/settings/'),
   updateSetting: (key: string, value: unknown) =>
     request(`/settings/${key}`, { method: 'PUT', body: JSON.stringify({ value }) }),
   bulkUpdateSettings: (updates: Record<string, unknown>) =>
     request('/settings/bulk', { method: 'POST', body: JSON.stringify(updates) }),
 
-  // Users
   getUsers: () => request<User[]>('/users/'),
   getMe: () => request<User>('/users/me'),
+  createUser: (body: UserIn) => request<User>('/users/', { method: 'POST', body: JSON.stringify(body) }),
+  updateUser: (id: number, body: UserIn) => request<User>(`/users/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteUser: (id: number) => request(`/users/${id}`, { method: 'DELETE' }),
+  activateUser: (id: number) => request(`/users/${id}/activate`, { method: 'PATCH' }),
+  deactivateUser: (id: number) => request(`/users/${id}/deactivate`, { method: 'PATCH' }),
+  resetUserPassword: (id: number, newPassword: string) =>
+    request(`/users/${id}/reset-password`, { method: 'PATCH', body: JSON.stringify({ new_password: newPassword }) }),
+  changeMyPassword: (currentPassword: string, newPassword: string) =>
+    request('/users/me/password', { method: 'PATCH', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
 }
-
-// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface DeviceSummary {
   sampler_ip: string
@@ -205,6 +207,13 @@ export interface AlertEvent {
   acked_at: string | null
 }
 
+export interface UserIn {
+  username: string
+  email: string
+  password?: string
+  role: string
+}
+
 export interface User {
   id: number
   username: string
@@ -213,6 +222,15 @@ export interface User {
   is_active: boolean
   created_at: string
   last_login: string | null
+}
+
+export interface ProtocolStat {
+  protocol: number
+  name: string
+  bytes: number
+  packets: number
+  flow_count: number
+  pct_bytes: number
 }
 
 export interface TopologyNode {
@@ -247,10 +265,6 @@ export type SearchParams = {
   protocol?: string; sampler_ip?: string; window?: string; limit?: string
 }
 
-/**
- * Download a binary/text export from an authenticated API endpoint.
- * Triggers browser Save dialog. Returns an error string or null on success.
- */
 export async function downloadExport(
   path: string,
   params: Record<string, string>,
