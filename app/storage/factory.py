@@ -46,4 +46,5 @@ async def init_storage(backend: str = "duckdb") -> None:
 
 def get_storage() -> StorageBackend:
     if _instance is None:
-        raise RuntimeError("Storage not initialized — call init_storage() fi
+        raise RuntimeError("Storage not initialized — call init_storage() first")
+    return _instance
