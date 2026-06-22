@@ -1,16 +1,55 @@
 """
-DuckDB storage backend.
-Embedded, zero-config alternative to ClickHouse.
-Suitable for low-traffic deployments (<50 flows/sec) or dev/test environments.
+DuckDB storage backend — enterprise concurrency design.
 
-DuckDB is synchronous, so every call is wrapped in asyncio.to_thread.
-The database file lives at settings.duckdb_path (default: /mnt/software/pktflow/flows.duckdb).
+Architecture
+------------
+DuckDB requires each connection to be accessed by a single thread at a time.
+To support concurrent reads without blocking on in-progress writes we use a
+pooled multi-connection design:
+
+    Write path
+    ──────────
+    _WRITE_EXECUTOR (max_workers=1)
+        └── _wconn  ← one connection, one thread, zero contention on writes
+
+    Read path
+    ─────────
+    _READ_EXECUTOR (max_workers=READ_POOL_SIZE)
+        └── _ReadPool (READ_POOL_SIZE connections)
+                ├── conn-0  ← thread 0 acquires, queries, releases
+                ├── conn-1  ← thread 1 acquires, queries, releases
+                └── …
+
+    Each read thread borrows a connection from the pool (blocking queue with
+    timeout), executes its query, and returns the connection.  READ_POOL_SIZE
+    concurrent read queries can execute simultaneously without blocking each
+    other or the write thread.
+
+Timeout strategy
+────────────────
+asyncio.wait({fut}, timeout=N) is used for read timeouts instead of
+asyncio.wait_for().  The key difference: asyncio.wait() does NOT attempt to
+cancel the underlying future when the timeout expires — it simply returns
+(done, pending) and the caller handles the pending case.  This avoids the
+Python 3.9 bug where wait_for's _cancel_and_wait() stalls indefinitely
+trying to cancel a non-cancellable concurrent.futures thread.  The thread
+always runs to completion in the background; the HTTP handler returns an
+empty/default result immediately after the timeout.
+
+Scaling
+───────
+READ_POOL_SIZE can be increased for heavier read workloads.  Writes are
+inherently single-writer in DuckDB (OLAP workloads do not need concurrent
+writers); the single write thread is not a bottleneck at typical NetFlow
+ingest rates.
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import concurrent.futures
 import logging
-import threading
+import queue as _queue
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -27,9 +66,21 @@ from app.storage.base import StorageBackend
 log = logging.getLogger("pktflow.storage.duckdb")
 settings = get_settings()
 
-# DuckDB is not thread-safe for concurrent writes — use a lock
-_write_lock = threading.Lock()
+# ── Pool / executor sizing ─────────────────────────────────────────────────────
+# READ_POOL_SIZE concurrent read queries.  Each needs its own DuckDB connection
+# and its own executor thread.  4 is a sensible default; tune up for heavier
+# dashboard / API workloads.
+READ_POOL_SIZE: int = 4
+READ_QUERY_TIMEOUT: float = 30.0   # seconds before a read returns None
 
+_WRITE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="duckdb-write"
+)
+_READ_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=READ_POOL_SIZE, thread_name_prefix="duckdb-read"
+)
+
+# ── Schema ────────────────────────────────────────────────────────────────────
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS flows (
     timestamp        TIMESTAMPTZ NOT NULL,
@@ -54,58 +105,192 @@ CREATE TABLE IF NOT EXISTS flows (
     flow_dir         INTEGER     DEFAULT 2
 );
 
-CREATE INDEX IF NOT EXISTS idx_flows_ts          ON flows (timestamp);
-CREATE INDEX IF NOT EXISTS idx_flows_sampler     ON flows (sampler_ip);
-CREATE INDEX IF NOT EXISTS idx_flows_src_ip      ON flows (src_ip);
-CREATE INDEX IF NOT EXISTS idx_flows_dst_ip      ON flows (dst_ip);
+CREATE INDEX IF NOT EXISTS idx_flows_ts      ON flows (timestamp);
+CREATE INDEX IF NOT EXISTS idx_flows_sampler ON flows (sampler_ip);
+CREATE INDEX IF NOT EXISTS idx_flows_src_ip  ON flows (src_ip);
+CREATE INDEX IF NOT EXISTS idx_flows_dst_ip  ON flows (dst_ip);
 """
 
+
+# ── Connection pool ───────────────────────────────────────────────────────────
+
+class _ReadPool:
+    """
+    Bounded pool of DuckDB connections for concurrent read queries.
+
+    Each connection is owned by at most one thread at a time (enforced by the
+    blocking queue).  Threads acquire a connection, run their query, then
+    return it to the pool.  If all connections are checked out the acquiring
+    thread blocks up to `acquire_timeout` seconds before raising.
+    """
+
+    def __init__(self, db_path: str, size: int = READ_POOL_SIZE,
+                 acquire_timeout: float = READ_QUERY_TIMEOUT):
+        self._db_path = db_path
+        self._size = size
+        self._acquire_timeout = acquire_timeout
+        self._pool: _queue.Queue[duckdb.DuckDBPyConnection] = _queue.Queue(maxsize=size)
+
+    def open(self) -> None:
+        """Open all pool connections.  Safe to call from any single thread."""
+        for i in range(self._size):
+            conn = duckdb.connect(self._db_path)
+            self._pool.put(conn)
+        log.info("DuckDB read pool open: %d connections at %s", self._size, self._db_path)
+
+    @contextlib.contextmanager
+    def acquire(self):
+        """
+        Context manager: check out a connection, yield it, then return it.
+        Raises RuntimeError if no connection becomes available within the
+        configured timeout.
+        """
+        try:
+            conn = self._pool.get(timeout=self._acquire_timeout)
+        except _queue.Empty:
+            raise RuntimeError(
+                f"DuckDB read pool exhausted — all {self._size} connections busy "
+                f"after {self._acquire_timeout:.0f}s"
+            )
+        try:
+            yield conn
+        except Exception:
+            # If the connection threw an error it may be invalid; replace it.
+            try:
+                conn.close()
+            except Exception:
+                pass
+            try:
+                conn = duckdb.connect(self._db_path)
+            except Exception as e:
+                log.error("DuckDB: failed to replace broken connection: %s", e)
+                conn = None
+            finally:
+                if conn is not None:
+                    self._pool.put(conn)
+            raise
+        else:
+            self._pool.put(conn)
+
+    @property
+    def size(self) -> int:
+        return self._size
+
+    @property
+    def available(self) -> int:
+        return self._pool.qsize()
+
+    def close_all(self) -> None:
+        """Close every connection.  Call on shutdown."""
+        closed = 0
+        while True:
+            try:
+                conn = self._pool.get_nowait()
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                closed += 1
+            except _queue.Empty:
+                break
+        log.info("DuckDB read pool: %d connections closed", closed)
+
+
+# ── Backend ───────────────────────────────────────────────────────────────────
 
 class DuckDBBackend(StorageBackend):
 
     def __init__(self):
-        self._conn: Optional[duckdb.DuckDBPyConnection] = None
-        self._db_path: str = getattr(settings, "duckdb_path", "/mnt/software/pktflow/flows.duckdb")
+        self._wconn: Optional[duckdb.DuckDBPyConnection] = None
+        self._read_pool: Optional[_ReadPool] = None
+        self._db_path: str = getattr(
+            settings, "duckdb_path", "/mnt/software/pktflow/flows.duckdb"
+        )
 
-    def _get_conn(self) -> duckdb.DuckDBPyConnection:
-        if self._conn is None:
-            raise RuntimeError("DuckDB not connected — call connect() first")
-        return self._conn
+    # ── Async dispatch helpers ─────────────────────────────────────────────────
 
-    def _exec(self, sql: str, params=None):
-        conn = self._get_conn()
-        if params:
-            return conn.execute(sql, params).fetchall()
-        return conn.execute(sql).fetchall()
+    async def _write(self, fn):
+        """Dispatch a write operation to the single write executor thread."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(_WRITE_EXECUTOR, fn)
 
-    def _exec_write(self, sql: str, params=None):
-        """Execute a write with the lock held."""
-        with _write_lock:
-            conn = self._get_conn()
-            if params:
-                conn.execute(sql, params)
-            else:
-                conn.execute(sql)
+    async def _read(self, fn, timeout: float = READ_QUERY_TIMEOUT):
+        """
+        Dispatch a read operation to the read executor thread pool.
+
+        asyncio.wait() is intentionally used instead of wait_for() so that
+        expiry of the timeout does NOT attempt to cancel the running thread
+        (which is not reliably possible for concurrent.futures tasks in
+        Python 3.9).  The thread completes in the background; callers receive
+        None and can return an empty result set gracefully.
+        """
+        loop = asyncio.get_event_loop()
+        fut = loop.run_in_executor(_READ_EXECUTOR, fn)
+        done, _ = await asyncio.wait({fut}, timeout=timeout)
+        if fut in done:
+            exc = fut.exception()
+            if exc is not None:
+                log.error("DuckDB read error: %s", exc, exc_info=exc)
+                return None
+            return fut.result()
+        log.warning(
+            "DuckDB read timed out after %.1fs — thread running to completion in background",
+            timeout,
+        )
+        return None
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def connect(self) -> None:
+        """
+        Open the write connection (+ apply schema) then warm up the read pool.
+        Both happen on the write executor so DuckDB sees a consistent first-
+        opener before the read pool connections are created.
+        """
         def _open():
-            self._conn = duckdb.connect(self._db_path)
-            # Apply schema (idempotent)
+            # Write connection
+            self._wconn = duckdb.connect(self._db_path)
             for stmt in _SCHEMA.strip().split(";"):
-                stmt = stmt.strip()
-                if stmt:
-                    self._conn.execute(stmt)
-        await asyncio.to_thread(_open)
-        log.info(f"DuckDB connected: {self._db_path}")
+                s = stmt.strip()
+                if s:
+                    self._wconn.execute(s)
+
+            # Read pool — open here so schema DDL is visible to pool conns
+            self._read_pool = _ReadPool(
+                self._db_path,
+                size=READ_POOL_SIZE,
+                acquire_timeout=READ_QUERY_TIMEOUT,
+            )
+            self._read_pool.open()
+
+        await self._write(_open)
+        log.info(
+            "DuckDB ready — 1 write thread + %d-connection read pool at %s",
+            READ_POOL_SIZE, self._db_path,
+        )
 
     async def close(self) -> None:
         def _close():
-            if self._conn:
-                self._conn.close()
-                self._conn = None
-        await asyncio.to_thread(_close)
+            if self._read_pool:
+                self._read_pool.close_all()
+                self._read_pool = None
+            if self._wconn:
+                self._wconn.close()
+                self._wconn = None
+
+        await self._write(_close)
+        log.info("DuckDB connections closed")
+
+    # ── Diagnostics ───────────────────────────────────────────────────────────
+
+    def pool_stats(self) -> dict:
+        if self._read_pool is None:
+            return {"status": "not_connected"}
+        return {
+            "pool_size": self._read_pool.size,
+            "available": self._read_pool.available,
+            "in_use": self._read_pool.size - self._read_pool.available,
+        }
 
     # ── Insert ────────────────────────────────────────────────────────────────
 
@@ -114,40 +299,39 @@ class DuckDBBackend(StorageBackend):
             return
 
         def _insert():
-            with _write_lock:
-                conn = self._get_conn()
-                rows = [f.to_clickhouse_row() for f in flows]
-                conn.executemany(
-                    """INSERT INTO flows VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    rows,
-                )
-        await asyncio.to_thread(_insert)
+            rows = [f.to_clickhouse_row() for f in flows]
+            self._wconn.executemany(
+                "INSERT INTO flows VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                rows,
+            )
 
-    # ── Dashboard ─────────────────────────────────────────────────────────────
+        await self._write(_insert)
+
+    # ── Dashboard — device summaries ──────────────────────────────────────────
 
     async def get_device_summaries(self) -> list[DeviceSummary]:
         def _query():
             cutoff_24h = datetime.now(tz=timezone.utc) - timedelta(hours=24)
             cutoff_1h  = datetime.now(tz=timezone.utc) - timedelta(hours=1)
-            return self._exec("""
-                SELECT
-                    sampler_ip,
-                    FIRST(sampler_name ORDER BY timestamp DESC)           AS sampler_name,
-                    FIRST(site        ORDER BY timestamp DESC)            AS site,
-                    SUM(CASE WHEN timestamp >= ? THEN bytes   ELSE 0 END) AS bytes_last_hour,
-                    SUM(CASE WHEN timestamp >= ? THEN packets ELSE 0 END) AS packets_last_hour,
-                    COUNT(CASE WHEN timestamp >= ? THEN 1     END)        AS flows_last_hour,
-                    MAX(timestamp)                                         AS last_seen
-                FROM flows
-                WHERE timestamp >= ?
-                GROUP BY sampler_ip
-                ORDER BY sampler_name
-            """, [cutoff_1h, cutoff_1h, cutoff_1h, cutoff_24h])
+            with self._read_pool.acquire() as conn:
+                return conn.execute("""
+                    SELECT
+                        sampler_ip,
+                        ARG_MAX(sampler_name, timestamp)                      AS sampler_name,
+                        ARG_MAX(site,         timestamp)                      AS site,
+                        SUM(CASE WHEN timestamp >= ? THEN bytes   ELSE 0 END) AS bytes_last_hour,
+                        SUM(CASE WHEN timestamp >= ? THEN packets ELSE 0 END) AS packets_last_hour,
+                        COUNT(CASE WHEN timestamp >= ? THEN 1     END)        AS flows_last_hour,
+                        MAX(timestamp)                                         AS last_seen
+                    FROM flows
+                    WHERE timestamp >= ?
+                    GROUP BY sampler_ip
+                    ORDER BY sampler_name
+                """, [cutoff_1h, cutoff_1h, cutoff_1h, cutoff_24h]).fetchall()
 
-        rows = await asyncio.to_thread(_query)
-        result = []
-        for row in rows:
-            result.append(DeviceSummary(
+        rows = await self._read(_query) or []
+        return [
+            DeviceSummary(
                 sampler_ip=row[0],
                 sampler_name=row[1] or "",
                 site=row[2] or "",
@@ -156,8 +340,9 @@ class DuckDBBackend(StorageBackend):
                 flows_last_hour=row[5] or 0,
                 flows_per_sec=round((row[5] or 0) / 3600, 2),
                 last_seen=row[6],
-            ))
-        return result
+            )
+            for row in rows
+        ]
 
     # ── Top talkers ───────────────────────────────────────────────────────────
 
@@ -170,25 +355,27 @@ class DuckDBBackend(StorageBackend):
     ) -> list[TopTalker]:
         def _query():
             where_extra = "AND sampler_ip = ?" if sampler_ip else ""
-            params = [start, end]
+            params: list = [start, end]
             if sampler_ip:
                 params.append(sampler_ip)
             params.append(limit)
-            return self._exec(f"""
-                SELECT src_ip, dst_ip, dst_port, protocol,
-                       SUM(bytes) AS bytes, SUM(packets) AS packets, COUNT(*) AS flow_count
-                FROM flows
-                WHERE timestamp BETWEEN ? AND ? {where_extra}
-                GROUP BY src_ip, dst_ip, dst_port, protocol
-                ORDER BY bytes DESC
-                LIMIT ?
-            """, params)
+            with self._read_pool.acquire() as conn:
+                return conn.execute(f"""
+                    SELECT src_ip, dst_ip, dst_port, protocol,
+                           SUM(bytes)   AS bytes,
+                           SUM(packets) AS packets,
+                           COUNT(*)     AS flow_count
+                    FROM flows
+                    WHERE timestamp BETWEEN ? AND ? {where_extra}
+                    GROUP BY src_ip, dst_ip, dst_port, protocol
+                    ORDER BY bytes DESC
+                    LIMIT ?
+                """, params).fetchall()
 
-        rows = await asyncio.to_thread(_query)
+        rows = await self._read(_query) or []
         return [
             TopTalker(
-                src_ip=r[0], dst_ip=r[1],
-                dst_port=r[2], protocol=r[3],
+                src_ip=r[0], dst_ip=r[1], dst_port=r[2], protocol=r[3],
                 bytes=r[4], packets=r[5], flow_count=r[6],
             )
             for r in rows
@@ -205,26 +392,29 @@ class DuckDBBackend(StorageBackend):
     ) -> list[TimeSeriesPoint]:
         def _query():
             where_extra = "AND sampler_ip = ?" if sampler_ip else ""
-            params = [bucket_seconds, start, end]
+            params: list = [bucket_seconds, bucket_seconds, start, end]
             if sampler_ip:
                 params.append(sampler_ip)
-            # DuckDB: epoch_ms / (bucket_ms) * bucket_ms gives bucket start
-            return self._exec(f"""
-                SELECT
-                    epoch_ms(
-                        (epoch_ms(timestamp) / (? * 1000)) * (? * 1000)
-                    )::TIMESTAMPTZ                        AS ts,
-                    SUM(bytes)                            AS bytes,
-                    SUM(packets)                          AS packets,
-                    COUNT(*)                              AS flow_count
-                FROM flows
-                WHERE timestamp BETWEEN ? AND ? {where_extra}
-                GROUP BY ts
-                ORDER BY ts
-            """, [bucket_seconds, bucket_seconds] + params[1:])
+            with self._read_pool.acquire() as conn:
+                return conn.execute(f"""
+                    SELECT
+                        epoch_ms(
+                            (epoch_ms(timestamp) / (? * 1000)) * (? * 1000)
+                        )::TIMESTAMPTZ  AS ts,
+                        SUM(bytes)      AS bytes,
+                        SUM(packets)    AS packets,
+                        COUNT(*)        AS flow_count
+                    FROM flows
+                    WHERE timestamp BETWEEN ? AND ? {where_extra}
+                    GROUP BY ts
+                    ORDER BY ts
+                """, params).fetchall()
 
-        rows = await asyncio.to_thread(_query)
-        return [TimeSeriesPoint(timestamp=r[0], bytes=r[1], packets=r[2], flow_count=r[3]) for r in rows]
+        rows = await self._read(_query) or []
+        return [
+            TimeSeriesPoint(timestamp=r[0], bytes=r[1], packets=r[2], flow_count=r[3])
+            for r in rows
+        ]
 
     # ── Flow search ───────────────────────────────────────────────────────────
 
@@ -242,8 +432,8 @@ class DuckDBBackend(StorageBackend):
         offset: int = 0,
     ) -> list[FlowSearchResult]:
         def _query():
-            conditions = []
-            params = []
+            conditions: list[str] = []
+            params: list = []
             if start:
                 conditions.append("timestamp >= ?"); params.append(start)
             if end:
@@ -260,25 +450,25 @@ class DuckDBBackend(StorageBackend):
                 conditions.append("protocol = ?"); params.append(protocol)
             if sampler_ip:
                 conditions.append("sampler_ip = ?"); params.append(sampler_ip)
-
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
             params += [limit, offset]
-            return self._exec(f"""
-                SELECT timestamp, sampler_ip, sampler_name, src_ip, dst_ip,
-                       src_port, dst_port, protocol, bytes, packets, duration_ms,
-                       tcp_flags, tos, input_if, output_if, next_hop, src_as, dst_as, flow_dir
-                FROM flows
-                {where}
-                ORDER BY timestamp DESC
-                LIMIT ? OFFSET ?
-            """, params)
+            with self._read_pool.acquire() as conn:
+                return conn.execute(f"""
+                    SELECT timestamp, sampler_ip, sampler_name,
+                           src_ip, dst_ip, src_port, dst_port, protocol,
+                           bytes, packets, duration_ms, tcp_flags, tos,
+                           input_if, output_if, next_hop, src_as, dst_as, flow_dir
+                    FROM flows
+                    {where}
+                    ORDER BY timestamp DESC
+                    LIMIT ? OFFSET ?
+                """, params).fetchall()
 
-        rows = await asyncio.to_thread(_query)
+        rows = await self._read(_query) or []
         return [
             FlowSearchResult(
                 timestamp=r[0], sampler_ip=r[1], sampler_name=r[2] or "",
-                src_ip=r[3], dst_ip=r[4],
-                src_port=r[5], dst_port=r[6], protocol=r[7],
+                src_ip=r[3], dst_ip=r[4], src_port=r[5], dst_port=r[6], protocol=r[7],
                 bytes=r[8], packets=r[9], duration_ms=r[10],
                 tcp_flags=r[11] or 0, tos=r[12] or 0,
                 input_if=r[13] or 0, output_if=r[14] or 0,
@@ -293,36 +483,43 @@ class DuckDBBackend(StorageBackend):
     async def get_flows_per_sec(self) -> float:
         def _query():
             cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=60)
-            return self._exec("SELECT COUNT(*) / 60.0 FROM flows WHERE timestamp >= ?", [cutoff])
+            with self._read_pool.acquire() as conn:
+                return conn.execute(
+                    "SELECT COUNT(*) / 60.0 FROM flows WHERE timestamp >= ?", [cutoff]
+                ).fetchall()
 
-        rows = await asyncio.to_thread(_query)
+        rows = await self._read(_query)
         return float(rows[0][0]) if rows else 0.0
 
     async def get_sampler_last_seen(self) -> dict[str, datetime]:
         def _query():
             cutoff = datetime.now(tz=timezone.utc) - timedelta(days=1)
-            return self._exec(
-                "SELECT sampler_ip, MAX(timestamp) FROM flows WHERE timestamp >= ? GROUP BY sampler_ip",
-                [cutoff],
-            )
+            with self._read_pool.acquire() as conn:
+                return conn.execute(
+                    "SELECT sampler_ip, MAX(timestamp) FROM flows "
+                    "WHERE timestamp >= ? GROUP BY sampler_ip",
+                    [cutoff],
+                ).fetchall()
 
-        rows = await asyncio.to_thread(_query)
+        rows = await self._read(_query) or []
         return {r[0]: r[1] for r in rows}
 
     # ── Retention ─────────────────────────────────────────────────────────────
 
     async def update_retention_ttl(self, days: int) -> None:
-        """DuckDB has no built-in TTL — delete rows older than `days` days."""
+        """Delete rows older than `days` days (DuckDB has no built-in TTL)."""
         def _delete():
             cutoff = datetime.now(tz=timezone.utc) - timedelta(days=days)
-            with _write_lock:
-                deleted = self._get_conn().execute(
-                    "DELETE FROM flows WHERE timestamp < ? RETURNING COUNT(*)", [cutoff]
-                ).fetchone()
-            return deleted[0] if deleted else 0
+            # COUNT(*) of deleted rows via a subquery — DuckDB does not support
+            # RETURNING in DELETE; fetch the count before deleting instead.
+            count = self._wconn.execute(
+                "SELECT COUNT(*) FROM flows WHERE timestamp < ?", [cutoff]
+            ).fetchone()[0]
+            self._wconn.execute("DELETE FROM flows WHERE timestamp < ?", [cutoff])
+            return count
 
-        n = await asyncio.to_thread(_delete)
-        log.info(f"DuckDB retention purge: removed {n} rows older than {days} days")
+        n = await self._write(_delete)
+        log.info("DuckDB retention purge: removed %d rows older than %d days", n, days)
 
     # ── Topology ──────────────────────────────────────────────────────────────
 
@@ -336,35 +533,41 @@ class DuckDBBackend(StorageBackend):
     ) -> tuple[list[TopologyNode], list[TopologyEdge]]:
         def _query():
             where_parts = ["timestamp BETWEEN ? AND ?"]
-            params = [start, end]
+            params: list = [start, end]
             if sampler_ip:
                 where_parts.append("sampler_ip = ?")
                 params.append(sampler_ip)
             where = " AND ".join(where_parts)
 
-            edge_rows = self._exec(f"""
-                SELECT src_ip, dst_ip, SUM(bytes) AS bytes, SUM(packets) AS packets,
-                       COUNT(*) AS flows, FIRST(protocol) AS protocol, FIRST(dst_port) AS dst_port
-                FROM flows
-                WHERE {where}
-                GROUP BY src_ip, dst_ip
-                HAVING bytes >= ?
-                ORDER BY bytes DESC
-                LIMIT ?
-            """, params + [min_bytes, limit])
+            with self._read_pool.acquire() as conn:
+                edge_rows = conn.execute(f"""
+                    SELECT src_ip, dst_ip,
+                           SUM(bytes)    AS bytes,
+                           SUM(packets)  AS packets,
+                           COUNT(*)      AS flows,
+                           MIN(protocol) AS protocol,
+                           MIN(dst_port) AS dst_port
+                    FROM flows
+                    WHERE {where}
+                    GROUP BY src_ip, dst_ip
+                    HAVING SUM(bytes) >= ?
+                    ORDER BY bytes DESC
+                    LIMIT ?
+                """, params + [min_bytes, limit]).fetchall()
 
-            sampler_rows = self._exec(f"""
-                SELECT sampler_ip,
-                       FIRST(sampler_name ORDER BY timestamp DESC) AS name,
-                       FIRST(site        ORDER BY timestamp DESC) AS site
-                FROM flows
-                WHERE {where}
-                GROUP BY sampler_ip
-            """, params)
+                sampler_rows = conn.execute(f"""
+                    SELECT sampler_ip,
+                           ARG_MAX(sampler_name, timestamp) AS name,
+                           ARG_MAX(site,         timestamp) AS site
+                    FROM flows
+                    WHERE {where}
+                    GROUP BY sampler_ip
+                """, params).fetchall()
 
             return edge_rows, sampler_rows
 
-        edge_rows, sampler_rows = await asyncio.to_thread(_query)
+        result = await self._read(_query)
+        edge_rows, sampler_rows = result if result else ([], [])
 
         sampler_map = {r[0]: {"name": r[1] or "", "site": r[2] or ""} for r in sampler_rows}
 
