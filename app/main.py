@@ -18,7 +18,7 @@ from app.storage.factory import init_storage, get_storage
 from app.ingest.buffer import IngestBuffer
 
 # ── Routers ───────────────────────────────────────────────────────────────────
-from app.api import ingest, flows, devices, alerts, settings as settings_router, auth, users, ai
+from app.api import ingest, flows, devices, alerts, settings as settings_router, auth, users, ai, system as system_router
 
 settings = get_settings()
 log = logging.getLogger("pktflow")
@@ -92,6 +92,7 @@ app.include_router(devices.router,         prefix="/api/devices",  tags=["device
 app.include_router(alerts.router,          prefix="/api/alerts",   tags=["alerts"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
 app.include_router(ai.router,              prefix="/api/ai",       tags=["ai"])
+app.include_router(system_router.router,   prefix="/api/system",   tags=["system"])
 
 # ── Health check ──────────────────────────────────────────────────────────────
 
@@ -110,4 +111,6 @@ if _frontend_dist.exists():
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
         if full_path.startswith("api/"):
-            raise HTTPExceptio
+            raise HTTPException(status_code=404, detail="Not found")
+        index = _frontend_dist / "index.html"
+        return FileResponse(str(index))
