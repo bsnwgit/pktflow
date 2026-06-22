@@ -4,13 +4,14 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 
-// Lazy-loaded pages (stubs for now — built in later phases)
 import { lazy, Suspense } from 'react'
-const DeviceView  = lazy(() => import('./pages/DeviceView'))
+const Analytics    = lazy(() => import('./pages/Analytics'))
+const DeviceView   = lazy(() => import('./pages/DeviceView'))
 const FlowExplorer = lazy(() => import('./pages/FlowExplorer'))
-const Topology    = lazy(() => import('./pages/Topology'))
-const Alerts      = lazy(() => import('./pages/Alerts'))
-const Settings    = lazy(() => import('./pages/Settings'))
+const Topology     = lazy(() => import('./pages/Topology'))
+const Alerts       = lazy(() => import('./pages/Alerts'))
+const Settings     = lazy(() => import('./pages/Settings'))
+const Users        = lazy(() => import('./pages/Users'))
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-48 text-gray-500">Loading…</div>
@@ -31,6 +32,11 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/" element={
             <ProtectedRoute><Dashboard /></ProtectedRoute>
+          } />
+          <Route path="/analytics" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageFallback />}><Analytics /></Suspense>
+            </ProtectedRoute>
           } />
           <Route path="/devices/:ip?" element={
             <ProtectedRoute>
@@ -55,6 +61,11 @@ export default function App() {
           <Route path="/settings" element={
             <ProtectedRoute>
               <Suspense fallback={<PageFallback />}><Settings /></Suspense>
+            </ProtectedRoute>
+          } />
+          <Route path="/users" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageFallback />}><Users /></Suspense>
             </ProtectedRoute>
           } />
           <Route path="*" element={<Navigate to="/" replace />} />

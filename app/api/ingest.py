@@ -126,4 +126,4 @@ async def ingest_flows(
 async def ingest_stats():
     """Current ingest buffer statistics."""
     buffer = IngestBuffer.get_instance()
-    return 
+    return buffer.stats

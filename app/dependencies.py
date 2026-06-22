@@ -37,7 +37,7 @@ async def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
     async with db.execute(
-        "SELECT id, username, email, role, is_active FROM users WHERE id = ?",
+        "SELECT id, username, email, role, is_active, created_at, last_login FROM users WHERE id = ?",
         (payload["sub"],),
     ) as cur:
         user = await cur.fetchone()
@@ -63,4 +63,4 @@ async def require_analyst(user: Annotated[dict, Depends(get_current_user)]) -> d
 # Type aliases for route signatures
 CurrentUser = Annotated[dict, Depends(get_current_user)]
 AdminUser = Annotated[dict, Depends(require_admin)]
-AnalystUser = Annotated[dict, Depends(requi
+AnalystUser = Annotated[dict, Depends(require_analyst)]
