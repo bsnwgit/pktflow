@@ -279,7 +279,11 @@ class DuckDBBackend(StorageBackend):
                 self._wconn = None
 
         await self._write(_close)
-        log.info("DuckDB connections closed")
+        # Shut down executors immediately — do NOT wait for threads.
+        # Without this, Python's atexit waits forever for blocked DuckDB threads.
+        _READ_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+        _WRITE_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+        log.info("DuckDB connections and executors closed")
 
     # ── Diagnostics ───────────────────────────────────────────────────────────
 
@@ -599,3 +603,51 @@ class DuckDBBackend(StorageBackend):
             ))
 
         return nodes, edges
+
+    # ── Protocol distribution ──────────────────────────────────────────────────
+
+    async def get_protocol_distribution(
+        self,
+        start: datetime,
+        end: datetime,
+        sampler_ip: Optional[str] = None,
+    ) -> list:
+        def _query():
+            where_parts = ["timestamp BETWEEN ? AND ?"]
+            params: list = [start, end]
+            if sampler_ip:
+                where_parts.append("sampler_ip = ?")
+                params.append(sampler_ip)
+            where = " AND ".join(where_parts)
+            with self._read_pool.acquire() as conn:
+                return conn.execute(f"""
+                    SELECT protocol,
+                           SUM(bytes)   AS total_bytes,
+                           SUM(packets) AS total_packets,
+                           COUNT(*)     AS flow_count
+                    FROM flows
+                    WHERE {where}
+                    GROUP BY protocol
+                    ORDER BY total_bytes DESC
+                    LIMIT 20
+                """, params).fetchall()
+
+        rows = await self._read(_query) or []
+        proto_names = {
+            1: "ICMP", 2: "IGMP", 6: "TCP", 17: "UDP",
+            47: "GRE", 50: "ESP", 51: "AH", 58: "ICMPv6",
+            89: "OSPF", 132: "SCTP",
+        }
+        total_bytes = sum(r[1] for r in rows) or 1
+        from app.models.flow import ProtocolStat
+        return [
+            ProtocolStat(
+                protocol=r[0],
+                name=proto_names.get(r[0], f"Proto {r[0]}"),
+                bytes=r[1],
+                packets=r[2],
+                flow_count=r[3],
+                pct_bytes=round(r[1] / total_bytes * 100, 1),
+            )
+            for r in rows
+        ]

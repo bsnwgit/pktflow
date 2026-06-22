@@ -111,4 +111,5 @@ def normalize_batch(raw_records: list[dict[str, Any]]) -> list[FlowRecord]:
     for raw in raw_records:
         record = normalize_goflow2_record(raw)
         if record is not None:
-            results.append(r
+            results.append(record)
+    return results
