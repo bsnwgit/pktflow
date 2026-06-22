@@ -81,16 +81,18 @@ async def update_device(
 async def delete_device(device_id: int, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)):
     await db.execute("DELETE FROM devices WHERE id = ?", (device_id,))
     await db.commit()
+    _refresh_cache(db)
 
 
 def _refresh_cache(db):
     """Trigger normalizer device cache refresh asynchronously."""
     import asyncio
-    asyncio.create_task(_do_refresh(db))
+    asyncio.create_task(_do_refresh())
 
 
-async def _do_refresh(db):
+async def _do_refresh():
+    from app.config import get_settings
     from app.ingest.normalizer import refresh_device_cache
-    async with db.execute("SELECT ip, name, site FROM devices WHERE allowed = 1") as cur:
-        rows = await cur.fetchall()
-    refresh_device_cache([dict(r) for r in rows])
+    async with aiosqlite.connect(get_settings().db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async 

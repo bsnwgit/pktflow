@@ -19,7 +19,7 @@ router = APIRouter()
 # ── Default settings (applied on first run) ───────────────────────────────────
 DEFAULTS: dict[str, Any] = {
     # Storage
-    "storage_backend": "clickhouse",     # clickhouse | duckdb
+    "storage_backend": "duckdb",          # clickhouse | duckdb
     "retention_days_raw": 90,
     "retention_days_hourly": 365,
 
