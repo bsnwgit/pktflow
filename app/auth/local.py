@@ -53,4 +53,6 @@ def decode_refresh_token(token: str) -> Optional[int]:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         if payload.get("type") != "refresh":
             return None
-        return 
+        return int(payload["sub"])
+    except JWTError:
+        return None
