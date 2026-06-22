@@ -18,7 +18,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import logging
-from typing import Any
+from typing import Any, Optional
 
 import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -68,7 +68,7 @@ def _ip_allowed(client_ip: str, allowed: list[str]) -> bool:
 @router.post("/flows", status_code=status.HTTP_204_NO_CONTENT)
 async def ingest_flows(
     request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
     db: aiosqlite.Connection = Depends(get_db),
 ):
     """
@@ -126,4 +126,4 @@ async def ingest_flows(
 async def ingest_stats():
     """Current ingest buffer statistics."""
     buffer = IngestBuffer.get_instance()
-    return buffer.stats
+    return 
