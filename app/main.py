@@ -1,0 +1,105 @@
+"""
+pktFlow — FastAPI application entry point.
+"""
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
+from app.config import get_settings
+from app.database import init_db
+from app.storage.factory import init_storage, get_storage
+from app.ingest.buffer import IngestBuffer
+
+# ── Routers ───────────────────────────────────────────────────────────────────
+from app.api import ingest, flows, devices, alerts, settings as settings_router, auth, users, ai
+
+settings = get_settings()
+log = logging.getLogger("pktflow")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup and shutdown logic."""
+    # ── Startup ───────────────────────────────────────────────────────────────
+    log.info("pktFlow starting up")
+
+    # Run SQLite migrations
+    await init_db()
+    log.info("Database migrations applied")
+
+    # Connect to flow storage backend
+    await init_storage()
+    log.info(f"Flow storage ready: {get_storage().__class__.__name__}")
+
+    # Start ingest buffer flush scheduler
+    buffer = IngestBuffer.get_instance()
+    await buffer.start()
+    log.info("Ingest buffer started")
+
+    # Start alert engine
+    from app.alerts.engine import AlertEngine
+    engine = AlertEngine()
+    await engine.start()
+    log.info("Alert engine started")
+
+    yield
+
+    # ── Shutdown ──────────────────────────────────────────────────────────────
+    log.info("pktFlow shutting down")
+    await buffer.stop()
+    await engine.stop()
+    storage = get_storage()
+    if hasattr(storage, "close"):
+        await storage.close()
+    log.info("Shutdown complete")
+
+
+# ── App ───────────────────────────────────────────────────────────────────────
+
+app = FastAPI(
+    title="pktFlow",
+    description="Enterprise NetFlow Visualization & Alerting Platform",
+    version="0.1.0",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    lifespan=lifespan,
+)
+
+# ── Middleware ────────────────────────────────────────────────────────────────
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ── API Routers ───────────────────────────────────────────────────────────────
+
+app.include_router(auth.router,            prefix="/api/auth",     tags=["auth"])
+app.include_router(users.router,           prefix="/api/users",    tags=["users"])
+app.include_router(ingest.router,          prefix="/api/ingest",   tags=["ingest"])
+app.include_router(flows.router,           prefix="/api/flows",    tags=["flows"])
+app.include_router(devices.router,         prefix="/api/devices",  tags=["devices"])
+app.include_router(alerts.router,          prefix="/api/alerts",   tags=["alerts"])
+app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
+app.include_router(ai.router,              prefix="/api/ai",       tags=["ai"])
+
+# ── Health check ──────────────────────────────────────────────────────────────
+
+@app.get("/api/health", tags=["system"])
+async def health():
+    return {"status": "ok", "version": "0.1.0"}
+
+# ── Serve React frontend (production build) ───────────────────────────────────
+# In development, Vite's dev server handles this on a different port.
+_frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
+if _frontend_dist.exists():
+    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
