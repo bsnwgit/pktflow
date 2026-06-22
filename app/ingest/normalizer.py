@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional, Union
 
 from app.models.flow import FlowRecord
 
@@ -48,11 +48,11 @@ def _ns_to_datetime(ns: int) -> datetime:
     return datetime.fromtimestamp(ns / 1e9, tz=timezone.utc)
 
 
-def _sec_to_datetime(sec: int | float) -> datetime:
+def _sec_to_datetime(sec: Union[int, float]) -> datetime:
     return datetime.fromtimestamp(sec, tz=timezone.utc)
 
 
-def normalize_goflow2_record(raw: dict[str, Any]) -> FlowRecord | None:
+def normalize_goflow2_record(raw: dict[str, Any]) -> Optional[FlowRecord]:
     """
     Normalize a single GoFlow2 JSON object to a FlowRecord.
     Returns None if the record is malformed or should be skipped.
@@ -111,5 +111,4 @@ def normalize_batch(raw_records: list[dict[str, Any]]) -> list[FlowRecord]:
     for raw in raw_records:
         record = normalize_goflow2_record(raw)
         if record is not None:
-            results.append(record)
-    return results
+            results.append(r
