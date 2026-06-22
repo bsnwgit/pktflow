@@ -1,0 +1,65 @@
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider, useAuth } from './store/auth'
+import Layout from './components/Layout'
+import Login from './pages/Login'
+import Dashboard from './pages/Dashboard'
+
+// Lazy-loaded pages (stubs for now — built in later phases)
+import { lazy, Suspense } from 'react'
+const DeviceView  = lazy(() => import('./pages/DeviceView'))
+const FlowExplorer = lazy(() => import('./pages/FlowExplorer'))
+const Topology    = lazy(() => import('./pages/Topology'))
+const Alerts      = lazy(() => import('./pages/Alerts'))
+const Settings    = lazy(() => import('./pages/Settings'))
+
+function PageFallback() {
+  return <div className="flex items-center justify-center h-48 text-gray-500">Loading…</div>
+}
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, isLoading } = useAuth()
+  if (isLoading) return <PageFallback />
+  if (!user) return <Navigate to="/login" replace />
+  return <Layout>{children}</Layout>
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/" element={
+            <ProtectedRoute><Dashboard /></ProtectedRoute>
+          } />
+          <Route path="/devices/:ip?" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageFallback />}><DeviceView /></Suspense>
+            </ProtectedRoute>
+          } />
+          <Route path="/explorer" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageFallback />}><FlowExplorer /></Suspense>
+            </ProtectedRoute>
+          } />
+          <Route path="/topology" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageFallback />}><Topology /></Suspense>
+            </ProtectedRoute>
+          } />
+          <Route path="/alerts" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageFallback />}><Alerts /></Suspense>
+            </ProtectedRoute>
+          } />
+          <Route path="/settings" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageFallback />}><Settings /></Suspense>
+            </ProtectedRoute>
+          } />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
+  )
+}
