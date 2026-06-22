@@ -1,0 +1,41 @@
+[Unit]
+Description=pktFlow NetFlow Visualization Platform
+Documentation=https://github.com/bsnwgit/pktflow
+After=network.target clickhouse-server.service
+# Remove the Requires line if using DuckDB backend (no ClickHouse dependency)
+Requires=clickhouse-server.service
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/mnt/software/pktflow
+
+# Config
+Environment=PKTFLOW_CONFIG=/mnt/software/pktflow/config.yaml
+
+# Launch FastAPI via Uvicorn
+# --workers 2 is safe for a single EC2; increase if CPU allows
+ExecStart=/mnt/software/pktflow/venv/bin/uvicorn app.main:app \
+    --host 0.0.0.0 \
+    --port 8080 \
+    --workers 2 \
+    --log-level info \
+    --no-access-log
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+StartLimitInterval=60
+StartLimitBurst=3
+
+# Logging
+StandardOutput=append:/mnt/software/logs/pktflow.log
+StandardError=append:/mnt/software/logs/pktflow.log
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
