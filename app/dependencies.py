@@ -3,7 +3,7 @@ FastAPI dependency injection helpers.
 """
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Optional
 
 import aiosqlite
 from fastapi import Depends, HTTPException, Security, status
@@ -23,7 +23,7 @@ _bearer = HTTPBearer(auto_error=False)
 
 async def get_current_user(
     db: DbDep,
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Security(_bearer)] = None,
+    credentials: Annotated[Optional[HTTPAuthorizationCredentials], Security(_bearer)] = None,
 ) -> dict:
     """
     Validates JWT from Authorization: Bearer header.
@@ -63,4 +63,4 @@ async def require_analyst(user: Annotated[dict, Depends(get_current_user)]) -> d
 # Type aliases for route signatures
 CurrentUser = Annotated[dict, Depends(get_current_user)]
 AdminUser = Annotated[dict, Depends(require_admin)]
-AnalystUser = Annotated[dict, Depends(require_analyst)]
+AnalystUser = Annotated[dict, Depends(requi
