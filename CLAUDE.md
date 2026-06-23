@@ -233,4 +233,19 @@ See `INCOMPLETE_FEATURES.md` for the full breakdown. Key gaps a new session must
 - **Notification channels (Slack, Email, PagerDuty, Webhook)** — code written in `engine.py` but never tested. `aiosmtplib` and `jinja2` are not verified in the venv. No "Send Test" backend endpoints exist.
 - **AI assistant** — backend and frontend written, requires `anthropic` package in venv + API key in settings. Never tested on O2.
 - **Aggregate rollup job** — hourly/daily rollup tables may exist in schema but no scheduled job populates them.
-- **Migration mode, storage test connection, device CSV import, unknown s
+- **Migration mode, storage test connection, device CSV import, unknown samplers UI, WebSocket live updates** — UI elements exist with no backend wiring.
+- **Alert event auto-cleanup** — alert_events and notification_log accumulate in SQLite indefinitely. No purge job built.
+- **Settings auto-refresh** — Settings page loads once on mount, no polling or push to detect changes made elsewhere.
+- **DuckDB backend** — fully written, never run against real data in production.
+- **Network layout export** — topology view has no export (PNG/SVG/JSON). Needs export button + optional per-device filtering.
+- **Topology node click → flow drill-down** — topology nodes are not interactive. Clicking a node should show flows filtered to that IP as src or dst.
+
+---
+
+## Known Issues / Watch Out For
+
+1. **Schema startup warnings** — `_ensure_schema` logs "Schema statement warning" on startup for SQL comments inside multi-statement blocks. Cosmetic only, service starts fine.
+2. **goflow2 template errors on restart** — Normal. After service restart, goflow2 loses cached NetFlow v9 templates and logs "template error" until the router sends the next template packet. Resolves within seconds.
+3. **Vector exponential backoff** — After multiple pktFlow restarts, vector backs off to ~512s retry intervals. A pktFlow restart (connection reset) triggers immediate retry from vector.
+4. **`--no-access-log` is removed from pktflow.service** — Access logging is currently enabled. Restore `--no-access-log` flag if performance becomes a concern.
+5. **ClickHouse `flow_dir` constraint** — `FlowRecord.flow_dir` is `Field(ge=0, le=2)`. Valid: 0=ingress, 1=egress, 2=unknown. If a router sends a non-standard direction value, it would be clamped to 2 by `default=2` in `_get()`.
