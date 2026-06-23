@@ -114,6 +114,38 @@ Architecture doc specifies WebSocket connections for live Dashboard updates (flo
 
 ---
 
+## Alert Event Auto-Cleanup — NOT BUILT
+
+Old alert events should be automatically purged after a configurable retention period (e.g. 30 days). Currently alert events accumulate in SQLite indefinitely. No scheduled job exists to trim the `alert_events` table. The `notification_log` table has the same problem.
+
+**What needs building:** A scheduled task (alongside the alert engine loop) that deletes `alert_events` and `notification_log` rows older than the configured retention window.
+
+---
+
+## Settings Auto-Refresh — NOT BUILT
+
+The Settings page loads values once on mount. If settings are changed from another session or by a background process, the UI shows stale values until the user manually refreshes the browser. There is no polling, WebSocket push, or cache-invalidation mechanism to keep the Settings page current.
+
+**What needs building:** Either periodic polling of `/api/settings/` on the Settings page, or a server-sent event / WebSocket push when settings change.
+
+---
+
+## Network Layout Export — NOT BUILT
+
+The network topology view (D3 force-directed graph) has no export capability. Users should be able to export the current topology as an image (PNG/SVG) or structured data (JSON/CSV), with the option to filter by specific NetFlow sampler devices so they can export only medical, only dental, or the full combined topology.
+
+**What needs building:** An export button on the topology page that calls a backend endpoint (or performs a client-side canvas/SVG export). Filtering by sampler device requires a query parameter to `/api/topology` (or equivalent) to scope the node/edge set before rendering.
+
+---
+
+## Topology Node Click — Flow Drill-Down — NOT BUILT
+
+Clicking a node in the topology graph should open a flow list filtered to that node's IP — showing all flows where that IP is the source or destination. Currently nodes are not interactive beyond hover tooltips.
+
+**What needs building:** A click handler on topology nodes that navigates to (or opens a panel with) the flows view pre-filtered by `src_ip=<node_ip> OR dst_ip=<node_ip>`. Requires either a dedicated route parameter or a shared filter state between the topology and flows pages.
+
+---
+
 ## DuckDB Backend — BUILT, NOT PRODUCTION TESTED
 
 `app/storage/duckdb.py` is fully implemented with connection pooling and all query methods. It was written as an alternate backend for low-traffic deployments. It has **never been run against real data** and has not been verified on O2. The ClickHouse backend is the only one proven in production.
@@ -141,4 +173,8 @@ Architecture doc specifies WebSocket connections for live Dashboard updates (flo
 | Device CSV import | ❌ Not built | ❌ Not built | ❌ |
 | Unknown samplers UI | ❌ Not built | ❌ Not built | ❌ |
 | WebSocket live updates | ❌ Not built | ❌ Not built | ❌ |
+| Alert event auto-cleanup | ❌ Not built | ❌ Not built | ❌ |
+| Settings auto-refresh | ❌ Not built | ❌ Not built | ❌ |
 | DuckDB backend | ✅ Written | N/A | ❌ |
+| Network layout export | ❌ Not built | ❌ Not built | ❌ |
+| Topology node click → flow drill-down | ❌ Not built | ❌ Not built | ❌ |
