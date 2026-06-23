@@ -4,7 +4,7 @@ POST /api/auth/* — login, logout, token refresh, Okta OIDC callback.
 from __future__ import annotations
 
 import aiosqlite
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
 from app.auth.local import verify_password, create_access_token, create_refresh_token, decode_refresh_token
@@ -59,10 +59,9 @@ async def login(body: LoginRequest, response: Response, db: aiosqlite.Connection
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
-    request: "Request",  # type: ignore[name-defined]  # noqa: F821
+    request: Request,
     db: aiosqlite.Connection = Depends(get_db),
 ):
-    from fastapi import Request
     token = request.cookies.get("refresh_token")
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No refresh token")
