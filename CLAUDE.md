@@ -223,6 +223,25 @@ Used in vector.toml `auth.token` and in curl test commands.
 
 ---
 
+## Incomplete Features
+
+See `INCOMPLETE_FEATURES.md` for the full breakdown. Key gaps a new session must know:
+
+- **Alert rule types `threshold`, `rate_spike`, `port_protocol`** — engine has placeholder `return`, nothing executes. Only `data_gap` and `new_host` work.
+- **Okta OIDC** — Settings UI exists, DB column exists, `app/auth/okta.py` does not exist. Zero backend implementation.
+- **Direct UDP ingest** — Settings UI exists, `app/ingest/udp_listener.py` does not exist.
+- **Notification channels (Slack, Email, PagerDuty, Webhook)** — code written in `engine.py` but never tested. `aiosmtplib` and `jinja2` are not verified in the venv. No "Send Test" backend endpoints exist.
+- **AI assistant** — backend and frontend written, requires `anthropic` package in venv + API key in settings. Never tested on O2.
+- **Aggregate rollup job** — hourly/daily rollup tables may exist in schema but no scheduled job populates them.
+- **Migration mode, storage test connection, device CSV import, unknown samplers UI, WebSocket live updates** — UI elements exist with no backend wiring.
+- **Alert event auto-cleanup** — alert_events and notification_log accumulate in SQLite indefinitely. No purge job built.
+- **Settings auto-refresh** — Settings page loads once on mount, no polling or push to detect changes made elsewhere.
+- **DuckDB backend** — fully written, never run against real data in production.
+- **Network layout export** — topology view has no export (PNG/SVG/JSON). Needs export button + optional per-device filtering.
+- **Topology node click → flow drill-down** — topology nodes are not interactive. Clicking a node should show flows filtered to that IP as src or dst.
+
+---
+
 ## Known Issues / Watch Out For
 
 1. **Schema startup warnings** — `_ensure_schema` logs "Schema statement warning" on startup for SQL comments inside multi-statement blocks. Cosmetic only, service starts fine.
