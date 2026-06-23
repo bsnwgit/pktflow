@@ -96,9 +96,6 @@ class AlertEngine:
         # Placeholder: skip for now
         return
 
-        if fired_message:
-            await self._fire(db, rule, fired_message, details)
-
     async def _fire(self, db: aiosqlite.Connection, rule: dict, message: str, details: dict) -> None:
         """Record an alert event and dispatch notifications, respecting cooldown."""
         # Check cooldown
@@ -181,7 +178,8 @@ class AlertEngine:
 
         host      = await _get("notify_email_smtp_host")   or ""
         port      = await _get("notify_email_smtp_port")   or 587
-        use_tls   = await _get("notify_email_smtp_tls")    if True else True
+        tls_val   = await _get("notify_email_smtp_tls")
+        use_tls   = tls_val if tls_val is not None else True
         username  = await _get("notify_email_username")    or ""
         password  = await _get("notify_email_password")    or ""
         from_addr = await _get("notify_email_from")        or "pktflow@localhost"
@@ -315,8 +313,11 @@ class AlertEngine:
                 ) as cur:
                     rule = await cur.fetchone()
                 if rule:
+                    rule_dict = dict(rule)
+                    rule_dict["conditions"] = json.loads(rule_dict["conditions"])
+                    rule_dict["channels"] = json.loads(rule_dict["channels"])
                     await self._fire(
-                        db, dict(rule),
+                        db, rule_dict,
                         f"Unknown sampler {ip} sent NetFlow data — not in device registry",
                         {"sampler_ip": ip},
                     )
