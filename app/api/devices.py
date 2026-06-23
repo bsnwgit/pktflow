@@ -95,4 +95,6 @@ async def _do_refresh():
     from app.ingest.normalizer import refresh_device_cache
     async with aiosqlite.connect(get_settings().db_path) as db:
         db.row_factory = aiosqlite.Row
-        async 
+        async with db.execute("SELECT ip, name, site FROM devices WHERE allowed = 1") as cur:
+            rows = await cur.fetchall()
+    refresh_device_cache([dict(r) for r in rows])

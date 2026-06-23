@@ -309,6 +309,7 @@ export default function Settings() {
               ]}
             />
           </Field>
+          <RestartServiceRow />
         </Section>
       )}
 
@@ -325,7 +326,6 @@ export default function Settings() {
               ]}
             />
           </Field>
-          <RestartServiceRow />
           <Field label="Raw flow retention" hint="Days to keep individual flow records">
             <div className="flex items-center gap-3">
               <NumberInput value={num('retention_days_raw', 90)} onChange={v => set('retention_days_raw', v)} min={1} max={3650} />
