@@ -91,4 +91,5 @@ class IngestBuffer:
             "buffered": len(self._buffer),
             "total_received": self._total_received,
             "total_flushed": self._total_flushed,
-            "last_flush": self._
+            "last_flush": self._last_flush.isoformat(),
+        }
