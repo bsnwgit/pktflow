@@ -8,7 +8,7 @@ This file is the ground truth for working in this project. Read it before doing 
 
 pktFlow is a production NetFlow visualization and alerting platform deployed on the Corp Infrastructure O2 server. It receives live NetFlow data from two collectors, stores it in ClickHouse, and serves a React dashboard.
 
-**Live URL:** http://10.20.30.5:8080  
+**Live URL:** http://10.20.30.5:8766  
 **Git remote:** GitHub + GitLab (both configured)  
 **Active branch:** `feature/initial-build`
 
@@ -27,7 +27,7 @@ pktFlow is a production NetFlow visualization and alerting platform deployed on 
 - App dir: `/mnt/software/pktflow`
 - Venv: `/mnt/software/pktflow/venv`
 - Config: `/mnt/software/pktflow/config.yaml`
-- Port: **8080** (not 8000 — do not confuse)
+- Port: **8766**
 - Systemd: `/etc/systemd/system/pktflow.service`
 - ClickHouse: localhost:9000, database `pktflow`, user `default`, no password
 - ClickHouse version: 26.5.3.52 on Amazon Linux 2023
@@ -72,7 +72,7 @@ Vector (same host, stdin source)
     │    2. add_site — adds .site and .sampler_address fields
     │  Batches events → HTTP POST JSON array
     ▼
-pktFlow ingest (10.20.30.5:8080/api/ingest/flows)
+pktFlow ingest (10.20.30.5:8766/api/ingest/flows)
     │  normalize_batch() → FlowRecord objects
     │  IngestBuffer → flushes to ClickHouse
     ▼
@@ -171,25 +171,38 @@ def _execute(self, query, params=None, data=None):
 
 **Never build the frontend in the project folder on Windows** — `node_modules` there is Windows-only and lacks the Linux `rollup` native binary.
 
-Always build in Linux `/tmp`:
-```bash
-cp -r /path/to/frontend /tmp/frontend-build
-cd /tmp/frontend-build
-npm install
-npm run build
-cp -r dist /mnt/software/pktflow/frontend/
+Always build in Linux `/tmp`. **CRITICAL: always sync the full `frontend/src` from local to O2 first** — the O2 copy can drift from the local project. Skipping this means new pages/components get silently excluded from the bundle.
+
+Full frontend deploy process (use Paramiko SFTP + SSH):
 ```
+1. SFTP entire frontend/src/ tree → /mnt/software/pktflow/frontend/src/ on O2
+2. SSH: rm -rf /tmp/pktflow-fe && cp -r /mnt/software/pktflow/frontend /tmp/pktflow-fe
+3. SSH: cd /tmp/pktflow-fe && npm install && npm run build
+4. SSH: rm -rf /mnt/software/pktflow/frontend/dist && cp -r /tmp/pktflow-fe/dist /mnt/software/pktflow/frontend/dist
+5. SSH: sudo systemctl restart pktflow
+```
+
+To verify the build includes all pages, check for lazy chunk filenames:
+```bash
+ls /mnt/software/pktflow/frontend/dist/assets/
+# Expected chunks: Users-*.js, Alerts-*.js, Settings-*.js, DeviceView-*.js, etc.
+```
+
+Node is installed via nvm on O2: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh"` before any npm command.
 
 ---
 
 ## Deployment Process
 
-To deploy backend changes to O2:
+### Backend changes
 1. Write/edit local file in `C:\Users\user\My Drive\Documents\Claude\Projects\pktFlow\`
 2. SFTP the changed file(s) to `/mnt/software/pktflow/` on O2 (same relative path)
 3. `sudo systemctl restart pktflow`
 4. Wait 4 seconds, check `systemctl is-active pktflow`
-5. Check `curl -s http://localhost:8080/api/ingest/stats`
+5. Check `curl -s http://localhost:8766/api/ingest/stats`
+
+### Frontend changes
+Follow the full frontend deploy process in the Frontend Build section above. Do NOT just rebuild from O2's existing source without first syncing local `frontend/src/` — the O2 source is not automatically updated.
 
 **After pktFlow restarts**, vector may have exponential backoff from prior connection resets — it can take up to ~512s before vector sends again. The restart itself triggers an immediate retry in vector (connection reset = immediate reconnect), so usually flows resume within seconds.
 
@@ -198,7 +211,8 @@ To deploy backend changes to O2:
 ## Ingest Stats Endpoint
 
 ```
-GET http://10.20.30.5:8080/api/ingest/stats
+GET http://10.20.30.5:8766/api/ingest/stats
+
 ```
 
 Returns:
@@ -239,6 +253,72 @@ See `INCOMPLETE_FEATURES.md` for the full breakdown. Key gaps a new session must
 - **DuckDB backend** — fully written, never run against real data in production.
 - **Network layout export** — topology view has no export (PNG/SVG/JSON). Needs export button + optional per-device filtering.
 - **Topology node click → flow drill-down** — topology nodes are not interactive. Clicking a node should show flows filtered to that IP as src or dst.
+- **Traffic by Port page** — new page planned: protocol mix chart, top ports by bytes/flows, traffic chart over time, full port inventory table (every dst_port seen), filterable by sampler/site.
+- **Sankey flow diagram** — new visualization planned: `src_ip → dst_port → dst_ip` alluvial/Sankey chart with band width by bytes. Similar to Kibana/Grafana flow diagrams. Use D3-sankey. Goes on the Traffic by Port page or its own tab.
+
+---
+
+## Current Build State (as of 2026-06-23)
+
+The application is **fully deployed and receiving live traffic** on O2.
+
+### What is built and working
+- FastAPI backend with ClickHouse storage (threading-safe, lock-serialized)
+- NetFlow ingest from two collectors (medical 10.20.30.11, dental 10.20.30.181) via goflow2 + Vector
+- Normalizer correctly handles Vector's snake_case output and string proto names (`"UDP"` → 17)
+- React dashboard: Dashboard, Device View, Flow Explorer, Topology (D3), Alerts, Settings, Users pages
+- Local auth (JWT + bcrypt), admin/analyst/viewer roles
+- Alert engine: `data_gap` and `new_host` rules functional
+- CSV/JSON flow export
+- Change password + reset password (admin) in Users page
+- Restart service button in Settings
+- README.md complete with setup, architecture, API reference
+
+### What is NOT yet built (next up)
+1. **Traffic by Port page** — port inventory, protocol mix, top ports, traffic chart by port
+2. **Sankey flow diagram** — `src_ip → dst_port → dst_ip` visualization
+3. See full list in `INCOMPLETE_FEATURES.md`
+
+### Git state
+- Branch: `feature/initial-build`
+- Remotes: GitHub (`github`) + GitLab (`gitlab`)
+- Last commit: `docs: complete README with setup, architecture, API reference, and deployment guide`
+- GitHub PR and GitLab MR open on `feature/initial-build`
+
+### Port discrepancy note
+The `pktflow.service` file in the repo specifies port `8080`. The **running service on O2 uses port `8766`** (the service file on the server was updated). If deploying fresh from the repo, update the port in `pktflow.service` and `config.example.yaml` to `8766` before installing.
+
+---
+
+## User Management
+
+SQLite DB: `/mnt/software/pktflow/pktflow.db`, table `users`.
+
+Columns: `id, username, email, hashed_password, role, is_active, okta_sub, created_at, last_login`
+
+Roles: `admin` (full access), `analyst` (read + export), `viewer` (read-only).
+
+**Users page** is at `/users` in the app — admin-only nav item. If it's missing from the sidebar, the user is not logged in as admin or the frontend is stale (re-deploy).
+
+**If login is broken** (can't get in after logout):
+1. SSH to O2, use Python + pktflow venv to inspect/repair SQLite:
+```python
+import sqlite3, bcrypt
+conn = sqlite3.connect('/mnt/software/pktflow/pktflow.db')
+conn.row_factory = sqlite3.Row
+# Check state
+for r in conn.execute("SELECT id, username, role, is_active FROM users"): print(dict(r))
+# Reset a user's password and re-activate
+new_hash = bcrypt.hashpw(b'NewPassword1!', bcrypt.gensalt()).decode()
+conn.execute("UPDATE users SET hashed_password=?, is_active=1 WHERE username='admin'", (new_hash,))
+conn.commit()
+```
+2. The `is_active=0` flag silently rejects login with "Invalid credentials" — always check it first.
+3. JWT secret is static (`CHANGE_ME_IN_PRODUCTION_secret_key_32chars`), so service restarts do NOT invalidate existing tokens.
+
+**Current accounts** (as of 2026-06-23):
+- `admin` / role=admin — primary break-glass account
+- `robert` / role=admin — day-to-day account
 
 ---
 
