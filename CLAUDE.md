@@ -223,10 +223,14 @@ Used in vector.toml `auth.token` and in curl test commands.
 
 ---
 
-## Known Issues / Watch Out For
+## Incomplete Features
 
-1. **Schema startup warnings** — `_ensure_schema` logs "Schema statement warning" on startup for SQL comments inside multi-statement blocks. Cosmetic only, service starts fine.
-2. **goflow2 template errors on restart** — Normal. After service restart, goflow2 loses cached NetFlow v9 templates and logs "template error" until the router sends the next template packet. Resolves within seconds.
-3. **Vector exponential backoff** — After multiple pktFlow restarts, vector backs off to ~512s retry intervals. A pktFlow restart (connection reset) triggers immediate retry from vector.
-4. **`--no-access-log` is removed from pktflow.service** — Access logging is currently enabled. Restore `--no-access-log` flag if performance becomes a concern.
-5. **ClickHouse `flow_dir` constraint** — `FlowRecord.flow_dir` is `Field(ge=0, le=2)`. Valid: 0=ingress, 1=egress, 2=unknown. If a router sends a non-standard direction value, it would be clamped to 2 by `default=2` in `_get()`.
+See `INCOMPLETE_FEATURES.md` for the full breakdown. Key gaps a new session must know:
+
+- **Alert rule types `threshold`, `rate_spike`, `port_protocol`** — engine has placeholder `return`, nothing executes. Only `data_gap` and `new_host` work.
+- **Okta OIDC** — Settings UI exists, DB column exists, `app/auth/okta.py` does not exist. Zero backend implementation.
+- **Direct UDP ingest** — Settings UI exists, `app/ingest/udp_listener.py` does not exist.
+- **Notification channels (Slack, Email, PagerDuty, Webhook)** — code written in `engine.py` but never tested. `aiosmtplib` and `jinja2` are not verified in the venv. No "Send Test" backend endpoints exist.
+- **AI assistant** — backend and frontend written, requires `anthropic` package in venv + API key in settings. Never tested on O2.
+- **Aggregate rollup job** — hourly/daily rollup tables may exist in schema but no scheduled job populates them.
+- **Migration mode, storage test connection, device CSV import, unknown s
