@@ -1,11 +1,14 @@
 """
 ClickHouse storage backend.
 Uses clickhouse-driver (sync) wrapped in asyncio.to_thread for non-blocking operation.
+Thread-safe: a threading.Lock serializes all ClickHouse calls so concurrent
+asyncio.to_thread() invocations never share the connection simultaneously.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -31,6 +34,7 @@ class ClickHouseBackend(StorageBackend):
 
     def __init__(self):
         self._client: Optional[Client] = None
+        self._lock = threading.Lock()  # serializes concurrent asyncio.to_thread calls
 
     def _get_client(self) -> Client:
         if self._client is None:
@@ -46,11 +50,31 @@ class ClickHouseBackend(StorageBackend):
         return self._client
 
     def _execute(self, query: str, params=None, data=None):
-        """Sync ClickHouse execute — call via asyncio.to_thread."""
-        client = self._get_client()
-        if data is not None:
-            return client.execute(query, data)
-        return client.execute(query, params or {})
+        """Sync ClickHouse execute — call via asyncio.to_thread.
+        Thread-safe: held under self._lock so concurrent threads never share the
+        connection.  Reconnects on any driver error (EOFError, PartiallyConsumedQueryError,
+        AttributeError, OSError, etc.).
+        """
+        with self._lock:
+            for attempt in range(2):
+                try:
+                    client = self._get_client()
+                    if data is not None:
+                        return client.execute(query, data)
+                    return client.execute(query, params or {})
+                except Exception as e:
+                    log.warning(
+                        f"ClickHouse query failed ({type(e).__name__}: {e}), "
+                        f"reconnecting… (attempt {attempt + 1}/2)"
+                    )
+                    try:
+                        if self._client is not None:
+                            self._client.disconnect()
+                    except Exception:
+                        pass
+                    self._client = None
+                    if attempt == 1:
+                        raise
 
     async def connect(self) -> None:
         await asyncio.to_thread(self._ensure_schema)
