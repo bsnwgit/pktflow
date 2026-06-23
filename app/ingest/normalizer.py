@@ -4,9 +4,13 @@ Flow record normalizer.
 Converts raw GoFlow2 JSON (as POSTed by Vector) into a list of FlowRecord objects.
 Also enriches each record with sampler_name and site from the device registry.
 
-GoFlow2 field reference — handles BOTH output formats:
-  PascalCase (protobuf-JSON):  SamplerAddress, SrcAddr, DstAddr, Bytes, Packets ...
-  snake_case (newer/VRL):      sampler_address, src_addr, dst_addr, bytes, packets ...
+Vector outputs snake_case field names after transforming goflow2 data:
+  sampler_address, src_addr, dst_addr, bytes, packets, proto (string!), in_if, out_if ...
+
+Also handles PascalCase (protobuf-JSON) for direct goflow2 ingest:
+  SamplerAddress, SrcAddr, DstAddr, Bytes, Packets, Proto ...
+
+Key difference: vector outputs proto as a string ("UDP", "TCP") not an integer.
 """
 from __future__ import annotations
 
@@ -21,6 +25,16 @@ log = logging.getLogger("pktflow.ingest.normalizer")
 # Cache of sampler_ip → (name, site) — populated from device registry
 _device_cache: dict[str, tuple[str, str]] = {}
 
+# Protocol name → IANA protocol number
+_PROTO_NAMES: dict[str, int] = {
+    "HOPOPT": 0, "ICMP": 1, "IGMP": 2, "GGP": 3, "IPV4": 4, "ST": 5,
+    "TCP": 6, "CBT": 7, "EGP": 8, "IGP": 9, "PUP": 12, "UDP": 17,
+    "HMP": 20, "RDP": 27, "IPV6": 41, "IPV6_ROUTE": 43, "IPV6_FRAG": 44,
+    "IDRP": 45, "RSVP": 46, "GRE": 47, "ESP": 50, "AH": 51,
+    "ICMPV6": 58, "IPV6_NONXT": 59, "IPV6_OPTS": 60, "OSPF": 89,
+    "PIM": 103, "SCTP": 132, "MPLS_IN_IP": 137,
+}
+
 
 def refresh_device_cache(devices: list[dict]) -> None:
     """Called by ingest handler after settings change or on startup."""
@@ -34,6 +48,26 @@ def _get(raw: dict, *keys: str, default: Any = None) -> Any:
         if key in raw and raw[key] is not None:
             return raw[key]
     return default
+
+
+def _proto_to_int(val: Any) -> int:
+    """Convert protocol value to int. Handles integers, numeric strings, and name strings."""
+    if val is None:
+        return 0
+    if isinstance(val, int):
+        return val
+    s = str(val).upper().strip()
+    if s.isdigit():
+        return int(s)
+    return _PROTO_NAMES.get(s, 0)
+
+
+def _ip_or_default(val: Any, default: str = "0.0.0.0") -> str:
+    """Return IP string, falling back to default for None/empty."""
+    if val is None:
+        return default
+    s = str(val).strip()
+    return s if s and s not in ("null", "None") else default
 
 
 def _ns_to_datetime(ns: int) -> datetime:
@@ -87,11 +121,11 @@ def normalize_goflow2_record(raw: dict[str, Any]) -> Optional[FlowRecord]:
             sampler_ip=sampler_ip,
             sampler_name=name,
             site=site,
-            src_ip=str(_get(raw, "SrcAddr", "src_addr", default="0.0.0.0")),
-            dst_ip=str(_get(raw, "DstAddr", "dst_addr", default="0.0.0.0")),
+            src_ip=_ip_or_default(_get(raw, "SrcAddr", "src_addr")),
+            dst_ip=_ip_or_default(_get(raw, "DstAddr", "dst_addr")),
             src_port=int(_get(raw, "SrcPort", "src_port", default=0)),
             dst_port=int(_get(raw, "DstPort", "dst_port", default=0)),
-            protocol=int(_get(raw, "Proto", "proto", default=0)),
+            protocol=_proto_to_int(_get(raw, "Proto", "proto", default=0)),
             bytes=int(_get(raw, "Bytes", "bytes", default=0)),
             packets=int(_get(raw, "Packets", "packets", default=0)),
             duration_ms=duration_ms,
@@ -99,7 +133,7 @@ def normalize_goflow2_record(raw: dict[str, Any]) -> Optional[FlowRecord]:
             tos=int(_get(raw, "IPTos", "ip_tos", default=0)),
             input_if=int(_get(raw, "InIf", "in_if", default=0)),
             output_if=int(_get(raw, "OutIf", "out_if", default=0)),
-            next_hop=str(_get(raw, "NextHop", "next_hop", default="0.0.0.0")),
+            next_hop=_ip_or_default(_get(raw, "NextHop", "next_hop")),
             src_as=int(_get(raw, "SrcAS", "src_as", default=0)),
             dst_as=int(_get(raw, "DstAS", "dst_as", default=0)),
             flow_dir=int(_get(raw, "FlowDirection", "flow_direction", default=2)),
