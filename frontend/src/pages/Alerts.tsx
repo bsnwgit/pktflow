@@ -238,6 +238,14 @@ export default function Alerts() {
   const [addingRule, setAddingRule] = useState(false)
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState('')
+  const [rulesFilter, setRulesFilter]   = useState('')
+  const [rulesSortKey, setRulesSortKey] = useState<keyof AlertRule | null>(null)
+  const [rulesSortDir, setRulesSortDir] = useState<'asc' | 'desc'>('asc')
+
+  const toggleRulesSort = (key: keyof AlertRule) => {
+    if (rulesSortKey === key) setRulesSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setRulesSortKey(key); setRulesSortDir('asc') }
+  }
 
   const loadEvents = async () => {
     setLoading(true)
@@ -426,17 +434,63 @@ export default function Alerts() {
           )}
           {error && <p className="text-sm text-red-400">{error}</p>}
 
+          {(() => {
+            const displayedRules = rules
+              .filter(r => {
+                if (!rulesFilter) return true
+                const q = rulesFilter.toLowerCase()
+                return r.name.toLowerCase().includes(q) ||
+                  r.rule_type.toLowerCase().includes(q) ||
+                  r.severity.toLowerCase().includes(q)
+              })
+              .sort((a, b) => {
+                if (!rulesSortKey) return 0
+                const av = a[rulesSortKey] as any
+                const bv = b[rulesSortKey] as any
+                if (typeof av === 'number') return rulesSortDir === 'asc' ? av - bv : bv - av
+                return rulesSortDir === 'asc'
+                  ? String(av ?? '').localeCompare(String(bv ?? ''))
+                  : String(bv ?? '').localeCompare(String(av ?? ''))
+              })
+            const RULE_COLS: Array<{ label: string; key: keyof AlertRule | null }> = [
+              { label: 'Enabled',  key: null },
+              { label: 'Rule',     key: 'name' },
+              { label: 'Type',     key: 'rule_type' },
+              { label: 'Severity', key: 'severity' },
+              { label: 'Channels', key: null },
+              { label: 'Cooldown', key: 'cooldown_min' },
+              { label: '',         key: null },
+            ]
+            return (
           <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-3">
+              <input
+                value={rulesFilter}
+                onChange={e => setRulesFilter(e.target.value)}
+                placeholder="Filter by name, type, severity…"
+                className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white placeholder-gray-600 w-52 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              {rulesFilter && <button onClick={() => setRulesFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+              <span className="text-xs text-white ml-auto">{displayedRules.length} rule{displayedRules.length !== 1 ? 's' : ''}</span>
+            </div>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-800">
-                  {['Enabled', 'Rule', 'Type', 'Severity', 'Channels', 'Cooldown', ''].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-medium text-white">{h}</th>
+                  {RULE_COLS.map(col => (
+                    <th
+                      key={col.label}
+                      onClick={() => col.key && toggleRulesSort(col.key)}
+                      className={`px-4 py-3 text-left text-xs font-medium select-none
+                        ${col.key ? `cursor-pointer ${rulesSortKey === col.key ? 'text-blue-400' : 'text-white hover:text-gray-200'}` : 'text-white'}`}
+                    >
+                      {col.label}
+                      {rulesSortKey === col.key && col.key && <span className="ml-1">{rulesSortDir === 'asc' ? '↑' : '↓'}</span>}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800/50">
-                {rules.map(rule => (
+                {displayedRules.map(rule => (
                   <tr key={rule.id} className="hover:bg-gray-800/30 transition-colors">
                     <td className="px-4 py-3">
                       <button
@@ -484,16 +538,18 @@ export default function Alerts() {
                     </td>
                   </tr>
                 ))}
-                {rules.length === 0 && (
+                {displayedRules.length === 0 && (
                   <tr>
                     <td colSpan={7} className="px-4 py-8 text-center text-sm text-white">
-                      No alert rules yet — click "+ New rule" to add one
+                      {rulesFilter ? 'No rules match this filter' : 'No alert rules yet — click "+ New rule" to add one'}
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
+            )
+          })()}
         </div>
       )}
     </div>
