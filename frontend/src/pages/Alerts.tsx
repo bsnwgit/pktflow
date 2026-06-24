@@ -33,15 +33,15 @@ function EventCard({ event, onAck }: { event: AlertEvent; onAck: (id: number) =>
           </span>
           <div className="min-w-0">
             <p className="text-sm font-medium text-white truncate">{event.rule_name}</p>
-            <p className="text-sm text-gray-400 mt-0.5">{event.message}</p>
+            <p className="text-sm text-white mt-0.5">{event.message}</p>
           </div>
         </div>
         <div className="shrink-0 flex items-center gap-2">
-          <span className="text-xs text-gray-500">{fmtTime(event.fired_at)}</span>
+          <span className="text-xs text-white">{fmtTime(event.fired_at)}</span>
           {!isAcked && (
             <button
               onClick={() => onAck(event.id)}
-              className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-700 rounded px-2.5 py-1 transition-colors"
+              className="text-xs bg-gray-800 hover:bg-gray-700 text-white hover:text-white border border-gray-700 rounded px-2.5 py-1 transition-colors"
             >
               Ack
             </button>
@@ -54,12 +54,12 @@ function EventCard({ event, onAck }: { event: AlertEvent; onAck: (id: number) =>
         <div className="mt-2">
           <button
             onClick={() => setExpanded(e => !e)}
-            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+            className="text-xs text-white hover:text-white transition-colors"
           >
             {expanded ? '▾ Hide details' : '▸ Show details'}
           </button>
           {expanded && (
-            <pre className="mt-2 text-xs bg-gray-800 rounded-lg p-3 text-gray-300 overflow-x-auto">
+            <pre className="mt-2 text-xs bg-gray-800 rounded-lg p-3 text-white overflow-x-auto">
               {JSON.stringify(event.details, null, 2)}
             </pre>
           )}
@@ -112,7 +112,7 @@ function RuleForm({
       <h3 className="text-sm font-semibold text-white">{initial.name ? 'Edit rule' : 'New alert rule'}</h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="sm:col-span-2">
-          <label className="block text-xs text-gray-400 mb-1">Rule name</label>
+          <label className="block text-xs text-white mb-1">Rule name</label>
           <input
             value={form.name}
             onChange={e => set('name', e.target.value)}
@@ -121,7 +121,7 @@ function RuleForm({
           />
         </div>
         <div className="sm:col-span-2">
-          <label className="block text-xs text-gray-400 mb-1">Description (optional)</label>
+          <label className="block text-xs text-white mb-1">Description (optional)</label>
           <input
             value={form.description}
             onChange={e => set('description', e.target.value)}
@@ -129,7 +129,7 @@ function RuleForm({
           />
         </div>
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Rule type</label>
+          <label className="block text-xs text-white mb-1">Rule type</label>
           <select
             value={form.rule_type}
             onChange={e => set('rule_type', e.target.value)}
@@ -141,7 +141,7 @@ function RuleForm({
           </select>
         </div>
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Severity</label>
+          <label className="block text-xs text-white mb-1">Severity</label>
           <select
             value={form.severity}
             onChange={e => set('severity', e.target.value)}
@@ -153,7 +153,7 @@ function RuleForm({
           </select>
         </div>
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Cooldown (minutes)</label>
+          <label className="block text-xs text-white mb-1">Cooldown (minutes)</label>
           <input
             type="number" min="1" max="1440"
             value={form.cooldown_min}
@@ -162,7 +162,7 @@ function RuleForm({
           />
         </div>
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Eval window (minutes)</label>
+          <label className="block text-xs text-white mb-1">Eval window (minutes)</label>
           <input
             type="number" min="1" max="1440"
             value={form.time_window_min}
@@ -173,7 +173,7 @@ function RuleForm({
       </div>
 
       <div>
-        <label className="block text-xs text-gray-400 mb-2">Notification channels</label>
+        <label className="block text-xs text-white mb-2">Notification channels</label>
         <div className="flex flex-wrap gap-2">
           {CHANNELS_AVAILABLE.map(ch => {
             const active = form.channels.includes(ch)
@@ -185,7 +185,7 @@ function RuleForm({
                 className={`text-xs px-3 py-1.5 rounded-lg border transition-colors capitalize ${
                   active
                     ? 'bg-blue-600/30 border-blue-500 text-blue-300'
-                    : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'
+                    : 'bg-gray-800 border-gray-700 text-white hover:border-gray-500'
                 }`}
               >
                 {ch}
@@ -205,7 +205,7 @@ function RuleForm({
         </button>
         <button
           onClick={onCancel}
-          className="text-gray-400 hover:text-white text-sm border border-gray-700 rounded-lg px-4 py-2 transition-colors"
+          className="text-white hover:text-white text-sm border border-gray-700 rounded-lg px-4 py-2 transition-colors"
         >
           Cancel
         </button>
@@ -318,7 +318,7 @@ export default function Alerts() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-white">Alerts</h1>
-          <p className="text-sm text-gray-400 mt-0.5">
+          <p className="text-sm text-white mt-0.5">
             {events.length > 0
               ? `${events.length} unacknowledged alert${events.length !== 1 ? 's' : ''}`
               : 'No active alerts'}
@@ -327,7 +327,7 @@ export default function Alerts() {
         {tab === 'active' && events.length > 0 && (
           <button
             onClick={handleAckAll}
-            className="text-sm border border-gray-700 hover:border-gray-500 text-gray-400 hover:text-white rounded-lg px-4 py-2 transition-colors"
+            className="text-sm border border-gray-700 hover:border-gray-500 text-white hover:text-white rounded-lg px-4 py-2 transition-colors"
           >
             Ack all
           </button>
@@ -349,7 +349,7 @@ export default function Alerts() {
             key={t}
             onClick={() => setTab(t)}
             className={`text-sm px-4 py-1.5 rounded-lg transition-colors capitalize ${
-              tab === t ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+              tab === t ? 'bg-gray-700 text-white' : 'text-white hover:text-white'
             }`}
           >
             {t}
@@ -365,9 +365,9 @@ export default function Alerts() {
       {/* Active events */}
       {tab === 'active' && (
         <div className="space-y-3">
-          {loading && <p className="text-sm text-gray-500">Loading…</p>}
+          {loading && <p className="text-sm text-white">Loading…</p>}
           {!loading && events.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-32 text-gray-500">
+            <div className="flex flex-col items-center justify-center h-32 text-white">
               <p className="text-2xl mb-2">✓</p>
               <p className="text-sm">No unacknowledged alerts</p>
             </div>
@@ -380,7 +380,7 @@ export default function Alerts() {
       {tab === 'history' && (
         <div className="space-y-3">
           {history.length === 0 && !loading && (
-            <div className="flex flex-col items-center justify-center h-32 text-gray-500">
+            <div className="flex flex-col items-center justify-center h-32 text-white">
               <p className="text-sm">No alert history</p>
             </div>
           )}
@@ -414,7 +414,7 @@ export default function Alerts() {
               <thead>
                 <tr className="border-b border-gray-800">
                   {['Enabled', 'Rule', 'Type', 'Severity', 'Channels', 'Cooldown', ''].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-400">{h}</th>
+                    <th key={h} className="px-4 py-3 text-left text-xs font-medium text-white">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -436,10 +436,10 @@ export default function Alerts() {
                     <td className="px-4 py-3">
                       <p className="font-medium text-white">{rule.name}</p>
                       {rule.description && (
-                        <p className="text-xs text-gray-500 mt-0.5">{rule.description}</p>
+                        <p className="text-xs text-white mt-0.5">{rule.description}</p>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-gray-400 text-xs">
+                    <td className="px-4 py-3 text-white text-xs">
                       <span className="bg-gray-800 px-2 py-0.5 rounded">{rule.rule_type}</span>
                     </td>
                     <td className="px-4 py-3">
@@ -447,19 +447,19 @@ export default function Alerts() {
                         {rule.severity}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-400">{rule.channels.join(', ')}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{rule.cooldown_min}m</td>
+                    <td className="px-4 py-3 text-xs text-white">{rule.channels.join(', ')}</td>
+                    <td className="px-4 py-3 text-xs text-white">{rule.cooldown_min}m</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <button
                           onClick={() => { setEditRule(rule); setAddingRule(false) }}
-                          className="text-xs text-gray-500 hover:text-blue-400 transition-colors"
+                          className="text-xs text-white hover:text-blue-400 transition-colors"
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => handleDeleteRule(rule.id)}
-                          className="text-xs text-gray-500 hover:text-red-400 transition-colors"
+                          className="text-xs text-white hover:text-red-400 transition-colors"
                         >
                           Delete
                         </button>
@@ -469,7 +469,7 @@ export default function Alerts() {
                 ))}
                 {rules.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-500">
+                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-white">
                       No alert rules yet — click "+ New rule" to add one
                     </td>
                   </tr>
