@@ -2,21 +2,17 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   AreaChart, Area, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend,
 } from 'recharts'
-import { api, DeviceSummary, TimeSeriesPoint, TopTalker } from '../api/client'
+import { api, DeviceSummary, TimeSeriesPoint, TopTalker, FlowRecord } from '../api/client'
+import { PortsTabContent } from './Ports'
+import { protoLabel } from '../utils/protocols'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const WINDOWS = ['1h', '6h', '24h', '7d', '30d'] as const
 type Window = typeof WINDOWS[number]
-
-const PROTO_NAMES: Record<number, string> = {
-  1: 'ICMP', 6: 'TCP', 17: 'UDP', 41: 'IPv6', 47: 'GRE',
-  50: 'ESP', 51: 'AH', 58: 'ICMPv6', 89: 'OSPF', 132: 'SCTP',
-}
-
-function protoLabel(n: number) { return PROTO_NAMES[n] ?? `IP/${n}` }
 
 function fmtBytes(b: number): string {
   if (b >= 1e12) return (b / 1e12).toFixed(2) + ' TB'
@@ -45,6 +41,14 @@ function fmtTs(ts: string, window: Window): string {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+function fmtDuration(ms: number): string {
+  if (ms >= 60000) return (ms / 60000).toFixed(1) + 'm'
+  if (ms >= 1000)  return (ms / 1000).toFixed(1) + 's'
+  return ms + 'ms'
+}
+
+const PIE_COLORS = ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4','#ec4899','#84cc16']
+
 function buildProtoDist(talkers: TopTalker[]) {
   const map: Record<string, number> = {}
   for (const t of talkers) {
@@ -54,15 +58,40 @@ function buildProtoDist(talkers: TopTalker[]) {
   return Object.entries(map).sort((a, b) => b[1] - a[1]).map(([name, bytes]) => ({ name, bytes }))
 }
 
+function buildSrcDist(talkers: TopTalker[]) {
+  const map: Record<string, number> = {}
+  for (const t of talkers) {
+    map[t.src_ip] = (map[t.src_ip] ?? 0) + t.bytes
+  }
+  return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, bytes]) => ({ name, bytes }))
+}
+
+function buildDstDist(talkers: TopTalker[]) {
+  const map: Record<string, number> = {}
+  for (const t of talkers) {
+    map[t.dst_ip] = (map[t.dst_ip] ?? 0) + t.bytes
+  }
+  return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, bytes]) => ({ name, bytes }))
+}
+
+function buildPortDist(talkers: TopTalker[]) {
+  const map: Record<string, number> = {}
+  for (const t of talkers) {
+    const label = `${t.dst_port}/${protoLabel(t.protocol)}`
+    map[label] = (map[label] ?? 0) + t.bytes
+  }
+  return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, bytes]) => ({ name, bytes }))
+}
+
 function TimeTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-lg p-3 text-xs shadow-xl">
-      <p className="text-gray-400 mb-2">{label}</p>
+      <p className="text-white mb-2">{label}</p>
       {payload.map((p: any) => (
         <div key={p.dataKey} className="flex items-center gap-2 mb-1">
           <span className="w-2 h-2 rounded-full" style={{ background: p.color }} />
-          <span className="text-gray-300">{p.name}:</span>
+          <span className="text-white">{p.name}:</span>
           <span className="text-white font-medium">
             {p.dataKey === 'bytes' ? fmtBytes(p.value) : p.value.toLocaleString()}
           </span>
@@ -72,19 +101,159 @@ function TimeTooltip({ active, payload, label }: any) {
   )
 }
 
+// ── Inline Flow Drill-Down ────────────────────────────────────────────────────
+
+function InlineFlows({ srcIp, dstIp, window }: { srcIp: string; dstIp: string; window: Window }) {
+  const [flows, setFlows]     = useState<FlowRecord[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState('')
+
+  useEffect(() => {
+    setLoading(true)
+    setError('')
+    api.searchFlows({ src_ip: srcIp, dst_ip: dstIp, window, limit: '20' })
+      .then(f => { setFlows(f ?? []); setLoading(false) })
+      .catch(e => { setError(String(e)); setLoading(false) })
+  }, [srcIp, dstIp, window])
+
+  if (loading) return (
+    <tr><td colSpan={9} className="px-6 py-3 bg-gray-950">
+      <div className="flex items-center gap-2 text-xs text-white">
+        <div className="w-3 h-3 border border-blue-500 border-t-transparent rounded-full animate-spin" />
+        Loading flows…
+      </div>
+    </td></tr>
+  )
+
+  if (error) return (
+    <tr><td colSpan={9} className="px-6 py-3 bg-gray-950 text-xs text-red-400">{error}</td></tr>
+  )
+
+  if (!flows.length) return (
+    <tr><td colSpan={9} className="px-6 py-3 bg-gray-950 text-xs text-white italic">No flows found</td></tr>
+  )
+
+  return (
+    <tr>
+      <td colSpan={9} className="px-0 py-0 bg-gray-950 border-b border-gray-800">
+        <div className="px-6 py-3">
+          <p className="text-xs text-blue-300 mb-2 font-medium">{flows.length} flows — {srcIp} → {dstIp}</p>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-white border-b border-gray-800">
+                <th className="pb-1 text-left pr-4">Time</th>
+                <th className="pb-1 text-left pr-4">Src Port</th>
+                <th className="pb-1 text-left pr-4">Dst Port</th>
+                <th className="pb-1 text-left pr-4">Proto</th>
+                <th className="pb-1 text-right pr-4">Bytes</th>
+                <th className="pb-1 text-right pr-4">Packets</th>
+                <th className="pb-1 text-right">Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              {flows.map((f, i) => (
+                <tr key={i} className="border-b border-gray-800/40 hover:bg-gray-800/30">
+                  <td className="py-1 pr-4 text-white">{new Date(f.timestamp).toLocaleTimeString()}</td>
+                  <td className="py-1 pr-4 font-mono text-white">{f.src_port}</td>
+                  <td className="py-1 pr-4 font-mono text-white">{f.dst_port}</td>
+                  <td className="py-1 pr-4">
+                    <span className="bg-gray-800 text-white px-1.5 py-0.5 rounded text-xs">{protoLabel(f.protocol)}</span>
+                  </td>
+                  <td className="py-1 pr-4 text-right text-white">{fmtBytes(f.bytes)}</td>
+                  <td className="py-1 pr-4 text-right text-white">{f.packets.toLocaleString()}</td>
+                  <td className="py-1 text-right text-white">{fmtDuration(f.duration_ms)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </td>
+    </tr>
+  )
+}
+
+// ── Talker Pie Charts ─────────────────────────────────────────────────────────
+
+function TalkerPieCharts({ talkers, totalBytes }: { talkers: TopTalker[]; totalBytes: number }) {
+  const protoDist = buildProtoDist(talkers)
+  const srcDist   = buildSrcDist(talkers)
+  const dstDist   = buildDstDist(talkers)
+  const portDist  = buildPortDist(talkers)
+
+  const PieTip = ({ active, payload }: any) => {
+    if (!active || !payload?.length) return null
+    const { name, value } = payload[0]
+    return (
+      <div className="bg-gray-800 border border-gray-700 rounded-lg p-2 text-xs shadow-xl">
+        <p className="text-white font-medium">{name}</p>
+        <p className="text-white">{fmtBytes(value)}</p>
+        {totalBytes > 0 && <p className="text-white">{((value / totalBytes) * 100).toFixed(1)}%</p>}
+      </div>
+    )
+  }
+
+  const PieCard = ({ title, data, mono = false }: { title: string; data: { name: string; bytes: number }[]; mono?: boolean }) => (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+      <p className="text-xs text-white mb-2 font-medium">{title}</p>
+      <div className="flex items-center gap-2">
+        <ResponsiveContainer width="50%" height={120}>
+          <PieChart>
+            <Pie data={data} dataKey="bytes" nameKey="name" cx="50%" cy="50%"
+              innerRadius={28} outerRadius={52} paddingAngle={2}>
+              {data.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+            </Pie>
+            <Tooltip content={<PieTip />} />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="flex flex-col gap-1 flex-1 min-w-0">
+          {data.slice(0, 5).map((d, i) => (
+            <div key={d.name} className="flex items-center gap-1.5 text-xs">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+              <span className={`${mono ? 'font-mono' : ''} text-white truncate flex-1`}>{d.name}</span>
+              <span className="text-white shrink-0">{totalBytes > 0 ? ((d.bytes / totalBytes) * 100).toFixed(0) + '%' : '-'}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+      <PieCard title="By Protocol"      data={protoDist} />
+      <PieCard title="Top Sources"      data={srcDist}   mono />
+      <PieCard title="Top Destinations" data={dstDist}   mono />
+      <PieCard title="Top Ports"        data={portDist}  mono />
+    </div>
+  )
+}
+
 // ── Top Talkers Table ─────────────────────────────────────────────────────────
-function TopTalkersTable({ talkers, totalBytes, onDrillDown }: {
+
+function TopTalkersTable({ talkers, totalBytes, window, externalExpanded, onExternalExpandedConsumed }: {
   talkers: TopTalker[]
   totalBytes: number
-  onDrillDown: (src: string, dst: string) => void
+  window: Window
+  externalExpanded?: string | null
+  onExternalExpandedConsumed?: () => void
 }) {
-  const [sortBy, setSortBy] = useState<'bytes' | 'packets' | 'flow_count'>('bytes')
+  const navigate = useNavigate()
+  const [sortBy, setSortBy]       = useState<'bytes' | 'packets' | 'flow_count'>('bytes')
+  const [expandedKey, setExpanded] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (externalExpanded) {
+      setExpanded(externalExpanded)
+      onExternalExpandedConsumed?.()
+    }
+  }, [externalExpanded])
+
   const sorted = [...talkers].sort((a, b) => b[sortBy] - a[sortBy])
 
   const Col = ({ col, label }: { col: typeof sortBy; label: string }) => (
     <th
       className={`px-4 py-3 text-left text-xs font-medium cursor-pointer select-none transition-colors
-        ${sortBy === col ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'}`}
+        ${sortBy === col ? 'text-blue-400' : 'text-white hover:text-gray-200'}`}
       onClick={() => setSortBy(col)}
     >
       {label} {sortBy === col && '↓'}
@@ -92,67 +261,347 @@ function TopTalkersTable({ talkers, totalBytes, onDrillDown }: {
   )
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-800">
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Source IP</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Destination IP</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Port</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Proto</th>
-            <Col col="bytes" label="Bytes" />
-            <Col col="packets" label="Packets" />
-            <Col col="flow_count" label="Flows" />
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Share</th>
-            <th className="px-4 py-3 text-xs font-medium text-gray-400" />
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-800/50">
-          {sorted.map((t, i) => {
-            const pct = totalBytes > 0 ? ((t.bytes / totalBytes) * 100).toFixed(1) : '0'
-            return (
-              <tr key={i} className="hover:bg-gray-800/40 transition-colors group">
-                <td className="px-4 py-2.5 font-mono text-blue-300 text-xs">{t.src_ip}</td>
-                <td className="px-4 py-2.5 font-mono text-purple-300 text-xs">{t.dst_ip}</td>
-                <td className="px-4 py-2.5 text-gray-300">{t.dst_port}</td>
-                <td className="px-4 py-2.5">
-                  <span className="bg-gray-800 text-gray-300 text-xs px-2 py-0.5 rounded">
-                    {protoLabel(t.protocol)}
-                  </span>
-                </td>
-                <td className="px-4 py-2.5 text-white font-medium">{fmtBytes(t.bytes)}</td>
-                <td className="px-4 py-2.5 text-gray-300">{t.packets.toLocaleString()}</td>
-                <td className="px-4 py-2.5 text-gray-400">{t.flow_count.toLocaleString()}</td>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <div className="w-14 h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(100, parseFloat(pct))}%` }} />
-                    </div>
-                    <span className="text-gray-400 text-xs">{pct}%</span>
-                  </div>
-                </td>
-                <td className="px-4 py-2.5">
-                  <button
-                    onClick={() => onDrillDown(t.src_ip, t.dst_ip)}
-                    className="text-xs text-blue-400 hover:text-blue-300 opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Drill into flows between these IPs"
+    <div>
+      <TalkerPieCharts talkers={talkers} totalBytes={totalBytes} />
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-800">
+              <th className="px-4 py-3 text-left text-xs font-medium text-white w-6" />
+              <th className="px-4 py-3 text-left text-xs font-medium text-white">Source IP</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-white">Destination IP</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-white">Port</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-white">Proto</th>
+              <Col col="bytes" label="Bytes" />
+              <Col col="packets" label="Packets" />
+              <Col col="flow_count" label="Flows" />
+              <th className="px-4 py-3 text-left text-xs font-medium text-white">Share</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800/50">
+            {sorted.map((t, i) => {
+              const rowKey = `${t.src_ip}-${t.dst_ip}-${t.dst_port}-${t.protocol}`
+              const isExpanded = expandedKey === rowKey
+              const pct = totalBytes > 0 ? ((t.bytes / totalBytes) * 100).toFixed(1) : '0'
+              return (
+                <>
+                  <tr
+                    key={rowKey}
+                    className={`hover:bg-gray-800/40 transition-colors cursor-pointer ${isExpanded ? 'bg-gray-800/30' : ''}`}
+                    onClick={() => setExpanded(isExpanded ? null : rowKey)}
                   >
-                    Drill in →
-                  </button>
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-      {sorted.length === 0 && (
-        <div className="text-center py-12 text-gray-500">No flow data for this window</div>
+                    <td className="px-4 py-2.5 text-white text-xs select-none">
+                      {isExpanded ? '▼' : '▶'}
+                    </td>
+                    <td className="px-4 py-2.5 font-mono text-blue-300 text-xs">{t.src_ip}</td>
+                    <td className="px-4 py-2.5 font-mono text-purple-300 text-xs">{t.dst_ip}</td>
+                    <td className="px-4 py-2.5 text-white">{t.dst_port}</td>
+                    <td className="px-4 py-2.5">
+                      <span className="bg-gray-800 text-white text-xs px-2 py-0.5 rounded">
+                        {protoLabel(t.protocol)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-white font-medium">{fmtBytes(t.bytes)}</td>
+                    <td className="px-4 py-2.5 text-white">{t.packets.toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-white">{t.flow_count.toLocaleString()}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-14 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                          <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(100, parseFloat(pct))}%` }} />
+                        </div>
+                        <span className="text-white text-xs">{pct}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                  {isExpanded && (
+                    <InlineFlows key={`flows-${rowKey}`} srcIp={t.src_ip} dstIp={t.dst_ip} window={window} />
+                  )}
+                </>
+              )
+            })}
+          </tbody>
+        </table>
+        {sorted.length === 0 && (
+          <div className="text-center py-12 text-white">No flow data for this window</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Sankey Flow Diagram ───────────────────────────────────────────────────────
+
+const SANKEY_PORT_GROUPS: Array<{ label: string; ports: Set<number>; color: string }> = [
+  { label: 'HTTPS',    ports: new Set([443, 8443]),                                 color: '#8b5cf6' },
+  { label: 'HTTP',     ports: new Set([80, 8080, 8000]),                            color: '#14b8a6' },
+  { label: 'DNS',      ports: new Set([53]),                                         color: '#10b981' },
+  { label: 'SSH',      ports: new Set([22]),                                         color: '#f59e0b' },
+  { label: 'Database', ports: new Set([3306, 5432, 1433, 5433, 27017, 6379, 5984]), color: '#ec4899' },
+  { label: 'RDP',      ports: new Set([3389]),                                       color: '#ef4444' },
+  { label: 'Email',    ports: new Set([25, 587, 465, 143, 993, 110, 995]),           color: '#f97316' },
+]
+const SANKEY_UDP_COLOR   = '#06b6d4' // cyan — all UDP except DNS
+const SANKEY_OTHER_COLOR = '#6b7280' // gray — unmatched TCP
+
+interface SankeyNode { key: string; bytes: number; x: number; y: number; h: number }
+interface SankeyLink { color: string; x0: number; y0: number; w0: number; x1: number; y1: number; w1: number; bytes: number; flow?: TopTalker }
+
+function buildSankeyLayout(talkers: TopTalker[], W: number, H: number) {
+  const PADDING = 6
+  const COL_W   = 110
+  const TOP_N   = 10
+
+  const flows = talkers.slice(0, 25)
+
+  // Aggregate by key
+  const aggMap = (keyFn: (t: TopTalker) => string) => {
+    const m = new Map<string, number>()
+    for (const t of flows) m.set(keyFn(t), (m.get(keyFn(t)) ?? 0) + t.bytes)
+    return m
+  }
+
+  const srcAgg  = aggMap(t => t.src_ip)
+  const portAgg = aggMap(t => `${protoLabel(t.protocol)}:${t.dst_port}`)
+  const dstAgg  = aggMap(t => t.dst_ip)
+
+  const layoutCol = (map: Map<string, number>, x: number): SankeyNode[] => {
+    const entries = [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, TOP_N)
+    const total   = entries.reduce((s, [, v]) => s + v, 0)
+    const avail   = H - PADDING * (entries.length - 1)
+    let y = 0
+    return entries.map(([key, bytes]) => {
+      const h = Math.max(12, (bytes / total) * avail)
+      const node = { key, bytes, x, y, h }
+      y += h + PADDING
+      return node
+    })
+  }
+
+  const srcNodes  = layoutCol(srcAgg,  0)
+  const portNodes = layoutCol(portAgg, (W - COL_W) / 2)
+  const dstNodes  = layoutCol(dstAgg,  W - COL_W)
+
+  const linkColor = (t: TopTalker) => {
+    // UDP (except DNS port 53) gets its own color regardless of port
+    if (t.protocol === 17 && t.dst_port !== 53) return SANKEY_UDP_COLOR
+    // Port-group matching for TCP / ICMP / others
+    for (const g of SANKEY_PORT_GROUPS) {
+      if (g.ports.has(t.dst_port)) return g.color
+    }
+    return SANKEY_OTHER_COLOR
+  }
+
+  // Track current y-offsets within each node for stacking links
+  const srcY  = Object.fromEntries(srcNodes.map(n  => [n.key, n.y]))
+  const portInY  = Object.fromEntries(portNodes.map(n => [n.key, n.y]))
+  const portOutY = Object.fromEntries(portNodes.map(n => [n.key, n.y]))
+  const dstY  = Object.fromEntries(dstNodes.map(n  => [n.key, n.y]))
+
+  const getNodeH = (nodes: SankeyNode[], key: string) => nodes.find(n => n.key === key)?.h ?? 0
+  const getNodeBytes = (nodes: SankeyNode[], key: string) => nodes.find(n => n.key === key)?.bytes ?? 1
+
+  const links1: SankeyLink[] = []
+  const links2: SankeyLink[] = []
+
+  // Sort flows by src, then port for deterministic stacking
+  const sorted = [...flows].sort((a, b) => a.src_ip.localeCompare(b.src_ip))
+
+  for (const t of sorted) {
+    const portKey = `${protoLabel(t.protocol)}:${t.dst_port}`
+    if (!(t.src_ip in srcY) || !(portKey in portInY)) continue
+
+    const srcNode   = srcNodes.find(n => n.key === t.src_ip)
+    const portNode  = portNodes.find(n => n.key === portKey)
+    if (!srcNode || !portNode) continue
+
+    const srcH  = getNodeH(srcNodes, t.src_ip)
+    const srcB  = getNodeBytes(srcNodes, t.src_ip)
+    const w     = Math.max(1, (t.bytes / srcB) * srcH)
+    const portH = getNodeH(portNodes, portKey)
+    const portB = getNodeBytes(portNodes, portKey)
+    const wIn   = Math.max(1, (t.bytes / portB) * portH)
+
+    links1.push({
+      color: linkColor(t),
+      x0: COL_W, y0: srcY[t.src_ip],  w0: w,
+      x1: portNode.x, y1: portInY[portKey], w1: wIn,
+      bytes: t.bytes,
+      flow: t,
+    })
+    srcY[t.src_ip]  += w
+    portInY[portKey] += wIn
+  }
+
+  const sorted2 = [...flows].sort((a, b) => a.dst_ip.localeCompare(b.dst_ip))
+  for (const t of sorted2) {
+    const portKey = `${protoLabel(t.protocol)}:${t.dst_port}`
+    if (!(portKey in portOutY) || !(t.dst_ip in dstY)) continue
+
+    const portNode = portNodes.find(n => n.key === portKey)
+    const dstNode  = dstNodes.find(n => n.key === t.dst_ip)
+    if (!portNode || !dstNode) continue
+
+    const portH = getNodeH(portNodes, portKey)
+    const portB = getNodeBytes(portNodes, portKey)
+    const wOut  = Math.max(1, (t.bytes / portB) * portH)
+    const dstH  = getNodeH(dstNodes, t.dst_ip)
+    const dstB  = getNodeBytes(dstNodes, t.dst_ip)
+    const wDst  = Math.max(1, (t.bytes / dstB) * dstH)
+
+    links2.push({
+      color: linkColor(t),
+      x0: portNode.x + COL_W, y0: portOutY[portKey], w0: wOut,
+      x1: W - COL_W, y1: dstY[t.dst_ip], w1: wDst,
+      bytes: t.bytes,
+      flow: t,
+    })
+    portOutY[portKey] += wOut
+    dstY[t.dst_ip]    += wDst
+  }
+
+  return { srcNodes, portNodes, dstNodes, links1, links2, COL_W }
+}
+
+function SankeyBand({ link, onClick }: { link: SankeyLink; onClick?: () => void }) {
+  const [hovered, setHovered] = useState(false)
+  const mx = (link.x0 + link.x1) / 2
+  const path = `
+    M ${link.x0} ${link.y0}
+    C ${mx} ${link.y0}, ${mx} ${link.y1}, ${link.x1} ${link.y1}
+    L ${link.x1} ${link.y1 + link.w1}
+    C ${mx} ${link.y1 + link.w1}, ${mx} ${link.y0 + link.w0}, ${link.x0} ${link.y0 + link.w0}
+    Z
+  `
+  return (
+    <path
+      d={path}
+      fill={link.color}
+      fillOpacity={hovered ? 0.6 : 0.35}
+      stroke={link.color}
+      strokeOpacity={hovered ? 0.9 : 0.6}
+      strokeWidth={0.5}
+      style={{ cursor: onClick ? 'pointer' : 'default' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={onClick}
+    />
+  )
+}
+
+function SankeyTab({ talkers, onDrillDown }: { talkers: TopTalker[]; onDrillDown: (t: TopTalker) => void }) {
+  const [selectedFlow, setSelectedFlow] = useState<TopTalker | null>(null)
+
+  if (!talkers.length) {
+    return <div className="text-center py-16 text-white">No flow data available</div>
+  }
+
+  const W = 860
+  const H = 520
+
+  let layout
+  try {
+    layout = buildSankeyLayout(talkers, W, H)
+  } catch {
+    return <div className="text-center py-16 text-red-400">Error building Sankey layout</div>
+  }
+
+  const { srcNodes, portNodes, dstNodes, links1, links2, COL_W } = layout
+
+  const NodeGroup = ({ nodes }: { nodes: SankeyNode[] }) => (
+    <g>
+      {nodes.map(n => (
+        <g key={n.key}>
+          <rect x={n.x} y={n.y} width={COL_W} height={n.h}
+            rx={3} fill="#3b82f6" fillOpacity={0.8} />
+          <text
+            x={n.x + COL_W / 2} y={n.y + n.h / 2}
+            textAnchor="middle" dominantBaseline="middle"
+            fontSize={9} fill="white" fontFamily="monospace"
+          >
+            {n.key.length > 14 ? n.key.slice(0, 13) + '…' : n.key}
+          </text>
+        </g>
+      ))}
+    </g>
+  )
+
+  return (
+    <div>
+      {/* Drill-down panel */}
+      {selectedFlow && (
+        <div className="mb-4 p-3 bg-gray-800 border border-blue-500/50 rounded-xl flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2 text-sm flex-wrap flex-1 min-w-0">
+            <span className="font-mono text-blue-300">{selectedFlow.src_ip}</span>
+            <span className="text-white">→</span>
+            <span className="bg-gray-700 text-white px-2 py-0.5 rounded text-xs font-mono">
+              {protoLabel(selectedFlow.protocol)}:{selectedFlow.dst_port}
+            </span>
+            <span className="text-white">→</span>
+            <span className="font-mono text-purple-300">{selectedFlow.dst_ip}</span>
+            <span className="text-white text-xs ml-2">{fmtBytes(selectedFlow.bytes)} · {selectedFlow.flow_count.toLocaleString()} flows</span>
+          </div>
+          <button
+            onClick={() => { onDrillDown(selectedFlow); setSelectedFlow(null) }}
+            className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
+          >
+            View in Top Talkers ↗
+          </button>
+          <button
+            onClick={() => setSelectedFlow(null)}
+            className="text-white hover:text-white text-sm px-1"
+          >
+            ✕
+          </button>
+        </div>
       )}
+
+      {(() => {
+        const usedColors = new Set([...links1, ...links2].map(l => l.color))
+        const legendItems = [
+          ...SANKEY_PORT_GROUPS.filter(g => usedColors.has(g.color)),
+          ...(usedColors.has(SANKEY_UDP_COLOR)   ? [{ label: 'UDP',   color: SANKEY_UDP_COLOR }]   : []),
+          ...(usedColors.has(SANKEY_OTHER_COLOR) ? [{ label: 'Other', color: SANKEY_OTHER_COLOR }] : []),
+        ]
+        return (
+          <div className="flex items-center gap-4 mb-3 text-xs text-white flex-wrap">
+            <span className="font-medium text-white">src IP → dst port → dst IP · band width = bytes · click a band to drill down</span>
+            {legendItems.map(({ label, color }) => (
+              <span key={label} className="flex items-center gap-1">
+                <span className="w-3 h-2 rounded-sm" style={{ background: color }} />
+                <span>{label}</span>
+              </span>
+            ))}
+          </div>
+        )
+      })()}
+
+      <div className="overflow-x-auto">
+        <svg width="100%" viewBox={`0 0 ${W} ${H + 24}`} xmlns="http://www.w3.org/2000/svg">
+          <text x={COL_W / 2} y={12} textAnchor="middle" fontSize={10} fill="#9ca3af">Source IP</text>
+          <text x={W / 2} y={12} textAnchor="middle" fontSize={10} fill="#9ca3af">Dst Port</text>
+          <text x={W - COL_W / 2} y={12} textAnchor="middle" fontSize={10} fill="#9ca3af">Dest IP</text>
+
+          <g transform="translate(0,20)">
+            {links1.map((l, i) => (
+              <SankeyBand key={i} link={l}
+                onClick={l.flow ? () => setSelectedFlow(l.flow!) : undefined} />
+            ))}
+            {links2.map((l, i) => (
+              <SankeyBand key={i} link={l}
+                onClick={l.flow ? () => setSelectedFlow(l.flow!) : undefined} />
+            ))}
+            <NodeGroup nodes={srcNodes} />
+            <NodeGroup nodes={portNodes} />
+            <NodeGroup nodes={dstNodes} />
+          </g>
+        </svg>
+      </div>
     </div>
   )
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
+
 export default function DeviceView() {
   const { ip } = useParams<{ ip?: string }>()
   const navigate = useNavigate()
@@ -163,7 +612,13 @@ export default function DeviceView() {
   const [series, setSeries]     = useState<TimeSeriesPoint[]>([])
   const [talkers, setTalkers]   = useState<TopTalker[]>([])
   const [loading, setLoading]   = useState(false)
-  const [activeTab, setActiveTab] = useState<'chart' | 'talkers' | 'proto'>('chart')
+  const [activeTab, setActiveTab] = useState<'chart' | 'sankey' | 'talkers' | 'ports'>('chart')
+  const [drillTarget, setDrillTarget] = useState<string | null>(null)
+
+  const handleSankeyDrill = useCallback((t: TopTalker) => {
+    setDrillTarget(`${t.src_ip}-${t.dst_ip}-${t.dst_port}-${t.protocol}`)
+    setActiveTab('talkers')
+  }, [])
 
   useEffect(() => {
     api.getDeviceSummaries().then(d => {
@@ -193,10 +648,6 @@ export default function DeviceView() {
     if (selected) navigate(`/devices/${encodeURIComponent(selected)}`, { replace: true })
   }, [selected])
 
-  const handleDrillDown = (src: string, dst: string) => {
-    navigate(`/explorer?src_ip=${src}&dst_ip=${dst}&window=${window}`)
-  }
-
   const device     = devices.find(d => d.sampler_ip === selected)
   const totalBytes = talkers.reduce((s, t) => s + t.bytes, 0)
   const windowSec  = WINDOW_SECS[window]
@@ -206,8 +657,6 @@ export default function DeviceView() {
     packets: p.packets,
     flows: p.flow_count,
   }))
-  const protoDist = buildProtoDist(talkers)
-
   return (
     <div className="space-y-5">
       {/* Header row */}
@@ -225,8 +674,8 @@ export default function DeviceView() {
         </select>
 
         {device && (
-          <div className="flex items-center gap-3 text-sm text-gray-400">
-            <span className="font-mono text-gray-500">{device.sampler_ip}</span>
+          <div className="flex items-center gap-3 text-sm text-white">
+            <span className="font-mono text-white">{device.sampler_ip}</span>
             <span>·</span>
             <span>{fmtBytes(device.bytes_last_hour)}/hr</span>
             <span>·</span>
@@ -240,7 +689,7 @@ export default function DeviceView() {
               key={w}
               onClick={() => setWindow(w)}
               className={`px-3 py-1 rounded text-sm font-medium transition-colors
-                ${window === w ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                ${window === w ? 'bg-blue-600 text-white' : 'text-white hover:text-white'}`}
             >
               {w}
             </button>
@@ -250,7 +699,7 @@ export default function DeviceView() {
         <button
           onClick={load}
           disabled={loading}
-          className="text-gray-400 hover:text-white border border-gray-700 rounded-lg px-3 py-1.5 text-sm transition-colors disabled:opacity-50"
+          className="text-white hover:text-white border border-gray-700 rounded-lg px-3 py-1.5 text-sm transition-colors disabled:opacity-50"
         >
           ↻
         </button>
@@ -265,7 +714,7 @@ export default function DeviceView() {
           { label: 'Total Flows',    value: talkers.reduce((s, t) => s + t.flow_count, 0).toLocaleString() },
         ].map(stat => (
           <div key={stat.label} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <p className="text-xs text-gray-500 mb-1">{stat.label}</p>
+            <p className="text-xs text-white mb-1">{stat.label}</p>
             <p className="text-lg font-semibold text-white">{stat.value}</p>
           </div>
         ))}
@@ -274,16 +723,16 @@ export default function DeviceView() {
       {/* Tabs panel */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
         <div className="flex border-b border-gray-800">
-          {(['chart', 'talkers', 'proto'] as const).map(tab => (
+          {(['chart', 'sankey', 'talkers', 'ports'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={`px-5 py-3 text-sm font-medium transition-colors
                 ${activeTab === tab
                   ? 'text-blue-400 border-b-2 border-blue-500 -mb-px'
-                  : 'text-gray-400 hover:text-white'}`}
+                  : 'text-white hover:text-white'}`}
             >
-              {tab === 'chart' ? 'Traffic Chart' : tab === 'talkers' ? 'Top Talkers' : 'Protocol Mix'}
+              {tab === 'chart' ? 'Traffic Chart' : tab === 'sankey' ? 'Flow Map' : tab === 'talkers' ? 'Top Talkers' : 'Ports'}
             </button>
           ))}
           {loading && (
@@ -297,7 +746,7 @@ export default function DeviceView() {
           {activeTab === 'chart' && (
             <div className="space-y-6">
               <div>
-                <p className="text-xs text-gray-500 mb-3">Bytes per bucket</p>
+                <p className="text-xs text-white mb-3">Bytes per bucket</p>
                 <ResponsiveContainer width="100%" height={260}>
                   <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
                     <defs>
@@ -315,7 +764,7 @@ export default function DeviceView() {
                 </ResponsiveContainer>
               </div>
               <div>
-                <p className="text-xs text-gray-500 mb-3">Packets per bucket</p>
+                <p className="text-xs text-white mb-3">Packets per bucket</p>
                 <ResponsiveContainer width="100%" height={160}>
                   <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
                     <defs>
@@ -336,47 +785,16 @@ export default function DeviceView() {
           )}
 
           {activeTab === 'talkers' && (
-            <TopTalkersTable talkers={talkers} totalBytes={totalBytes} onDrillDown={handleDrillDown} />
+            <TopTalkersTable talkers={talkers} totalBytes={totalBytes} window={window}
+              externalExpanded={drillTarget} onExternalExpandedConsumed={() => setDrillTarget(null)} />
           )}
 
-          {activeTab === 'proto' && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div>
-                <p className="text-xs text-gray-500 mb-3">Bytes by protocol</p>
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={protoDist} layout="vertical" margin={{ left: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" horizontal={false} />
-                    <XAxis type="number" tickFormatter={v => fmtBytes(v)} tick={{ fill: '#6b7280', fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <YAxis type="category" dataKey="name" tick={{ fill: '#9ca3af', fontSize: 12 }} tickLine={false} axisLine={false} width={56} />
-                    <Tooltip formatter={(v: number) => fmtBytes(v)} contentStyle={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 8 }} labelStyle={{ color: '#9ca3af' }} />
-                    <Bar dataKey="bytes" fill="#3b82f6" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 mb-3">Protocol breakdown</p>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-800">
-                      <th className="py-2 text-left text-xs text-gray-400">Protocol</th>
-                      <th className="py-2 text-right text-xs text-gray-400">Bytes</th>
-                      <th className="py-2 text-right text-xs text-gray-400">Share</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-800/50">
-                    {protoDist.map(p => (
-                      <tr key={p.name}>
-                        <td className="py-2.5 text-white font-medium">{p.name}</td>
-                        <td className="py-2.5 text-right text-gray-300">{fmtBytes(p.bytes)}</td>
-                        <td className="py-2.5 text-right text-gray-400">
-                          {totalBytes > 0 ? ((p.bytes / totalBytes) * 100).toFixed(1) + '%' : '-'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+          {activeTab === 'ports' && (
+            <PortsTabContent sampler_ip={selected} window={window} />
+          )}
+
+          {activeTab === 'sankey' && (
+            <SankeyTab talkers={talkers} onDrillDown={handleSankeyDrill} />
           )}
         </div>
       </div>

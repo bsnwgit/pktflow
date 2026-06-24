@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Optional
 
-from app.models.flow import FlowRecord, TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge
+from app.models.flow import FlowRecord, TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge, PortStat
 
 
 class StorageBackend(ABC):
@@ -46,6 +46,9 @@ class StorageBackend(ABC):
         start: datetime,
         end: datetime,
         bucket_seconds: int = 60,
+        dst_port: Optional[int] = None,
+        protocol: Optional[int] = None,
+        site: Optional[str] = None,
     ) -> list[TimeSeriesPoint]:
         """Traffic volume bucketed by time for charting."""
 
@@ -87,3 +90,49 @@ class StorageBackend(ABC):
         limit: int = 200,
     ) -> tuple[list[TopologyNode], list[TopologyEdge]]:
         """Return (nodes, edges) for the network topology graph."""
+
+    @abstractmethod
+    async def purge_sampler(self, sampler_ip: str) -> None:
+        """Delete all flow records for a given sampler IP (used to clean stale dashboard cards)."""
+
+    @abstractmethod
+    async def get_top_ports(
+        self,
+        start: datetime,
+        end: datetime,
+        sampler_ip: Optional[str] = None,
+        site: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[PortStat]:
+        """Top destination ports ranked by byte volume."""
+
+    @abstractmethod
+    async def get_metric_in_window(
+        self,
+        metric: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> float:
+        """Sum of metric ('bytes', 'packets', or 'flows') over the last window_min minutes."""
+
+    @abstractmethod
+    async def get_metric_baseline(
+        self,
+        metric: str,
+        baseline_days: int,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> float:
+        """Average per-window-min value of metric over the last baseline_days days."""
+
+    @abstractmethod
+    async def get_port_flow_count(
+        self,
+        port: int,
+        protocol: Optional[int],
+        direction: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> int:
+        """Count of flows matching port/protocol/direction in the last window_min minutes.
+        direction: 'src', 'dst', or 'any'."""

@@ -160,3 +160,14 @@ class TopologyEdge(BaseModel):
     flows: int = 0
     protocol: int = 0
     dst_port: int = 0
+
+
+class PortStat(BaseModel):
+    port: int
+    protocol: int
+    proto_name: str
+    service_name: str              # well-known service name or ""
+    bytes: int
+    packets: int
+    flow_count: int
+    pct_bytes: float

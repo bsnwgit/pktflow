@@ -80,21 +80,162 @@ class AlertEngine:
             last_seen = await get_storage().get_sampler_last_seen()
             now = datetime.now(tz=timezone.utc)
 
+            # Fire for any sampler that has gone silent
+            gapped_samplers: set[str] = set()
             for sampler_ip, ts in last_seen.items():
                 if ts.tzinfo is None:
                     ts = ts.replace(tzinfo=timezone.utc)
                 if (now - ts) > timedelta(minutes=silence_min):
+                    gapped_samplers.add(sampler_ip)
                     fired_message = f"No flows from {sampler_ip} for >{silence_min} minutes (last seen: {ts.isoformat()})"
                     details = {"sampler_ip": sampler_ip, "last_seen": ts.isoformat()}
                     await self._fire(db, rule, fired_message, details)
+
+            # Auto-resolve open events whose sampler has recovered
+            await self._auto_resolve_data_gap(db, rule, gapped_samplers, last_seen, silence_min)
             return  # handled per-sampler above
 
         elif rule_type == "new_host":
             return  # handled via notify_unknown_sampler()
 
-        # Additional rule types (threshold, rate_spike, port_protocol) — Phase 4
-        # Placeholder: skip for now
-        return
+        elif rule_type == "threshold":
+            await self._evaluate_threshold(db, rule)
+
+        elif rule_type == "rate_spike":
+            await self._evaluate_rate_spike(db, rule)
+
+        elif rule_type == "port_protocol":
+            await self._evaluate_port_protocol(db, rule)
+
+    async def _evaluate_threshold(self, db: aiosqlite.Connection, rule: dict) -> None:
+        from app.storage.factory import get_storage
+        conds = rule["conditions"]
+        metric = conds.get("metric", "bytes")
+        operator = conds.get("operator", "gt")
+        threshold = float(conds.get("value", 0))
+        sampler_ip = conds.get("sampler_ip") or None
+        window_min = rule.get("time_window_min", 5)
+
+        current = await get_storage().get_metric_in_window(metric, window_min, sampler_ip)
+        ops = {"gt": current > threshold, "gte": current >= threshold,
+               "lt": current < threshold, "lte": current <= threshold}
+        if ops.get(operator, False):
+            op_sym = {"gt": ">", "gte": "≥", "lt": "<", "lte": "≤"}.get(operator, operator)
+            sampler_str = f" from {sampler_ip}" if sampler_ip else ""
+            await self._fire(db, rule, (
+                f"Threshold breached{sampler_str}: {metric} in last {window_min}m "
+                f"= {current:,.0f} {op_sym} {threshold:,.0f}"
+            ), {"metric": metric, "current": current, "threshold": threshold,
+                "operator": operator, "sampler_ip": sampler_ip or "all"})
+        else:
+            await self._auto_resolve(db, rule, f"{metric} back within threshold (current: {current:,.0f})")
+
+    async def _evaluate_rate_spike(self, db: aiosqlite.Connection, rule: dict) -> None:
+        from app.storage.factory import get_storage
+        conds = rule["conditions"]
+        metric = conds.get("metric", "bytes")
+        multiplier = float(conds.get("multiplier", 3.0))
+        baseline_days = int(conds.get("baseline_days", 7))
+        sampler_ip = conds.get("sampler_ip") or None
+        window_min = rule.get("time_window_min", 5)
+
+        storage = get_storage()
+        current = await storage.get_metric_in_window(metric, window_min, sampler_ip)
+        baseline = await storage.get_metric_baseline(metric, baseline_days, window_min, sampler_ip)
+
+        if baseline > 0 and current >= baseline * multiplier:
+            ratio = current / baseline
+            sampler_str = f" from {sampler_ip}" if sampler_ip else ""
+            await self._fire(db, rule, (
+                f"Rate spike detected{sampler_str}: {metric} in last {window_min}m "
+                f"= {current:,.0f} ({ratio:.1f}× the {baseline_days}-day baseline of {baseline:,.0f})"
+            ), {"metric": metric, "current": current, "baseline": baseline,
+                "ratio": round(ratio, 2), "multiplier": multiplier,
+                "sampler_ip": sampler_ip or "all"})
+        else:
+            await self._auto_resolve(db, rule, f"{metric} rate back to normal (current: {current:,.0f}, baseline: {baseline:,.0f})")
+
+    async def _evaluate_port_protocol(self, db: aiosqlite.Connection, rule: dict) -> None:
+        from app.storage.factory import get_storage
+        conds = rule["conditions"]
+        port = int(conds.get("port", 0))
+        if port <= 0:
+            log.warning(f"port_protocol rule '{rule['name']}' has no valid port configured")
+            return
+        proto_str = conds.get("protocol", "any")
+        direction = conds.get("direction", "any")
+        sampler_ip = conds.get("sampler_ip") or None
+        window_min = rule.get("time_window_min", 5)
+
+        _PROTO_INT = {"TCP": 6, "UDP": 17}
+        protocol_int = _PROTO_INT.get(proto_str) if proto_str != "any" else None
+
+        count = await get_storage().get_port_flow_count(port, protocol_int, direction, window_min, sampler_ip)
+        if count > 0:
+            dir_str = {"src": "src port", "dst": "dst port", "any": "port"}.get(direction, "port")
+            proto_label = proto_str if proto_str != "any" else "any protocol"
+            sampler_str = f" on {sampler_ip}" if sampler_ip else ""
+            await self._fire(db, rule, (
+                f"Traffic on {dir_str} {port}/{proto_label}{sampler_str}: "
+                f"{count} flows in last {window_min}m"
+            ), {"port": port, "protocol": proto_str, "direction": direction,
+                "flow_count": count, "sampler_ip": sampler_ip or "all"})
+        else:
+            await self._auto_resolve(db, rule, f"No traffic on port {port}/{proto_str} in last {window_min}m")
+
+    async def _auto_resolve(self, db: aiosqlite.Connection, rule: dict, reason: str) -> None:
+        """Ack all open (unacknowledged) events for this rule when condition has cleared."""
+        async with db.execute(
+            "SELECT id FROM alert_events WHERE rule_id = ? AND acked_at IS NULL",
+            (rule["id"],),
+        ) as cur:
+            open_ids = [r[0] for r in await cur.fetchall()]
+        if not open_ids:
+            return
+        for eid in open_ids:
+            await db.execute(
+                "UPDATE alert_events SET acked_at = datetime('now') WHERE id = ?", (eid,)
+            )
+        await db.commit()
+        log.info(
+            f"Auto-resolved {len(open_ids)} event(s) for rule '{rule['name']}': {reason}"
+        )
+
+    async def _auto_resolve_data_gap(
+        self,
+        db: aiosqlite.Connection,
+        rule: dict,
+        gapped_samplers: set,
+        last_seen: dict,
+        silence_min: int,
+    ) -> None:
+        """Auto-resolve data_gap events whose sampler has recovered."""
+        async with db.execute(
+            "SELECT id, details FROM alert_events WHERE rule_id = ? AND acked_at IS NULL",
+            (rule["id"],),
+        ) as cur:
+            open_events = [(r[0], json.loads(r[1])) for r in await cur.fetchall()]
+        if not open_events:
+            return
+        now = datetime.now(tz=timezone.utc)
+        for eid, details in open_events:
+            sampler_ip = details.get("sampler_ip", "")
+            if sampler_ip in gapped_samplers:
+                continue  # still gapped — don't resolve
+            ts = last_seen.get(sampler_ip)
+            if ts is None:
+                continue  # no data at all — can't confirm recovery
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            if (now - ts) <= timedelta(minutes=silence_min):
+                await db.execute(
+                    "UPDATE alert_events SET acked_at = datetime('now') WHERE id = ?", (eid,)
+                )
+                log.info(
+                    f"Auto-resolved data_gap event {eid} for rule '{rule['name']}': "
+                    f"{sampler_ip} recovered (last seen {ts.isoformat()})"
+                )
+        await db.commit()
 
     async def _fire(self, db: aiosqlite.Connection, rule: dict, message: str, details: dict) -> None:
         """Record an alert event and dispatch notifications, respecting cooldown."""

@@ -1,0 +1,98 @@
+
+<h2 class="sr-only">pktFlow incomplete features todo list</h2>
+<style>
+  .todo-wrap { padding: 1rem 0; font-size: 14px; }
+  .section { margin-bottom: 1.5rem; }
+  .section-title { font-size: 13px; font-weight: 500; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 8px; }
+  .item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 12px; border-radius: var(--border-radius-md); border: 0.5px solid var(--color-border-tertiary); background: var(--color-background-primary); margin-bottom: 6px; }
+  .item:hover { border-color: var(--color-border-secondary); }
+  .item.done { opacity: 0.45; }
+  .item.done .label { text-decoration: line-through; color: var(--color-text-secondary); }
+  .badge { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
+  .badge-be { background: var(--color-background-danger); color: var(--color-text-danger); }
+  .badge-fe { background: var(--color-background-info); color: var(--color-text-info); }
+  .badge-both { background: var(--color-background-warning); color: var(--color-text-warning); }
+  .badge-untested { background: var(--color-background-secondary); color: var(--color-text-secondary); }
+  .badge-done { background: var(--color-background-success); color: var(--color-text-success); }
+  .label { flex: 1; color: var(--color-text-primary); line-height: 1.4; }
+  .label small { display: block; font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; }
+  .filter-row { display: flex; gap: 8px; margin-bottom: 1rem; flex-wrap: wrap; }
+  button.filter-btn { font-size: 12px; padding: 4px 12px; cursor: pointer; border-radius: 20px; border: 0.5px solid var(--color-border-secondary); background: transparent; color: var(--color-text-secondary); }
+  button.filter-btn.active { background: var(--color-background-secondary); color: var(--color-text-primary); border-color: var(--color-border-primary); }
+</style>
+<div class="todo-wrap">
+  <div class="filter-row">
+    <button class="filter-btn active" onclick="filter('all',this)">All</button>
+    <button class="filter-btn" onclick="filter('be',this)">Backend only</button>
+    <button class="filter-btn" onclick="filter('fe',this)">Frontend only</button>
+    <button class="filter-btn" onclick="filter('both',this)">Both needed</button>
+    <button class="filter-btn" onclick="filter('untested',this)">Written, untested</button>
+  </div>
+  <div id="list"></div>
+</div>
+<script>
+const items = [
+  { cat: "New pages", label: "Ports tab in Device View", note: "Port inventory, protocol mix, top ports by volume, traffic over time, inline flow drill-down — embedded as a tab in Device View", tag: "fe", done: true },
+  { cat: "New pages", label: "Sankey flow diagram", note: "src_ip → dst_port → dst_ip alluvial chart using D3-sankey; goes on Device View page", tag: "both", done: true },
+  { cat: "New pages", label: "Pie charts above Device View top talkers table", note: "Protocol mix + top src/dst IP pie charts above the top talkers tab", tag: "fe", done: true },
+  { cat: "Alert engine", label: "threshold / rate_spike / port_protocol alerts", note: "Engine has placeholder return — nothing executes", tag: "be" },
+  { cat: "Alert engine", label: "Per-rule-type condition builder UI", note: "Alerts.tsx sends conditions: {} for all types", tag: "both" },
+  { cat: "Auth", label: "Okta OIDC authentication", note: "app/auth/okta.py does not exist; no callback route", tag: "be" },
+  { cat: "Infrastructure", label: "SSL/TLS certificate", note: "pktFlow runs on plain HTTP; add SSL cert for HTTPS + WSS support", tag: "be", done: true },
+  { cat: "Ingest", label: "Direct UDP NetFlow ingest", note: "app/ingest/udp_listener.py does not exist", tag: "be" },
+  { cat: "Notifications", label: "Slack / Email / PagerDuty / Webhook dispatch", note: "Written but never tested; deps unverified in venv", tag: "untested" },
+  { cat: "Notifications", label: '"Send Test" notification endpoints', note: "/api/settings/test-notification does not exist", tag: "be" },
+  { cat: "Storage", label: "Hourly/daily aggregate rollup job", note: "Tables may exist; no scheduled job populates them", tag: "be" },
+  { cat: "Storage", label: "Manual retention cleanup endpoint", note: "UI button exists; no backend endpoint", tag: "be" },
+  { cat: "AI", label: "AI assistant production verification", note: "anthropic pkg + API key not verified in venv on O2", tag: "untested" },
+  { cat: "Settings", label: '"Test Connection" for ClickHouse', note: "UI button exists; no endpoint", tag: "be" },
+  { cat: "Devices", label: "Device import from CSV", note: "No UI and no backend", tag: "both" },
+  { cat: "Tables", label: "Column sorting on all tables", note: "Click-to-sort on every table column across all pages — Flow Explorer, Alerts, Users, Devices, Top Talkers, etc.", tag: "fe" },
+  { cat: "Devices", label: "Unknown samplers review UI", note: "new_host alert fires; no UI surface to act on them", tag: "fe" },
+  { cat: "Dashboard", label: "WebSocket live updates", note: "Dashboard polls REST; no WebSocket routes exist", tag: "both" },
+  { cat: "Alerts", label: "Auto-resolve self-corrected alerts", note: "Threshold/rate_spike/port_protocol/data_gap alerts should auto-ack when condition clears on next engine cycle", tag: "be" },
+  { cat: "Alerts", label: "Alert event + notification_log auto-cleanup", note: "Both tables accumulate indefinitely; no purge job", tag: "be" },
+  { cat: "Settings", label: "Settings page auto-refresh", note: "Loads once on mount; stale if changed elsewhere", tag: "fe" },
+  { cat: "Topology", label: "Network layout export (PNG/SVG/JSON/DOT/Draw.io/Lucidchart)", note: "Export button live — SVG, PNG, JSON, Graphviz DOT, Draw.io, and Lucidchart (requires API token in Settings → Integrations)", tag: "both" },
+  { cat: "Topology", label: "Topology node click → flow drill-down", note: "Nodes not interactive; click should filter to that IP", tag: "both" },
+  { cat: "New pages", label: "Flow Map (Sankey) color by protocol/port", note: "Bands are all one color — differentiate by protocol or port group (HTTP, DNS, HTTPS, etc.) with a color legend", tag: "fe", done: true },
+  { cat: "Topology", label: "Topology device dropdown — show name + IP", note: "Sampler/device selector should display both device name and IP address, not just IP", tag: "fe" },
+  { cat: "Topology", label: "Topology network cluster labeling", note: "Group nodes into labeled subnet/cluster boxes (e.g. by /24 or site) to show network structure visually", tag: "fe" },
+  { cat: "Navigation", label: "Make Analytics the main dashboard", note: "Replace the current Dashboard page with Analytics as the default landing page; update nav and default route. Remove protocol card. Place network map and traffic flow panels side by side.", tag: "fe" },
+  { cat: "Navigation", label: "Move Devices to Settings → Devices tab", note: "Remove Devices from the left nav; add as a tab inside Settings page alongside General, Storage, etc.", tag: "fe" },
+  { cat: "Integrations", label: "TraceCat integration", note: "Interface pktFlow with TraceCat SOAR — send alert events as TraceCat cases/workflows, enable automated response actions triggered by pktFlow alert rules", tag: "both" },
+  { cat: "New pages", label: "Protocol expansion plan", note: "Expand protocol coverage — identify gaps in protocol decoding, add support for additional NetFlow fields, improve protocol labeling across dashboard views", tag: "both", done: true },
+  { cat: "New pages", label: "Flow Map coloring expansion", note: "Expand Sankey band color scheme — more service groups, custom port ranges, ICMP handling, user-configurable color assignments", tag: "fe" },
+];
+
+const tagLabel = { be: "backend", fe: "frontend", both: "be + fe", untested: "untested" };
+const tagClass = { be: "badge-be", fe: "badge-fe", both: "badge-both", untested: "badge-untested" };
+
+let currentTag = "all";
+
+function filter(tag, el) {
+  currentTag = tag;
+  document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+  el.classList.add("active");
+  render();
+}
+
+function render() {
+  const visible = currentTag === "all" ? items : items.filter(i => i.tag === currentTag && !i.done);
+  const groups = {};
+  visible.forEach(i => { (groups[i.cat] = groups[i.cat] || []).push(i); });
+
+  let html = Object.entries(groups).map(([cat, its]) =>
+    `<div class="section"><div class="section-title">${cat}</div>${its.map(i =>
+      `<div class="item${i.done ? ' done' : ''}">
+        <span class="badge ${i.done ? 'badge-done' : tagClass[i.tag]}">${i.done ? 'done' : tagLabel[i.tag]}</span>
+        <span class="label">${i.label}<small>${i.note}</small></span>
+        ${i.done ? '<span style="font-size:14px;color:var(--color-text-success);">✓</span>' : `<button style="font-size:12px;padding:2px 8px;cursor:pointer;border-radius:20px;border:0.5px solid var(--color-border-secondary);background:transparent;color:var(--color-text-secondary);" onclick="sendPrompt('Let\\'s work on: ${i.label.replace(/'/g,"\\'")}')">work on this ↗</button>`}
+      </div>`).join("")}</div>`
+  ).join("") || `<p style="color:var(--color-text-secondary);font-size:13px;">No items in this category.</p>`;
+
+  document.getElementById("list").innerHTML = html;
+}
+
+render();
+</script>

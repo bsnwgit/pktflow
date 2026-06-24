@@ -1,17 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api, downloadExport, FlowRecord, DeviceSummary } from '../api/client'
+import { protoLabel } from '../utils/protocols'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const PROTO_NAMES: Record<number, string> = {
-  1: 'ICMP', 6: 'TCP', 17: 'UDP', 41: 'IPv6',
-  47: 'GRE', 50: 'ESP', 58: 'ICMPv6', 89: 'OSPF',
-}
-function protoLabel(n: number) { return PROTO_NAMES[n] ?? `${n}` }
-
 const TCP_FLAGS: Array<[number, string, string]> = [
-  [0x01, 'FIN', 'text-gray-400'],
+  [0x01, 'FIN', 'text-white'],
   [0x02, 'SYN', 'text-green-400'],
   [0x04, 'RST', 'text-red-400'],
   [0x08, 'PSH', 'text-yellow-400'],
@@ -52,7 +47,7 @@ function FlowDetail({ flow, onClose, onExploreIp }: {
     label: string; value?: string | number; mono?: boolean; children?: React.ReactNode
   }) => (
     <div className="flex justify-between items-start py-2 border-b border-gray-800 last:border-0">
-      <span className="text-xs text-gray-500 shrink-0 w-36">{label}</span>
+      <span className="text-xs text-white shrink-0 w-36">{label}</span>
       {children ?? (
         <span className={`text-sm text-white text-right ${mono ? 'font-mono' : ''}`}>{value ?? '—'}</span>
       )}
@@ -66,25 +61,25 @@ function FlowDetail({ flow, onClose, onExploreIp }: {
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
           <div>
             <h2 className="font-semibold text-white">Flow Detail</h2>
-            <p className="text-xs text-gray-500 mt-0.5">{fmtTime(flow.timestamp)}</p>
+            <p className="text-xs text-white mt-0.5">{fmtTime(flow.timestamp)}</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-white text-lg leading-none">✕</button>
+          <button onClick={onClose} className="text-white hover:text-white text-lg leading-none">✕</button>
         </div>
 
         <div className="px-5 py-4 space-y-1">
           {/* Collector */}
-          <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">Collector</p>
+          <p className="text-xs font-medium text-white uppercase tracking-wider mb-2">Collector</p>
           <Field label="Sampler" value={`${flow.sampler_name || flow.sampler_ip}`} />
           <Field label="Sampler IP" value={flow.sampler_ip} mono />
 
           {/* Network */}
-          <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mt-4 mb-2">Network</p>
+          <p className="text-xs font-medium text-white uppercase tracking-wider mt-4 mb-2">Network</p>
           <Field label="Source IP">
             <div className="flex items-center gap-2">
               <span className="font-mono text-blue-300 text-sm">{flow.src_ip}</span>
               <button
                 onClick={() => onExploreIp(flow.src_ip)}
-                className="text-xs text-gray-500 hover:text-blue-400 transition-colors"
+                className="text-xs text-white hover:text-blue-400 transition-colors"
                 title="Explore all flows from this IP"
               >
                 filter ↗
@@ -97,7 +92,7 @@ function FlowDetail({ flow, onClose, onExploreIp }: {
               <span className="font-mono text-purple-300 text-sm">{flow.dst_ip}</span>
               <button
                 onClick={() => onExploreIp(flow.dst_ip)}
-                className="text-xs text-gray-500 hover:text-blue-400 transition-colors"
+                className="text-xs text-white hover:text-blue-400 transition-colors"
                 title="Explore all flows to this IP"
               >
                 filter ↗
@@ -112,7 +107,7 @@ function FlowDetail({ flow, onClose, onExploreIp }: {
           </Field>
 
           {/* Volume */}
-          <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mt-4 mb-2">Volume</p>
+          <p className="text-xs font-medium text-white uppercase tracking-wider mt-4 mb-2">Volume</p>
           <Field label="Bytes" value={`${fmtBytes(flow.bytes)} (${flow.bytes.toLocaleString()} B)`} />
           <Field label="Packets" value={flow.packets.toLocaleString()} />
           <Field label="Duration" value={fmtDuration(flow.duration_ms)} />
@@ -126,7 +121,7 @@ function FlowDetail({ flow, onClose, onExploreIp }: {
           {/* TCP Flags (only for TCP) */}
           {flow.protocol === 6 && (
             <>
-              <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mt-4 mb-2">TCP Flags</p>
+              <p className="text-xs font-medium text-white uppercase tracking-wider mt-4 mb-2">TCP Flags</p>
               <div className="flex gap-2 py-2">
                 {TCP_FLAGS.map(([bit, name, cls]) => (
                   <span
@@ -134,7 +129,7 @@ function FlowDetail({ flow, onClose, onExploreIp }: {
                     className={`text-xs px-2 py-0.5 rounded font-mono border
                       ${((flow as any).tcp_flags ?? 0) & bit
                         ? `${cls} border-current bg-current/10`
-                        : 'text-gray-700 border-gray-800'}`}
+                        : 'text-white border-gray-800'}`}
                   >
                     {name}
                   </span>
@@ -267,7 +262,7 @@ export default function FlowExplorer() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-white">Flow Explorer</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Search and inspect individual flow records</p>
+          <p className="text-sm text-white mt-0.5">Search and inspect individual flow records</p>
         </div>
       </div>
 
@@ -282,7 +277,7 @@ export default function FlowExplorer() {
             { key: 'protocol', label: 'Protocol',   placeholder: '6' },
           ].map(({ key, label, placeholder }) => (
             <div key={key}>
-              <label className="block text-xs text-gray-500 mb-1">{label}</label>
+              <label className="block text-xs text-white mb-1">{label}</label>
               <input
                 value={(filters as any)[key]}
                 onChange={set(key as keyof Filters)}
@@ -295,7 +290,7 @@ export default function FlowExplorer() {
 
           {/* Sampler selector */}
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Sampler</label>
+            <label className="block text-xs text-white mb-1">Sampler</label>
             <select
               value={filters.sampler_ip}
               onChange={set('sampler_ip')}
@@ -312,7 +307,7 @@ export default function FlowExplorer() {
 
           {/* Window */}
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Window</label>
+            <label className="block text-xs text-white mb-1">Window</label>
             <select
               value={filters.window}
               onChange={set('window')}
@@ -335,7 +330,7 @@ export default function FlowExplorer() {
           </button>
           <button
             onClick={() => { setFilters(EMPTY_FILTERS); setFlows([]) }}
-            className="text-gray-400 hover:text-white text-sm border border-gray-700 rounded-lg px-4 py-2 transition-colors"
+            className="text-white hover:text-white text-sm border border-gray-700 rounded-lg px-4 py-2 transition-colors"
           >
             Clear
           </button>
@@ -343,12 +338,12 @@ export default function FlowExplorer() {
           {flows.length > 0 && (
             <div className="ml-auto flex items-center gap-2">
               {exportMsg && <span className="text-xs text-green-400">{exportMsg}</span>}
-              <span className="text-xs text-gray-500 mr-1">Export:</span>
+              <span className="text-xs text-white mr-1">Export:</span>
               {(['csv', 'json', 'pcap'] as const).map(fmt => (
                 <button
                   key={fmt}
                   onClick={() => handleExport(fmt)}
-                  className="text-xs border border-gray-700 hover:border-gray-500 text-gray-400 hover:text-white rounded px-2.5 py-1 transition-colors uppercase"
+                  className="text-xs border border-gray-700 hover:border-gray-500 text-white hover:text-white rounded px-2.5 py-1 transition-colors uppercase"
                 >
                   {fmt}
                 </button>
@@ -362,9 +357,9 @@ export default function FlowExplorer() {
       {flows.length > 0 && (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-white">
               <span className="text-white font-medium">{flows.length.toLocaleString()}</span> flows
-              {flows.length === PAGE_SIZE && <span className="text-gray-500"> (showing first page)</span>}
+              {flows.length === PAGE_SIZE && <span className="text-white"> (showing first page)</span>}
             </p>
           </div>
           <div className="overflow-x-auto">
@@ -372,7 +367,7 @@ export default function FlowExplorer() {
               <thead>
                 <tr className="border-b border-gray-800">
                   {['Time', 'Sampler', 'Source', 'Destination', 'Proto', 'Port', 'Bytes', 'Pkts', 'Duration'].map(h => (
-                    <th key={h} className="px-3 py-3 text-left font-medium text-gray-400 whitespace-nowrap">{h}</th>
+                    <th key={h} className="px-3 py-3 text-left font-medium text-white whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -383,19 +378,19 @@ export default function FlowExplorer() {
                     onClick={() => setSelected(f)}
                     className="hover:bg-gray-800/50 cursor-pointer transition-colors group"
                   >
-                    <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{fmtTime(f.timestamp)}</td>
-                    <td className="px-3 py-2 text-gray-300">{f.sampler_name || f.sampler_ip}</td>
+                    <td className="px-3 py-2 text-white whitespace-nowrap">{fmtTime(f.timestamp)}</td>
+                    <td className="px-3 py-2 text-white">{f.sampler_name || f.sampler_ip}</td>
                     <td className="px-3 py-2 font-mono text-blue-300">{f.src_ip}</td>
                     <td className="px-3 py-2 font-mono text-purple-300">{f.dst_ip}</td>
                     <td className="px-3 py-2">
-                      <span className="bg-gray-800 text-gray-300 px-1.5 py-0.5 rounded">
+                      <span className="bg-gray-800 text-white px-1.5 py-0.5 rounded">
                         {protoLabel(f.protocol)}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-gray-300">{f.dst_port}</td>
+                    <td className="px-3 py-2 text-white">{f.dst_port}</td>
                     <td className="px-3 py-2 text-white font-medium">{fmtBytes(f.bytes)}</td>
-                    <td className="px-3 py-2 text-gray-400">{f.packets.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-gray-400">{fmtDuration(f.duration_ms)}</td>
+                    <td className="px-3 py-2 text-white">{f.packets.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-white">{fmtDuration(f.duration_ms)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -418,7 +413,7 @@ export default function FlowExplorer() {
       )}
 
       {!loading && flows.length === 0 && (
-        <div className="flex flex-col items-center justify-center h-40 text-gray-500">
+        <div className="flex flex-col items-center justify-center h-40 text-white">
           <p className="text-sm">Enter filters above and click Search</p>
         </div>
       )}

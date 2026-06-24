@@ -15,7 +15,7 @@ from typing import Optional
 from clickhouse_driver import Client
 
 from app.config import get_settings
-from app.models.flow import FlowRecord, TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge
+from app.models.flow import FlowRecord, TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge, PortStat, ProtocolStat
 from app.storage.base import StorageBackend
 
 log = logging.getLogger("pktflow.storage.clickhouse")
@@ -180,12 +180,25 @@ class ClickHouseBackend(StorageBackend):
         start: datetime,
         end: datetime,
         bucket_seconds: int = 60,
+        dst_port: Optional[int] = None,
+        protocol: Optional[int] = None,
+        site: Optional[str] = None,
     ) -> list[TimeSeriesPoint]:
-        where = "timestamp BETWEEN %(start)s AND %(end)s"
+        conditions = ["timestamp BETWEEN %(start)s AND %(end)s"]
         params: dict = {"start": start, "end": end, "bucket": bucket_seconds}
         if sampler_ip:
-            where += " AND sampler_ip = %(sampler_ip)s"
+            conditions.append("sampler_ip = %(sampler_ip)s")
             params["sampler_ip"] = sampler_ip
+        if dst_port is not None:
+            conditions.append("dst_port = %(dst_port)s")
+            params["dst_port"] = dst_port
+        if protocol is not None:
+            conditions.append("protocol = %(protocol)s")
+            params["protocol"] = protocol
+        if site:
+            conditions.append("site = %(site)s")
+            params["site"] = site
+        where = " AND ".join(conditions)
 
         query = f"""
             SELECT
@@ -354,3 +367,229 @@ class ClickHouseBackend(StorageBackend):
         """
         await asyncio.to_thread(self._execute, query)
         log.info(f"Updated flow retention TTL to {days} days")
+
+    async def purge_sampler(self, sampler_ip: str) -> None:
+        query = f"ALTER TABLE {settings.clickhouse_database}.flows DELETE WHERE sampler_ip = %(sampler_ip)s"
+        await asyncio.to_thread(self._execute, query, {"sampler_ip": sampler_ip})
+        log.info(f"Purged all flows for sampler_ip={sampler_ip}")
+
+    # Well-known port → service name (dst_port context)
+    _WELL_KNOWN: dict[tuple[int, int], str] = {
+        (80, 6): "HTTP", (443, 6): "HTTPS", (22, 6): "SSH", (23, 6): "Telnet",
+        (25, 6): "SMTP", (53, 17): "DNS", (53, 6): "DNS/TCP", (67, 17): "DHCP",
+        (68, 17): "DHCP", (110, 6): "POP3", (143, 6): "IMAP", (161, 17): "SNMP",
+        (162, 17): "SNMP Trap", (179, 6): "BGP", (389, 6): "LDAP",
+        (443, 17): "QUIC", (445, 6): "SMB", (514, 17): "Syslog",
+        (587, 6): "SMTP TLS", (636, 6): "LDAPS", (993, 6): "IMAPS",
+        (995, 6): "POP3S", (1433, 6): "MSSQL", (1521, 6): "Oracle",
+        (3306, 6): "MySQL", (3389, 6): "RDP", (5432, 6): "PostgreSQL",
+        (5601, 6): "Kibana", (5672, 6): "AMQP", (6379, 6): "Redis",
+        (8080, 6): "HTTP-Alt", (8443, 6): "HTTPS-Alt", (9000, 6): "ClickHouse",
+        (9200, 6): "Elasticsearch", (9300, 6): "Elasticsearch", (27017, 6): "MongoDB",
+        (2055, 17): "NetFlow", (4739, 17): "IPFIX",
+    }
+
+    _PROTO_NAMES: dict[int, str] = {
+        0:   "HOPOPT",
+        1:   "ICMP",
+        2:   "IGMP",
+        3:   "GGP",
+        4:   "IP-in-IP",
+        5:   "ST",
+        6:   "TCP",
+        7:   "CBT",
+        8:   "EGP",
+        9:   "IGP",
+        17:  "UDP",
+        20:  "HMP",
+        22:  "XNS-IDP",
+        27:  "RDP",
+        33:  "DCCP",
+        36:  "XTP",
+        37:  "DDP",
+        38:  "IDPR-CMTP",
+        41:  "IPv6",
+        43:  "IPv6-Route",
+        44:  "IPv6-Frag",
+        45:  "IDRP",
+        46:  "RSVP",
+        47:  "GRE",
+        48:  "DSR",
+        50:  "ESP",
+        51:  "AH",
+        58:  "ICMPv6",
+        59:  "IPv6-NoNxt",
+        60:  "IPv6-Opts",
+        88:  "EIGRP",
+        89:  "OSPF",
+        94:  "IPIP",
+        103: "PIM",
+        108: "IPComp",
+        112: "VRRP",
+        115: "L2TP",
+        132: "SCTP",
+        133: "FC",
+        136: "UDPLite",
+        137: "MPLS-in-IP",
+        138: "manet",
+        139: "HIP",
+        140: "Shim6",
+        141: "WESP",
+        142: "ROHC",
+    }
+
+    async def get_top_ports(
+        self,
+        start: datetime,
+        end: datetime,
+        sampler_ip: Optional[str] = None,
+        site: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[PortStat]:
+        conditions = ["timestamp BETWEEN %(start)s AND %(end)s"]
+        params: dict = {"start": start, "end": end, "limit": limit}
+        if sampler_ip:
+            conditions.append("sampler_ip = %(sampler_ip)s")
+            params["sampler_ip"] = sampler_ip
+        if site:
+            conditions.append("site = %(site)s")
+            params["site"] = site
+        where = " AND ".join(conditions)
+
+        query = f"""
+            SELECT
+                dst_port,
+                protocol,
+                sum(bytes)   AS bytes,
+                sum(packets) AS packets,
+                count()      AS flow_count
+            FROM {settings.clickhouse_database}.flows
+            WHERE {where}
+            GROUP BY dst_port, protocol
+            ORDER BY bytes DESC
+            LIMIT %(limit)s
+        """
+        rows = await asyncio.to_thread(self._execute, query, params)
+
+        total_bytes = sum(r[2] for r in rows) or 1
+        result = []
+        for r in rows:
+            port, proto, b, pkt, fc = int(r[0]), int(r[1]), int(r[2]), int(r[3]), int(r[4])
+            result.append(PortStat(
+                port=port,
+                protocol=proto,
+                proto_name=self._PROTO_NAMES.get(proto, str(proto)),
+                service_name=self._WELL_KNOWN.get((port, proto), ""),
+                bytes=b,
+                packets=pkt,
+                flow_count=fc,
+                pct_bytes=round(b / total_bytes * 100, 2),
+            ))
+        return result
+
+    async def get_protocol_distribution(
+        self,
+        start: datetime,
+        end: datetime,
+        sampler_ip: Optional[str] = None,
+    ) -> list[ProtocolStat]:
+        conditions = ["timestamp BETWEEN %(start)s AND %(end)s"]
+        params: dict = {"start": start, "end": end}
+        if sampler_ip:
+            conditions.append("sampler_ip = %(sampler_ip)s")
+            params["sampler_ip"] = sampler_ip
+        where = " AND ".join(conditions)
+
+        query = f"""
+            SELECT
+                protocol,
+                sum(bytes)   AS bytes,
+                sum(packets) AS packets,
+                count()      AS flow_count
+            FROM {settings.clickhouse_database}.flows
+            WHERE {where}
+            GROUP BY protocol
+            ORDER BY bytes DESC
+            LIMIT 20
+        """
+        rows = await asyncio.to_thread(self._execute, query, params)
+        total_bytes = sum(int(r[1]) for r in rows) or 1
+        result = []
+        for r in rows:
+            proto, b, pkt, fc = int(r[0]), int(r[1]), int(r[2]), int(r[3])
+            result.append(ProtocolStat(
+                protocol=proto,
+                name=self._PROTO_NAMES.get(proto, f"Proto {proto}"),
+                bytes=b,
+                packets=pkt,
+                flow_count=fc,
+                pct_bytes=round(b / total_bytes * 100, 1),
+            ))
+        return result
+
+    async def get_metric_in_window(
+        self,
+        metric: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> float:
+        """Sum of metric over the last window_min minutes."""
+        col = {"bytes": "sum(bytes)", "packets": "sum(packets)", "flows": "count()"}.get(metric, "sum(bytes)")
+        where = "timestamp >= now() - INTERVAL %(window_min)s MINUTE"
+        params: dict = {"window_min": window_min}
+        if sampler_ip:
+            where += " AND sampler_ip = %(sampler_ip)s"
+            params["sampler_ip"] = sampler_ip
+        query = f"SELECT {col} FROM {settings.clickhouse_database}.flows WHERE {where}"
+        rows = await asyncio.to_thread(self._execute, query, params)
+        return float(rows[0][0]) if rows and rows[0][0] is not None else 0.0
+
+    async def get_metric_baseline(
+        self,
+        metric: str,
+        baseline_days: int,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> float:
+        """Average per-window value of metric over the last baseline_days days."""
+        col = {"bytes": "sum(bytes)", "packets": "sum(packets)", "flows": "count()"}.get(metric, "sum(bytes)")
+        where = "timestamp >= now() - INTERVAL %(baseline_days)s DAY"
+        params: dict = {"baseline_days": baseline_days}
+        if sampler_ip:
+            where += " AND sampler_ip = %(sampler_ip)s"
+            params["sampler_ip"] = sampler_ip
+        num_windows = max((baseline_days * 24 * 60) / window_min, 1)
+        query = f"SELECT {col} FROM {settings.clickhouse_database}.flows WHERE {where}"
+        rows = await asyncio.to_thread(self._execute, query, params)
+        total = float(rows[0][0]) if rows and rows[0][0] is not None else 0.0
+        return total / num_windows
+
+    async def get_port_flow_count(
+        self,
+        port: int,
+        protocol: Optional[int],
+        direction: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> int:
+        """Count of flows matching port/protocol/direction in the last window_min minutes."""
+        params: dict = {"port": port, "window_min": window_min}
+        if direction == "dst":
+            port_clause = "dst_port = %(port)s"
+        elif direction == "src":
+            port_clause = "src_port = %(port)s"
+        else:
+            port_clause = "(src_port = %(port)s OR dst_port = %(port)s)"
+
+        conditions = [f"timestamp >= now() - INTERVAL %(window_min)s MINUTE", port_clause]
+        if protocol is not None:
+            conditions.append("protocol = %(protocol)s")
+            params["protocol"] = protocol
+        if sampler_ip:
+            conditions.append("sampler_ip = %(sampler_ip)s")
+            params["sampler_ip"] = sampler_ip
+
+        where = " AND ".join(conditions)
+        query = f"SELECT count() FROM {settings.clickhouse_database}.flows WHERE {where}"
+        rows = await asyncio.to_thread(self._execute, query, params)
+        return int(rows[0][0]) if rows and rows[0][0] is not None else 0
