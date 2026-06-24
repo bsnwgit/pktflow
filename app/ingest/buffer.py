@@ -77,6 +77,12 @@ class IngestBuffer:
             self._total_flushed += len(batch)
             self._last_flush = datetime.now(tz=timezone.utc)
             log.debug(f"Flushed {len(batch)} records (total flushed: {self._total_flushed})")
+            # Notify WebSocket clients of new data (fire-and-forget)
+            try:
+                from app.api.ws import broadcast_device_update
+                asyncio.create_task(broadcast_device_update())
+            except Exception:
+                pass
         except Exception as e:
             log.error(f"Flush failed — {len(batch)} records lost: {e}")
 
