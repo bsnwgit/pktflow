@@ -184,9 +184,9 @@ class AlertEngine:
             await self._auto_resolve(db, rule, f"No traffic on port {port}/{proto_str} in last {window_min}m")
 
     async def _auto_resolve(self, db: aiosqlite.Connection, rule: dict, reason: str) -> None:
-        """Ack all open (unacknowledged) events for this rule when condition has cleared."""
+        """Mark open events for this rule as auto-resolved when the condition has cleared."""
         async with db.execute(
-            "SELECT id FROM alert_events WHERE rule_id = ? AND acked_at IS NULL",
+            "SELECT id FROM alert_events WHERE rule_id = ? AND acked_at IS NULL AND resolved_at IS NULL",
             (rule["id"],),
         ) as cur:
             open_ids = [r[0] for r in await cur.fetchall()]
@@ -194,7 +194,8 @@ class AlertEngine:
             return
         for eid in open_ids:
             await db.execute(
-                "UPDATE alert_events SET acked_at = datetime('now') WHERE id = ?", (eid,)
+                "UPDATE alert_events SET resolved_at = datetime('now'), auto_resolved = 1 WHERE id = ?",
+                (eid,),
             )
         await db.commit()
         log.info(
@@ -211,7 +212,7 @@ class AlertEngine:
     ) -> None:
         """Auto-resolve data_gap events whose sampler has recovered."""
         async with db.execute(
-            "SELECT id, details FROM alert_events WHERE rule_id = ? AND acked_at IS NULL",
+            "SELECT id, details FROM alert_events WHERE rule_id = ? AND acked_at IS NULL AND resolved_at IS NULL",
             (rule["id"],),
         ) as cur:
             open_events = [(r[0], json.loads(r[1])) for r in await cur.fetchall()]
@@ -229,7 +230,8 @@ class AlertEngine:
                 ts = ts.replace(tzinfo=timezone.utc)
             if (now - ts) <= timedelta(minutes=silence_min):
                 await db.execute(
-                    "UPDATE alert_events SET acked_at = datetime('now') WHERE id = ?", (eid,)
+                    "UPDATE alert_events SET resolved_at = datetime('now'), auto_resolved = 1 WHERE id = ?",
+                    (eid,),
                 )
                 log.info(
                     f"Auto-resolved data_gap event {eid} for rule '{rule['name']}': "
