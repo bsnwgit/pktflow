@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import * as d3 from 'd3'
 import { useNavigate } from 'react-router-dom'
 import { api, TopologyNode, TopologyEdge, DeviceSummary } from '../api/client'
+import { protoShort } from '../utils/protocols'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -15,10 +16,6 @@ function fmtBytes(b: number): string {
   if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB'
   if (b >= 1e3) return (b / 1e3).toFixed(1) + ' KB'
   return b + ' B'
-}
-
-const PROTO_NAMES: Record<number, string> = {
-  1: 'ICMP', 6: 'TCP', 17: 'UDP', 47: 'GRE', 50: 'ESP',
 }
 
 const SITE_COLORS = [
@@ -166,7 +163,7 @@ function TopologyGraph({
         showTip(ev, `
           <b>${src} → ${dst}</b>
           <br>${fmtBytes(d.bytes)} · ${d.flows.toLocaleString()} flows
-          <br><span style="color:#9ca3af">${PROTO_NAMES[d.protocol] || `Proto ${d.protocol}`}${d.dst_port ? `:${d.dst_port}` : ''}</span>
+          <br><span style="color:#9ca3af">${protoShort(d.protocol)}${d.dst_port ? `:${d.dst_port}` : ''}</span>
         `)
       })
       .on('mousemove', moveTip).on('mouseleave', hideTip)
@@ -263,7 +260,7 @@ export default function Topology() {
         <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1">
           {WINDOWS.map(w => (
             <button key={w} onClick={() => setWindow(w)}
-              className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${window_ === w ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}>
+              className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${window_ === w ? 'bg-gray-700 text-white' : 'text-white hover:text-white'}`}>
               {w}
             </button>
           ))}
@@ -287,7 +284,7 @@ export default function Topology() {
         </button>
 
         {data && (
-          <span className="text-xs text-gray-500 ml-auto">
+          <span className="text-xs text-white ml-auto">
             {data.nodes.length} nodes · {data.edges.length} edges
           </span>
         )}
@@ -301,12 +298,12 @@ export default function Topology() {
 
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80 z-10">
-            <p className="text-sm text-gray-400">Building topology…</p>
+            <p className="text-sm text-white">Building topology…</p>
           </div>
         )}
 
         {!loading && data && data.nodes.length === 0 && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
             <p className="text-sm">No flow data in this window.</p>
             <p className="text-xs mt-1">Try a longer window or lower the min-bytes filter.</p>
           </div>
@@ -321,7 +318,7 @@ export default function Topology() {
           />
         )}
 
-        <p className="absolute bottom-3 left-3 text-xs text-gray-700 pointer-events-none select-none">
+        <p className="absolute bottom-3 left-3 text-xs text-white pointer-events-none select-none">
           Scroll to zoom · Drag nodes · Click to inspect
         </p>
       </div>
@@ -337,16 +334,16 @@ export default function Topology() {
                   NetFlow sampler
                 </span>
               )}
-              {selected.site && <span className="text-xs text-gray-500">{selected.site}</span>}
+              {selected.site && <span className="text-xs text-white">{selected.site}</span>}
             </div>
-            <p className="text-sm font-mono text-gray-400">{selected.id}</p>
+            <p className="text-sm font-mono text-white">{selected.id}</p>
             <div className="flex gap-6 mt-2 text-sm">
               <div>
-                <p className="text-xs text-gray-500">Total bytes</p>
+                <p className="text-xs text-white">Total bytes</p>
                 <p className="text-white font-medium">{fmtBytes(selected.bytes)}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-500">Flow count</p>
+                <p className="text-xs text-white">Flow count</p>
                 <p className="text-white font-medium">{selected.flows.toLocaleString()}</p>
               </div>
             </div>
@@ -354,16 +351,16 @@ export default function Topology() {
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => navigate(`/explorer?src_ip=${selected.id}&window=${window_}`)}
-              className="text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 hover:text-white rounded-lg px-3 py-2 transition-colors whitespace-nowrap">
+              className="text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white hover:text-white rounded-lg px-3 py-2 transition-colors whitespace-nowrap">
               Flows from →
             </button>
             <button
               onClick={() => navigate(`/explorer?dst_ip=${selected.id}&window=${window_}`)}
-              className="text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 hover:text-white rounded-lg px-3 py-2 transition-colors whitespace-nowrap">
+              className="text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white hover:text-white rounded-lg px-3 py-2 transition-colors whitespace-nowrap">
               Flows to →
             </button>
             <button onClick={() => setSelected(null)}
-              className="text-gray-500 hover:text-white text-sm ml-1">✕</button>
+              className="text-white hover:text-white text-sm ml-1">✕</button>
           </div>
         </div>
       )}
