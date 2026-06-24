@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api, downloadExport, FlowRecord, DeviceSummary } from '../api/client'
 import { protoLabel } from '../utils/protocols'
@@ -180,10 +180,12 @@ export default function FlowExplorer() {
 
   const [filters, setFilters] = useState<Filters>({
     ...EMPTY_FILTERS,
-    src_ip:     searchParams.get('src_ip')  ?? '',
-    dst_ip:     searchParams.get('dst_ip')  ?? '',
-    sampler_ip: searchParams.get('sampler') ?? '',
-    window:     searchParams.get('window')  ?? '1h',
+    src_ip:     searchParams.get('src_ip')   ?? '',
+    dst_ip:     searchParams.get('dst_ip')   ?? '',
+    dst_port:   searchParams.get('dst_port') ?? '',
+    protocol:   searchParams.get('protocol') ?? '',
+    sampler_ip: searchParams.get('sampler')  ?? '',
+    window:     searchParams.get('window')   ?? '1h',
   })
 
   const [devices, setDevices]     = useState<DeviceSummary[]>([])
@@ -193,7 +195,53 @@ export default function FlowExplorer() {
   const [selected, setSelected]   = useState<FlowRecord | null>(null)
   const [exportMsg, setExportMsg] = useState('')
 
+  const [tableFilter, setTableFilter]     = useState('')
+  const [tableSortKey, setTableSortKey]   = useState<keyof FlowRecord | null>(null)
+  const [tableSortDir, setTableSortDir]   = useState<'asc' | 'desc'>('desc')
+
   const PAGE_SIZE = 100
+
+  const FLOW_COLS: Array<{ label: string; key: keyof FlowRecord | null }> = [
+    { label: 'Time',        key: 'timestamp' },
+    { label: 'Sampler',     key: 'sampler_name' },
+    { label: 'Source',      key: 'src_ip' },
+    { label: 'Destination', key: 'dst_ip' },
+    { label: 'Proto',       key: 'protocol' },
+    { label: 'Port',        key: 'dst_port' },
+    { label: 'Bytes',       key: 'bytes' },
+    { label: 'Pkts',        key: 'packets' },
+    { label: 'Duration',    key: 'duration_ms' },
+  ]
+
+  const toggleTableSort = (key: keyof FlowRecord) => {
+    if (tableSortKey === key) setTableSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setTableSortKey(key); setTableSortDir('desc') }
+  }
+
+  const displayedFlows = useMemo(() => {
+    let result = flows
+    if (tableFilter.trim()) {
+      const q = tableFilter.toLowerCase()
+      result = result.filter(f =>
+        f.src_ip.includes(q) || f.dst_ip.includes(q) ||
+        String(f.dst_port).includes(q) || String(f.src_port).includes(q) ||
+        protoLabel(f.protocol).toLowerCase().includes(q) ||
+        (f.sampler_name || f.sampler_ip).toLowerCase().includes(q)
+      )
+    }
+    if (tableSortKey) {
+      result = [...result].sort((a, b) => {
+        const av = a[tableSortKey] as any
+        const bv = b[tableSortKey] as any
+        if (typeof av === 'number' && typeof bv === 'number')
+          return tableSortDir === 'asc' ? av - bv : bv - av
+        return tableSortDir === 'asc'
+          ? String(av ?? '').localeCompare(String(bv ?? ''))
+          : String(bv ?? '').localeCompare(String(av ?? ''))
+      })
+    }
+    return result
+  }, [flows, tableFilter, tableSortKey, tableSortDir])
 
   useEffect(() => {
     api.getDeviceSummaries().then(setDevices)
@@ -218,9 +266,9 @@ export default function FlowExplorer() {
     }
   }
 
-  // Auto-search on mount if URL params were passed (drill-in from Device View)
+  // Auto-search on mount if URL params were passed (drill-in from Device View / Port Inventory)
   useEffect(() => {
-    if (filters.src_ip || filters.dst_ip) search(0)
+    if (filters.src_ip || filters.dst_ip || filters.sampler_ip || filters.dst_port) search(0)
   }, [])
 
   const handleExploreIp = (ip: string) => {
@@ -356,23 +404,42 @@ export default function FlowExplorer() {
       {/* Results */}
       {flows.length > 0 && (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
-            <p className="text-sm text-white">
-              <span className="text-white font-medium">{flows.length.toLocaleString()}</span> flows
-              {flows.length === PAGE_SIZE && <span className="text-white"> (showing first page)</span>}
+          <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-3 flex-wrap">
+            <input
+              value={tableFilter}
+              onChange={e => setTableFilter(e.target.value)}
+              placeholder="Filter by IP, port, proto…"
+              className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white placeholder-gray-600 w-44 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            {tableFilter && <button onClick={() => setTableFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+            <p className="text-sm text-white ml-auto">
+              <span className="text-white font-medium">{displayedFlows.length.toLocaleString()}</span>
+              {displayedFlows.length !== flows.length && <span className="text-white"> of {flows.length.toLocaleString()}</span>}
+              {' flows'}
+              {flows.length === PAGE_SIZE && <span className="text-white"> (first page)</span>}
             </p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-gray-800">
-                  {['Time', 'Sampler', 'Source', 'Destination', 'Proto', 'Port', 'Bytes', 'Pkts', 'Duration'].map(h => (
-                    <th key={h} className="px-3 py-3 text-left font-medium text-white whitespace-nowrap">{h}</th>
+                  {FLOW_COLS.map(col => (
+                    <th
+                      key={col.label}
+                      onClick={() => col.key && toggleTableSort(col.key)}
+                      className={`px-3 py-3 text-left font-medium whitespace-nowrap select-none
+                        ${col.key
+                          ? `cursor-pointer ${tableSortKey === col.key ? 'text-blue-400' : 'text-white hover:text-gray-200'}`
+                          : 'text-white'}`}
+                    >
+                      {col.label}
+                      {tableSortKey === col.key && <span className="ml-1">{tableSortDir === 'asc' ? '↑' : '↓'}</span>}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800/50">
-                {flows.map((f, i) => (
+                {displayedFlows.map((f, i) => (
                   <tr
                     key={i}
                     onClick={() => setSelected(f)}

@@ -238,8 +238,11 @@ function TopTalkersTable({ talkers, totalBytes, window, externalExpanded, onExte
   onExternalExpandedConsumed?: () => void
 }) {
   const navigate = useNavigate()
-  const [sortBy, setSortBy]       = useState<'bytes' | 'packets' | 'flow_count'>('bytes')
+  type TalkerSortKey = keyof TopTalker
+  const [sortKey, setSortKey]     = useState<TalkerSortKey>('bytes')
+  const [sortDir, setSortDir]     = useState<'asc' | 'desc'>('desc')
   const [expandedKey, setExpanded] = useState<string | null>(null)
+  const [filter, setFilter]       = useState('')
 
   useEffect(() => {
     if (externalExpanded) {
@@ -248,38 +251,71 @@ function TopTalkersTable({ talkers, totalBytes, window, externalExpanded, onExte
     }
   }, [externalExpanded])
 
-  const sorted = [...talkers].sort((a, b) => b[sortBy] - a[sortBy])
+  const toggleSort = (key: TalkerSortKey) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir(key === 'src_ip' || key === 'dst_ip' || key === 'protocol' ? 'asc' : 'desc') }
+  }
 
-  const Col = ({ col, label }: { col: typeof sortBy; label: string }) => (
+  const sorted = [...talkers].sort((a, b) => {
+    const av = a[sortKey] as any
+    const bv = b[sortKey] as any
+    if (typeof av === 'number' && typeof bv === 'number')
+      return sortDir === 'asc' ? av - bv : bv - av
+    return sortDir === 'asc'
+      ? String(av ?? '').localeCompare(String(bv ?? ''))
+      : String(bv ?? '').localeCompare(String(av ?? ''))
+  })
+
+  const displayed = filter.trim()
+    ? sorted.filter(t => {
+        const q = filter.toLowerCase()
+        return t.src_ip.includes(q) || t.dst_ip.includes(q) ||
+          protoLabel(t.protocol).toLowerCase().includes(q) ||
+          String(t.dst_port).includes(q)
+      })
+    : sorted
+
+  const Col = ({ col, label }: { col: TalkerSortKey; label: string }) => (
     <th
       className={`px-4 py-3 text-left text-xs font-medium cursor-pointer select-none transition-colors
-        ${sortBy === col ? 'text-blue-400' : 'text-white hover:text-gray-200'}`}
-      onClick={() => setSortBy(col)}
+        ${sortKey === col ? 'text-blue-400' : 'text-white hover:text-gray-200'}`}
+      onClick={() => toggleSort(col)}
     >
-      {label} {sortBy === col && '↓'}
+      {label}{sortKey === col && <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>}
     </th>
   )
 
   return (
     <div>
       <TalkerPieCharts talkers={talkers} totalBytes={totalBytes} />
+      <div className="flex items-center gap-3 mb-3 px-1">
+        <input
+          value={filter}
+          onChange={e => setFilter(e.target.value)}
+          placeholder="Filter by IP, port, proto…"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-600 w-52 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+        {filter && <button onClick={() => setFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+        {filter && <span className="text-xs text-gray-500">{displayed.length} of {sorted.length}</span>}
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-800">
               <th className="px-4 py-3 text-left text-xs font-medium text-white w-6" />
-              <th className="px-4 py-3 text-left text-xs font-medium text-white">Source IP</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-white">Destination IP</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-white">Port</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-white">Proto</th>
+              <Col col="src_ip" label="Source IP" />
+              <Col col="dst_ip" label="Destination IP" />
+              <Col col="dst_port" label="Port" />
+              <Col col="protocol" label="Proto" />
               <Col col="bytes" label="Bytes" />
               <Col col="packets" label="Packets" />
               <Col col="flow_count" label="Flows" />
               <th className="px-4 py-3 text-left text-xs font-medium text-white">Share</th>
+              <th className="px-4 py-3 w-8" />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800/50">
-            {sorted.map((t, i) => {
+            {displayed.map((t, i) => {
               const rowKey = `${t.src_ip}-${t.dst_ip}-${t.dst_port}-${t.protocol}`
               const isExpanded = expandedKey === rowKey
               const pct = totalBytes > 0 ? ((t.bytes / totalBytes) * 100).toFixed(1) : '0'
@@ -312,6 +348,19 @@ function TopTalkersTable({ talkers, totalBytes, window, externalExpanded, onExte
                         <span className="text-white text-xs">{pct}%</span>
                       </div>
                     </td>
+                    <td className="px-2 py-2.5" onClick={e => e.stopPropagation()}>
+                      <a
+                        href={`/explorer?src_ip=${encodeURIComponent(t.src_ip)}&dst_ip=${encodeURIComponent(t.dst_ip)}&dst_port=${t.dst_port}&protocol=${t.protocol}&window=${window}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-gray-500 hover:text-blue-400 transition-colors"
+                        title="View in Flow Explorer"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                      </a>
+                    </td>
                   </tr>
                   {isExpanded && (
                     <InlineFlows key={`flows-${rowKey}`} srcIp={t.src_ip} dstIp={t.dst_ip} window={window} />
@@ -321,8 +370,10 @@ function TopTalkersTable({ talkers, totalBytes, window, externalExpanded, onExte
             })}
           </tbody>
         </table>
-        {sorted.length === 0 && (
-          <div className="text-center py-12 text-white">No flow data for this window</div>
+        {displayed.length === 0 && (
+          <div className="text-center py-12 text-white">
+            {filter ? 'No results match this filter' : 'No flow data for this window'}
+          </div>
         )}
       </div>
     </div>
@@ -681,12 +732,6 @@ export default function DeviceView() {
             <span>·</span>
             <span className="text-white font-medium">{fmtBps(device.bytes_last_hour, 3600)} avg</span>
             <span>·</span>
-            <button
-              onClick={() => navigate(`/explorer?sampler_ip=${device.sampler_ip}&window=${window}`)}
-              className="text-blue-400 hover:text-blue-300 transition-colors"
-            >
-              View in Flow Explorer →
-            </button>
           </div>
         )}
 

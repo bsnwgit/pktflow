@@ -65,7 +65,7 @@ function InlinePortFlows({
       .catch(e => { setError(String(e)); setLoading(false) })
   }, [port, protocol, window, sampler_ip])
 
-  const colSpan = 8
+  const colSpan = 9
 
   if (loading) return (
     <tr><td colSpan={colSpan} className="px-6 py-3 bg-gray-950">
@@ -293,7 +293,8 @@ function TrafficTimelinePanel({
 
 function PortInventoryTable({ window, sampler_ip, site }: { window: string; sampler_ip?: string; site?: string }) {
   const [data, setData] = useState<PortStat[]>([])
-  const [sortKey, setSortKey] = useState<'bytes' | 'flow_count' | 'port'>('bytes')
+  type PortSortKey = 'port' | 'proto_name' | 'service_name' | 'bytes' | 'packets' | 'flow_count' | 'pct_bytes'
+  const [sortKey, setSortKey] = useState<PortSortKey>('bytes')
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc')
   const [search, setSearch] = useState('')
   const [expandedKey, setExpanded] = useState<string | null>(null)
@@ -305,7 +306,7 @@ function PortInventoryTable({ window, sampler_ip, site }: { window: string; samp
     api.getTopPorts(params).then(setData).catch(() => {})
   }, [window, sampler_ip, site])
 
-  const toggle = (k: typeof sortKey) => {
+  const toggle = (k: PortSortKey) => {
     if (sortKey === k) setSortDir(d => d === 'desc' ? 'asc' : 'desc')
     else { setSortKey(k); setSortDir('desc') }
   }
@@ -317,16 +318,21 @@ function PortInventoryTable({ window, sampler_ip, site }: { window: string; samp
       return String(d.port).includes(s) || d.service_name.toLowerCase().includes(s) || d.proto_name.toLowerCase().includes(s)
     })
     .sort((a, b) => {
-      const av = sortKey === 'port' ? a.port : sortKey === 'bytes' ? a.bytes : a.flow_count
-      const bv = sortKey === 'port' ? b.port : sortKey === 'bytes' ? b.bytes : b.flow_count
+      const av = a[sortKey] as any
+      const bv = b[sortKey] as any
+      if (typeof av === 'string')
+        return sortDir === 'desc' ? bv.localeCompare(av) : av.localeCompare(bv)
       return sortDir === 'desc' ? bv - av : av - bv
     })
 
-  const SortBtn = ({ k, label }: { k: typeof sortKey; label: string }) => (
-    <button onClick={() => toggle(k)} className="flex items-center gap-1 hover:text-white transition-colors text-white">
-      {label}
-      {sortKey === k && <span className="text-blue-400">{sortDir === 'desc' ? '↓' : '↑'}</span>}
-    </button>
+  const SortTh = ({ k, label, cls }: { k: PortSortKey; label: string; cls?: string }) => (
+    <th
+      onClick={() => toggle(k)}
+      className={`px-4 py-2.5 text-left text-xs cursor-pointer select-none transition-colors
+        ${sortKey === k ? 'text-blue-400' : 'text-white hover:text-gray-200'} ${cls ?? ''}`}
+    >
+      {label}{sortKey === k && <span className="ml-1">{sortDir === 'desc' ? '↓' : '↑'}</span>}
+    </th>
   )
 
   return (
@@ -343,15 +349,16 @@ function PortInventoryTable({ window, sampler_ip, site }: { window: string; samp
       <div className="overflow-hidden rounded-xl border border-gray-800">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-800 text-xs text-white bg-gray-900">
+            <tr className="border-b border-gray-800 bg-gray-900">
               <th className="px-4 py-2.5 w-6" />
-              <th className="px-4 py-2.5 text-left"><SortBtn k="port" label="Port" /></th>
-              <th className="px-4 py-2.5 text-left text-white">Protocol</th>
-              <th className="px-4 py-2.5 text-left text-white">Service</th>
-              <th className="px-4 py-2.5 text-right"><SortBtn k="bytes" label="Bytes" /></th>
-              <th className="px-4 py-2.5 text-right text-white">Packets</th>
-              <th className="px-4 py-2.5 text-right"><SortBtn k="flow_count" label="Flows" /></th>
-              <th className="px-4 py-2.5 text-right text-white">% Traffic</th>
+              <SortTh k="port"         label="Port" />
+              <SortTh k="proto_name"   label="Protocol" />
+              <SortTh k="service_name" label="Service" />
+              <SortTh k="bytes"        label="Bytes" />
+              <SortTh k="packets"      label="Packets" />
+              <SortTh k="flow_count"   label="Flows" />
+              <SortTh k="pct_bytes"    label="% Traffic" />
+              <th className="px-4 py-2.5 w-8" />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800/50 bg-gray-900">
@@ -369,16 +376,29 @@ function PortInventoryTable({ window, sampler_ip, site }: { window: string; samp
                     <td className="px-4 py-2 font-mono text-white">{row.port}</td>
                     <td className="px-4 py-2 text-white">{row.proto_name}</td>
                     <td className="px-4 py-2 text-white">{row.service_name || '—'}</td>
-                    <td className="px-4 py-2 text-right text-white">{fmtBytes(row.bytes)}</td>
-                    <td className="px-4 py-2 text-right text-white">{fmtNum(row.packets)}</td>
-                    <td className="px-4 py-2 text-right text-white">{fmtNum(row.flow_count)}</td>
-                    <td className="px-4 py-2 text-right">
-                      <div className="flex items-center justify-end gap-2">
+                    <td className="px-4 py-2 text-white">{fmtBytes(row.bytes)}</td>
+                    <td className="px-4 py-2 text-white">{fmtNum(row.packets)}</td>
+                    <td className="px-4 py-2 text-white">{fmtNum(row.flow_count)}</td>
+                    <td className="px-4 py-2">
+                      <div className="flex items-center gap-2">
                         <div className="w-16 bg-gray-800 rounded-full h-1.5">
                           <div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${Math.min(row.pct_bytes, 100)}%` }} />
                         </div>
-                        <span className="text-white text-xs w-10 text-right">{row.pct_bytes.toFixed(1)}%</span>
+                        <span className="text-white text-xs">{row.pct_bytes.toFixed(1)}%</span>
                       </div>
+                    </td>
+                    <td className="px-2 py-2" onClick={e => e.stopPropagation()}>
+                      <a
+                        href={`/explorer?dst_port=${row.port}&protocol=${row.protocol}&window=${window}${sampler_ip ? `&sampler=${encodeURIComponent(sampler_ip)}` : ''}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-gray-500 hover:text-blue-400 transition-colors"
+                        title="View in Flow Explorer"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                      </a>
                     </td>
                   </tr>
                   {isExpanded && (
@@ -395,7 +415,7 @@ function PortInventoryTable({ window, sampler_ip, site }: { window: string; samp
               )
             })}
             {filtered.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-8 text-center text-white text-sm italic">No ports found</td></tr>
+              <tr><td colSpan={9} className="px-4 py-8 text-center text-white text-sm italic">No ports found</td></tr>
             )}
           </tbody>
         </table>
@@ -418,9 +438,6 @@ export function PortsTabContent({ sampler_ip, window }: { sampler_ip: string; wi
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card title="Protocol Mix">
-          <ProtocolMixPanel window={window} sampler_ip={sampler_ip} />
-        </Card>
         <Card title="Top Ports by Volume">
           <div className="flex items-center gap-2 self-end -mt-1">
             {(['bytes','flows'] as const).map(m => (
@@ -433,14 +450,14 @@ export function PortsTabContent({ sampler_ip, window }: { sampler_ip: string; wi
           <p className="text-xs text-white -mt-2">Click a bar to pin the traffic timeline to that port.</p>
           <TopPortsPanel window={window} sampler_ip={sampler_ip} metric={topMetric} onPortClick={handlePortClick} />
         </Card>
+        <Card title="Traffic Over Time">
+          <TrafficTimelinePanel
+            window={window} sampler_ip={sampler_ip}
+            pinnedPort={pinnedPort} pinnedProtocol={pinnedProto}
+            onClear={() => { setPinnedPort(null); setPinnedProto(null) }}
+          />
+        </Card>
       </div>
-      <Card title="Traffic Over Time">
-        <TrafficTimelinePanel
-          window={window} sampler_ip={sampler_ip}
-          pinnedPort={pinnedPort} pinnedProtocol={pinnedProto}
-          onClear={() => { setPinnedPort(null); setPinnedProto(null) }}
-        />
-      </Card>
       <Card title="Port Inventory">
         <PortInventoryTable window={window} sampler_ip={sampler_ip} />
       </Card>
