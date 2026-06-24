@@ -12,9 +12,10 @@ const Topology     = lazy(() => import('./pages/Topology'))
 const Alerts       = lazy(() => import('./pages/Alerts'))
 const Settings     = lazy(() => import('./pages/Settings'))
 const Users        = lazy(() => import('./pages/Users'))
+const Ports        = lazy(() => import('./pages/Ports'))
 
 function PageFallback() {
-  return <div className="flex items-center justify-center h-48 text-gray-500">Loading…</div>
+  return <div className="flex items-center justify-center h-48 text-white">Loading…</div>
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -66,6 +67,11 @@ export default function App() {
           <Route path="/users" element={
             <ProtectedRoute>
               <Suspense fallback={<PageFallback />}><Users /></Suspense>
+            </ProtectedRoute>
+          } />
+          <Route path="/ports" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageFallback />}><Ports /></Suspense>
             </ProtectedRoute>
           } />
           <Route path="*" element={<Navigate to="/" replace />} />

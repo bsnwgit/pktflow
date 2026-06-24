@@ -24,6 +24,10 @@ export function isAuthenticated(): boolean {
   return _accessToken !== null
 }
 
+export function getToken(): string | null {
+  return _accessToken
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -82,6 +86,8 @@ export const api = {
   logout: () => request('/auth/logout', { method: 'POST' }),
 
   getDeviceSummaries: () => request<DeviceSummary[]>('/flows/devices'),
+  purgeSampler: (sampler_ip: string) =>
+    request<null>(`/flows/samplers/${encodeURIComponent(sampler_ip)}`, { method: 'DELETE' }),
   getFlowRate: () => request<{ flows_per_sec: number }>('/flows/rate'),
   getTimeSeries: (params: TimeSeriesParams) =>
     request<TimeSeriesPoint[]>(`/flows/timeseries?${new URLSearchParams(params as any)}`),
@@ -94,6 +100,8 @@ export const api = {
     request<TopologyResponse>(`/flows/topology?${new URLSearchParams(params as any)}`),
   getProtocolStats: (params: { window?: string; sampler_ip?: string }) =>
     request<ProtocolStat[]>(`/flows/protocols?${new URLSearchParams(params as any)}`),
+  getTopPorts: (params: TopPortsParams) =>
+    request<PortStat[]>(`/flows/ports/top?${new URLSearchParams(params as any)}`),
 
   getDevices: () => request<Device[]>('/devices/'),
   createDevice: (d: DeviceIn) => request<Device>('/devices/', { method: 'POST', body: JSON.stringify(d) }),
@@ -127,6 +135,12 @@ export const api = {
 
   restartService: () =>
     request<{ status: string; message: string }>('/system/restart', { method: 'POST' }),
+
+  createLucidchart: (params: URLSearchParams) =>
+    request<{ edit_url: string; document_id: string }>(
+      `/flows/topology/lucidchart?${params}`,
+      { method: 'POST' }
+    ),
 }
 
 export interface DeviceSummary {
@@ -236,6 +250,17 @@ export interface ProtocolStat {
   pct_bytes: number
 }
 
+export interface PortStat {
+  port: number
+  protocol: number
+  proto_name: string
+  service_name: string
+  bytes: number
+  packets: number
+  flow_count: number
+  pct_bytes: number
+}
+
 export interface TopologyNode {
   id: string
   sampler_name: string
@@ -261,12 +286,13 @@ export interface TopologyResponse {
 }
 
 export type TopologyParams = { window?: string; sampler_ip?: string; min_bytes?: string; limit?: string }
-export type TimeSeriesParams = { sampler_ip?: string; window?: string }
+export type TimeSeriesParams = { sampler_ip?: string; window?: string; dst_port?: string; protocol?: string; site?: string }
 export type TopTalkersParams = { sampler_ip?: string; window?: string; limit?: string }
 export type SearchParams = {
   src_ip?: string; dst_ip?: string; src_port?: string; dst_port?: string
   protocol?: string; sampler_ip?: string; window?: string; limit?: string
 }
+export type TopPortsParams = { window?: string; sampler_ip?: string; site?: string; limit?: string }
 
 export async function downloadExport(
   path: string,
