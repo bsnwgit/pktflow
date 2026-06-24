@@ -213,7 +213,31 @@ export default function Settings() {
 
   // Per-tab save helpers
   const generalSave = useSave(['app_name', 'base_url', 'timezone', 'anthropic_api_key', 'ai_model'], settings, load)
-  const storageSave = useSave(['storage_backend', 'retention_days_raw', 'retention_days_hourly'], settings, load)
+  const storageSave = useSave(['storage_backend', 'retention_days_raw', 'retention_days_hourly', 'alert_event_retention_days'], settings, load)
+  const [cleanupRunning, setCleanupRunning] = useState(false)
+  const [cleanupResult, setCleanupResult]   = useState<string | null>(null)
+
+  const runCleanup = async () => {
+    setCleanupRunning(true)
+    setCleanupResult(null)
+    try {
+      const r = await api.runCleanup()
+      const parts: string[] = []
+      if (r.flows_eligible > 0)
+        parts.push(`${r.flows_eligible.toLocaleString()} flows queued for deletion`)
+      else
+        parts.push('No flows beyond retention threshold')
+      if (r.hourly_eligible > 0)
+        parts.push(`${r.hourly_eligible.toLocaleString()} hourly rollup rows queued`)
+      if (r.alert_events_deleted > 0)
+        parts.push(`${r.alert_events_deleted} alert events purged`)
+      setCleanupResult(parts.join(' · '))
+    } catch (e: any) {
+      setCleanupResult(`Error: ${e.message}`)
+    } finally {
+      setCleanupRunning(false)
+    }
+  }
   const ingestSave  = useSave([
     'ingest_method', 'ingest_token', 'ingest_http_port',
     'ingest_udp_port_netflow', 'ingest_udp_port_sflow',
@@ -345,6 +369,28 @@ export default function Settings() {
             <div className="flex items-center gap-3">
               <NumberInput value={num('retention_days_hourly', 365)} onChange={v => set('retention_days_hourly', v)} min={1} max={3650} />
               <span className="text-sm text-white">days</span>
+            </div>
+          </Field>
+          <Field label="Alert event retention" hint="Days to keep fired alert events and notification logs before auto-purge">
+            <div className="flex items-center gap-3">
+              <NumberInput value={num('alert_event_retention_days', 90)} onChange={v => set('alert_event_retention_days', v)} min={1} max={3650} />
+              <span className="text-sm text-white">days</span>
+            </div>
+          </Field>
+          <Field label="Manual cleanup" hint="Immediately apply current retention settings — ClickHouse TTL mutation is queued asynchronously">
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                onClick={runCleanup}
+                disabled={cleanupRunning}
+                className="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white text-sm rounded-lg px-4 py-2 transition-colors"
+              >
+                {cleanupRunning ? 'Running…' : 'Run Cleanup Now'}
+              </button>
+              {cleanupResult && (
+                <span className={`text-xs ${cleanupResult.startsWith('Error') ? 'text-red-400' : 'text-green-400'}`}>
+                  {cleanupResult}
+                </span>
+              )}
             </div>
           </Field>
         </Section>

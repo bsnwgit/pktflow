@@ -2,7 +2,6 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './store/auth'
 import Layout from './components/Layout'
 import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
 
 import { lazy, Suspense } from 'react'
 const Analytics    = lazy(() => import('./pages/Analytics'))
@@ -32,13 +31,11 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/" element={
-            <ProtectedRoute><Dashboard /></ProtectedRoute>
-          } />
-          <Route path="/analytics" element={
             <ProtectedRoute>
               <Suspense fallback={<PageFallback />}><Analytics /></Suspense>
             </ProtectedRoute>
           } />
+          <Route path="/analytics" element={<Navigate to="/" replace />} />
           <Route path="/devices/:ip?" element={
             <ProtectedRoute>
               <Suspense fallback={<PageFallback />}><DeviceView /></Suspense>

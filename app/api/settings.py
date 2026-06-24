@@ -82,6 +82,9 @@ DEFAULTS: dict[str, Any] = {
     "ssl_enabled": False,             # Enable HTTPS/WSS
     "ssl_certfile": "",               # Absolute path to PEM cert file on server
     "ssl_keyfile": "",                # Absolute path to PEM private key on server
+
+    # Alerts
+    "alert_event_retention_days": 90, # Days to keep alert_events + notification_log rows
 }
 
 
