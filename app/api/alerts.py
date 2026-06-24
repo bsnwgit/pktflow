@@ -107,9 +107,14 @@ async def list_events(
     unacked_only: bool = False,
     db: aiosqlite.Connection = Depends(get_db),
 ):
+    # unacked_only=True  → active tab: not yet user-acked (includes auto-resolved)
+    # unacked_only=False → full history
     where = "WHERE ae.acked_at IS NULL" if unacked_only else ""
     async with db.execute(f"""
-        SELECT ae.*, ar.name AS rule_name, ar.severity
+        SELECT ae.id, ae.rule_id, ae.severity, ae.message, ae.details,
+               ae.fired_at, ae.acked_at, ae.acked_by,
+               ae.resolved_at, ae.auto_resolved,
+               ar.name AS rule_name, ar.severity AS rule_severity
         FROM alert_events ae
         JOIN alert_rules ar ON ae.rule_id = ar.id
         {where}
@@ -121,12 +126,14 @@ async def list_events(
     for r in rows:
         d = dict(r)
         d["details"] = json.loads(d["details"])
+        # Normalise: rule_severity shadows severity from the join — use ae.severity
         result.append(d)
     return result
 
 
 @router.post("/events/{event_id}/ack")
 async def ack_event(event_id: int, user: CurrentUser, db: aiosqlite.Connection = Depends(get_db)):
+    """User-initiated acknowledge — clears the event from the active view."""
     await db.execute(
         "UPDATE alert_events SET acked_at=datetime('now'), acked_by=? WHERE id=?",
         (user["id"], event_id),
@@ -137,6 +144,7 @@ async def ack_event(event_id: int, user: CurrentUser, db: aiosqlite.Connection =
 
 @router.post("/events/ack-all")
 async def ack_all_events(user: CurrentUser, db: aiosqlite.Connection = Depends(get_db)):
+    """Acknowledge all unacked events (active + auto-resolved)."""
     await db.execute(
         "UPDATE alert_events SET acked_at=datetime('now'), acked_by=? WHERE acked_at IS NULL",
         (user["id"],),

@@ -102,6 +102,27 @@ async def flow_time_series(
     )
 
 
+@router.get("/timeseries/daily", response_model=list[TimeSeriesPoint])
+async def daily_time_series(
+    _: CurrentUser,
+    days: int = Query(30, ge=1, le=365, description="Number of days to include (default 30)"),
+    sampler_ip: Optional[str] = Query(None, description="Filter to a single sampler"),
+):
+    """Daily traffic totals from the flows_daily rollup table. Efficient for 30-365 day views."""
+    return await get_storage().get_daily_timeseries(days=days, sampler_ip=sampler_ip)
+
+
+@router.get("/timeseries/hourly", response_model=list[TimeSeriesPoint])
+async def hourly_time_series(
+    _: CurrentUser,
+    window: str = Query("7d", description="Time window: 1h, 6h, 24h, 7d, 30d"),
+    sampler_ip: Optional[str] = Query(None, description="Filter to a single sampler"),
+):
+    """Hourly traffic totals from the flows_hourly rollup table. Efficient for 7-30 day views."""
+    s, e = _parse_window(window)
+    return await get_storage().get_hourly_timeseries(start=s, end=e, sampler_ip=sampler_ip)
+
+
 @router.get("/top-talkers", response_model=list[TopTalker])
 async def top_talkers(
     _: CurrentUser,

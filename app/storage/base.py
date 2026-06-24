@@ -136,3 +136,22 @@ class StorageBackend(ABC):
     ) -> int:
         """Count of flows matching port/protocol/direction in the last window_min minutes.
         direction: 'src', 'dst', or 'any'."""
+
+    async def get_daily_timeseries(
+        self,
+        days: int = 30,
+        sampler_ip: Optional[str] = None,
+    ) -> list[TimeSeriesPoint]:
+        """Daily rollup: bytes/packets/flows per day from flows_daily.
+        Default implementation returns empty list (ClickHouse-only feature)."""
+        return []
+
+    async def get_hourly_timeseries(
+        self,
+        start: datetime,
+        end: datetime,
+        sampler_ip: Optional[str] = None,
+    ) -> list[TimeSeriesPoint]:
+        """Hourly rollup: bytes/packets/flows per hour from flows_hourly.
+        Default implementation returns empty list (ClickHouse-only feature)."""
+        return []
