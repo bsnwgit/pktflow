@@ -18,7 +18,7 @@ from app.storage.factory import init_storage, get_storage
 from app.ingest.buffer import IngestBuffer
 
 # ── Routers ───────────────────────────────────────────────────────────────────
-from app.api import ingest, flows, devices, alerts, settings as settings_router, auth, users, ai, system as system_router
+from app.api import ingest, flows, devices, alerts, settings as settings_router, auth, users, ai, system as system_router, ws as ws_router
 
 settings = get_settings()
 log = logging.getLogger("pktflow")
@@ -93,6 +93,7 @@ app.include_router(alerts.router,          prefix="/api/alerts",   tags=["alerts
 app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
 app.include_router(ai.router,              prefix="/api/ai",       tags=["ai"])
 app.include_router(system_router.router,   prefix="/api/system",   tags=["system"])
+app.include_router(ws_router.router,       prefix="/api",          tags=["ws"])
 
 # ── Health check ──────────────────────────────────────────────────────────────
 
@@ -114,3 +115,47 @@ if _frontend_dist.exists():
             raise HTTPException(status_code=404, detail="Not found")
         index = _frontend_dist / "index.html"
         return FileResponse(str(index))
+
+
+# ── Entrypoint (used by systemd: python -m app.main) ─────────────────────────
+if __name__ == "__main__":
+    import json
+    import sqlite3
+    import uvicorn
+
+    # Read SSL settings from SQLite before uvicorn starts
+    _db_path = Path(__file__).parent.parent / "pktflow.db"
+    _ssl_enabled = False
+    _ssl_certfile = None
+    _ssl_keyfile = None
+    try:
+        _conn = sqlite3.connect(str(_db_path))
+        for _key in ("ssl_enabled", "ssl_certfile", "ssl_keyfile"):
+            _row = _conn.execute("SELECT value FROM settings WHERE key=?", (_key,)).fetchone()
+            if _row:
+                _val = json.loads(_row[0])
+                if _key == "ssl_enabled":
+                    _ssl_enabled = bool(_val)
+                elif _key == "ssl_certfile":
+                    _ssl_certfile = _val if _val else None
+                elif _key == "ssl_keyfile":
+                    _ssl_keyfile = _val if _val else None
+        _conn.close()
+    except Exception as _e:
+        log.warning(f"Could not read SSL settings from DB: {_e}. Starting without SSL.")
+
+    _uvicorn_kwargs: dict = dict(
+        host="0.0.0.0",
+        port=8766,
+        workers=1,
+        log_level="info",
+    )
+    if _ssl_enabled and _ssl_certfile and _ssl_keyfile:
+        _uvicorn_kwargs["ssl_certfile"] = _ssl_certfile
+        _uvicorn_kwargs["ssl_keyfile"] = _ssl_keyfile
+        log.info(f"SSL enabled — cert: {_ssl_certfile}")
+    else:
+        if _ssl_enabled:
+            log.warning("SSL enabled in settings but cert/key paths are missing — starting without SSL.")
+
+    uvicorn.run("app.main:app", **_uvicorn_kwargs)

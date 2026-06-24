@@ -74,6 +74,14 @@ DEFAULTS: dict[str, Any] = {
     # AI assistant (Phase 5)
     "anthropic_api_key": "",          # Anthropic API key for in-app Claude assistant
     "ai_model": "claude-haiku-4-5-20251001",
+
+    # Integrations
+    "lucid_api_token": "",            # Lucidchart Personal Access Token for diagram export
+
+    # SSL / TLS
+    "ssl_enabled": False,             # Enable HTTPS/WSS
+    "ssl_certfile": "",               # Absolute path to PEM cert file on server
+    "ssl_keyfile": "",                # Absolute path to PEM private key on server
 }
 
 
@@ -97,7 +105,8 @@ async def get_all_settings(_: CurrentUser, db: aiosqlite.Connection = Depends(ge
 
     # Mask secrets in API response
     for secret_key in ("ingest_token", "okta_client_secret", "notify_email_password",
-                        "notify_pagerduty_integration_key", "anthropic_api_key"):
+                        "notify_pagerduty_integration_key", "anthropic_api_key",
+                        "lucid_api_token"):
         if result.get(secret_key):
             result[secret_key] = "••••••••"
 

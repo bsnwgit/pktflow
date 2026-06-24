@@ -2,6 +2,20 @@
 
 This file is the ground truth for working in this project. Read it before doing anything.
 
+**Todo list:** All pending work is tracked in `TODO.md`. When asked for the todo list, read `todo_widget.html` and render it using the `show_widget` tool — do NOT show it as plain text or as a separate artifact panel.
+
+**CRITICAL — Backup before marking complete:** Every time the user says to mark a todo item as done, run the O2 backup rotation script FIRST, then mark the item. Never mark complete without backing up.
+
+```
+# Run via Paramiko on O2:
+/mnt/software/pktflow_backup.sh
+```
+
+Backup rotation keeps 2 revisions at `/mnt/software/pktflow_backups/`:
+- `backup_1/` = most recent snapshot
+- `backup_2/` = previous snapshot
+- When a new backup runs: backup_2 is dropped, backup_1 → backup_2, current → backup_1
+
 ---
 
 ## What This Is
@@ -44,14 +58,22 @@ pktFlow is a production NetFlow visualization and alerting platform deployed on 
 - Run scripts via Desktop Commander `start_process`, not the bash sandbox
 
 ```python
-import paramiko
+import paramiko, sys
+sys.stdout.reconfigure(encoding='utf-8')  # REQUIRED — Windows defaults to cp1252 which crashes on Unicode output from O2
 key = paramiko.RSAKey.from_private_key_file(r"C:\Users\user\.ssh\corporate_infrastructure.pem")
 client = paramiko.SSHClient()
 client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 client.connect("10.20.30.5", username="ec2-user", pkey=key, timeout=15, banner_timeout=15)
 _, stdout, _ = client.exec_command("your command", timeout=20)
-print(stdout.read().decode())
+print(stdout.read().decode('utf-8', errors='replace'))
 client.close()
+```
+
+**Windows encoding — CRITICAL:** Always include `sys.stdout.reconfigure(encoding='utf-8')` at the top of every Paramiko script. Without it, any Unicode output from O2 (box-drawing chars, checkmarks, etc.) causes `UnicodeEncodeError: 'charmap' codec can't encode character` and the script dies mid-run.
+
+**npm build output:** Vite's build table uses Unicode box-drawing characters. Never try to capture and print `npm run build` output directly. Always redirect to `/dev/null` and echo pass/fail:
+```bash
+npm run build > /dev/null 2>&1 && echo 'build ok' || echo 'BUILD FAILED'
 ```
 
 ---

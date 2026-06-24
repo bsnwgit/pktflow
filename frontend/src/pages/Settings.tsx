@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api } from '../api/client'
+import { api, DeviceSummary } from '../api/client'
+import { useAutoRefresh } from '../store/autoRefresh'
 
 // ── Generic helpers ────────────────────────────────────────────────────────────
 type Settings = Record<string, unknown>
@@ -9,7 +10,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
     <div className="grid grid-cols-3 gap-4 items-start py-4 border-b border-gray-800 last:border-0">
       <div>
         <p className="text-sm font-medium text-white">{label}</p>
-        {hint && <p className="text-xs text-gray-500 mt-0.5">{hint}</p>}
+        {hint && <p className="text-xs text-white mt-0.5">{hint}</p>}
       </div>
       <div className="col-span-2">{children}</div>
     </div>
@@ -91,13 +92,13 @@ function RestartServiceRow() {
     <div className="grid grid-cols-3 gap-4 items-start py-4 border-b border-gray-800">
       <div>
         <p className="text-sm font-medium text-white">Restart Service</p>
-        <p className="text-xs text-gray-500 mt-0.5">Apply backend changes or recover from errors</p>
+        <p className="text-xs text-white mt-0.5">Apply backend changes or recover from errors</p>
       </div>
       <div className="col-span-2 flex items-center gap-3">
         <button
           onClick={restart}
           disabled={state === 'restarting'}
-          className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
+          className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-white text-white text-sm font-medium rounded-lg transition-colors"
         >
           {state === 'restarting' ? 'Restarting…' : 'Restart Service'}
         </button>
@@ -115,7 +116,7 @@ function RestartServiceRow() {
 // Badge for "Phase 5" to mark not-yet-active features
 function Phase5Badge() {
   return (
-    <span className="ml-2 text-xs bg-gray-800 text-gray-400 border border-gray-700 rounded px-1.5 py-0.5">
+    <span className="ml-2 text-xs bg-gray-800 text-white border border-gray-700 rounded px-1.5 py-0.5">
       Phase 5
     </span>
   )
@@ -180,15 +181,16 @@ function useSave(keys: string[], settings: Settings, onSuccess: () => void) {
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
-type TabId = 'general' | 'storage' | 'ingest' | 'auth' | 'notifications' | 'devices'
+type TabId = 'general' | 'storage' | 'ingest' | 'auth' | 'notifications' | 'devices' | 'integrations'
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'general',       label: 'General' },
+  { id: 'devices',       label: 'Collectors' },
   { id: 'storage',       label: 'Storage' },
   { id: 'ingest',        label: 'Ingest' },
   { id: 'auth',          label: 'Auth' },
   { id: 'notifications', label: 'Notifications' },
-  { id: 'devices',       label: 'Devices' },
+  { id: 'integrations',  label: 'Integrations' },
 ]
 
 export default function Settings() {
@@ -230,10 +232,17 @@ export default function Settings() {
     'notify_webhook_enabled', 'notify_webhook_url',
     'notify_webhook_method', 'notify_webhook_payload_template',
   ], settings, load)
+  const integrationsSave = useSave(
+    ['lucid_api_token', 'ssl_enabled', 'ssl_certfile', 'ssl_keyfile'],
+    settings, load
+  )
+
+  const { tick } = useAutoRefresh()
+  useEffect(() => { if (tick > 0) load() }, [tick])
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-48 text-gray-500">
+      <div className="flex items-center justify-center h-48 text-white">
         <p className="text-sm">Loading settings…</p>
       </div>
     )
@@ -250,7 +259,7 @@ export default function Settings() {
             key={t.id}
             onClick={() => setTab(t.id)}
             className={`text-sm px-4 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
-              tab === t.id ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+              tab === t.id ? 'bg-gray-700 text-white' : 'text-white hover:text-white'
             }`}
           >
             {t.label}
@@ -282,7 +291,7 @@ export default function Settings() {
           </Field>
 
           <div className="pt-4 pb-1">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">
               AI Assistant (Claude)
             </p>
           </div>
@@ -329,13 +338,13 @@ export default function Settings() {
           <Field label="Raw flow retention" hint="Days to keep individual flow records">
             <div className="flex items-center gap-3">
               <NumberInput value={num('retention_days_raw', 90)} onChange={v => set('retention_days_raw', v)} min={1} max={3650} />
-              <span className="text-sm text-gray-400">days</span>
+              <span className="text-sm text-white">days</span>
             </div>
           </Field>
           <Field label="Hourly rollup retention" hint="Days to keep per-hour aggregated data">
             <div className="flex items-center gap-3">
               <NumberInput value={num('retention_days_hourly', 365)} onChange={v => set('retention_days_hourly', v)} min={1} max={3650} />
-              <span className="text-sm text-gray-400">days</span>
+              <span className="text-sm text-white">days</span>
             </div>
           </Field>
         </Section>
@@ -406,12 +415,12 @@ export default function Settings() {
           <Field label="Session timeout">
             <div className="flex items-center gap-3">
               <NumberInput value={num('session_timeout_minutes', 480)} onChange={v => set('session_timeout_minutes', v)} min={5} max={10080} />
-              <span className="text-sm text-gray-400">minutes</span>
+              <span className="text-sm text-white">minutes</span>
             </div>
           </Field>
 
           <div className="pt-4 pb-2">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">
               Okta OIDC SSO
               <Phase5Badge />
             </p>
@@ -448,7 +457,7 @@ export default function Settings() {
         <Section title="Notifications" onSave={notifySave.save} saving={notifySave.saving} saved={notifySave.saved} error={notifySave.error}>
           {/* Slack */}
           <div className="pt-2 pb-1">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Slack</p>
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">Slack</p>
           </div>
           <Field label="Enable Slack">
             <Toggle value={bool('notify_slack_enabled')} onChange={v => set('notify_slack_enabled', v)} />
@@ -466,7 +475,7 @@ export default function Settings() {
 
           {/* Email — Phase 5 */}
           <div className="pt-4 pb-1">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">
               Email (SMTP) <Phase5Badge />
             </p>
           </div>
@@ -505,7 +514,7 @@ export default function Settings() {
 
           {/* PagerDuty — Phase 5 */}
           <div className="pt-4 pb-1">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">
               PagerDuty <Phase5Badge />
             </p>
           </div>
@@ -520,7 +529,7 @@ export default function Settings() {
 
           {/* Webhook — Phase 5 */}
           <div className="pt-4 pb-1">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">
               Webhook <Phase5Badge />
             </p>
           </div>
@@ -552,35 +561,108 @@ export default function Settings() {
         </Section>
       )}
 
-      {/* Devices tab — redirect to full devices management */}
-      {tab === 'devices' && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center">
-          <p className="text-white font-medium mb-2">Device Management</p>
-          <p className="text-sm text-gray-400 mb-4">
-            Add, edit, and remove NetFlow samplers. Devices define how samplers are named and
-            which source IPs are allowed to submit flows.
-          </p>
-          <DevicesTab />
-        </div>
+      {/* Devices tab */}
+      {tab === 'devices' && <DevicesTab />}
+
+      {/* Integrations */}
+      {tab === 'integrations' && (
+        <Section title="Integrations" onSave={integrationsSave.save} saving={integrationsSave.saving} saved={integrationsSave.saved} error={integrationsSave.error}>
+
+          <div className="pt-2 pb-1">
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">Lucidchart</p>
+          </div>
+          <Field label="API token" hint="Personal Access Token from lucid.co → Account → API Tokens. Required for topology export to Lucidchart.">
+            <TextInput
+              value={str('lucid_api_token')}
+              onChange={v => set('lucid_api_token', v)}
+              placeholder="eyJ…"
+              secret
+              mono
+            />
+          </Field>
+
+          <div className="pt-4 pb-1">
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">SSL / TLS</p>
+          </div>
+          <Field label="Enable HTTPS" hint="Serve pktFlow over HTTPS and WSS. Requires a valid cert and key file on the server. Restart required.">
+            <Toggle value={bool('ssl_enabled')} onChange={v => set('ssl_enabled', v)} />
+          </Field>
+          {bool('ssl_enabled') && (
+            <>
+              <Field label="Certificate file" hint="Absolute path to the PEM certificate file on the O2 server (e.g. /etc/pktflow/ssl/cert.pem).">
+                <TextInput
+                  value={str('ssl_certfile')}
+                  onChange={v => set('ssl_certfile', v)}
+                  placeholder="/etc/pktflow/ssl/cert.pem"
+                  mono
+                />
+              </Field>
+              <Field label="Private key file" hint="Absolute path to the PEM private key file on the O2 server (e.g. /etc/pktflow/ssl/key.pem).">
+                <TextInput
+                  value={str('ssl_keyfile')}
+                  onChange={v => set('ssl_keyfile', v)}
+                  placeholder="/etc/pktflow/ssl/key.pem"
+                  mono
+                />
+              </Field>
+              <Field label="" hint="">
+                <p className="text-xs text-white bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 leading-relaxed">
+                  Save these settings, then restart the service from the{' '}
+                  <strong className="text-white">General</strong> tab for SSL to take effect.
+                </p>
+              </Field>
+            </>
+          )}
+        </Section>
       )}
     </div>
   )
 }
 
-// ── Inline devices management ─────────────────────────────────────────────────
+// ── Devices tab — managed devices + live collector stats ──────────────────────
 interface Device { id: number; ip: string; name: string; site: string; notes: string; allowed: boolean }
 
+const STATUS_DOT: Record<string, string> = {
+  online: 'bg-green-400', stale: 'bg-yellow-400', offline: 'bg-red-400',
+}
+const STATUS_TEXT: Record<string, string> = {
+  online: 'text-green-400', stale: 'text-yellow-400', offline: 'text-red-400',
+}
+
+function samplerStatus(lastSeen: string | null | undefined): 'online' | 'stale' | 'offline' {
+  if (!lastSeen) return 'offline'
+  const ago = (Date.now() - new Date(lastSeen).getTime()) / 1000
+  if (ago < 120) return 'online'
+  if (ago < 600) return 'stale'
+  return 'offline'
+}
+
+function fmtDevBytes(b: number): string {
+  if (b >= 1e9) return (b / 1e9).toFixed(1) + ' GB'
+  if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB'
+  if (b >= 1e3) return (b / 1e3).toFixed(1) + ' KB'
+  return b + ' B'
+}
+
 function DevicesTab() {
-  const [devices, setDevices]   = useState<Device[]>([])
-  const [editing, setEditing]   = useState<Device | null>(null)
-  const [adding, setAdding]     = useState(false)
-  const [saving, setSaving]     = useState(false)
-  const [error, setError]       = useState('')
+  const [devices, setDevices]     = useState<Device[]>([])
+  const [summaries, setSummaries] = useState<DeviceSummary[]>([])
+  const [editing, setEditing]     = useState<Device | null>(null)
+  const [adding, setAdding]       = useState(false)
+  const [saving, setSaving]       = useState(false)
+  const [error, setError]         = useState('')
 
   const EMPTY: Device = { id: 0, ip: '', name: '', site: '', notes: '', allowed: true }
 
-  const load = async () => setDevices(await api.getDevices())
-  useEffect(() => { load() }, [])
+  const loadDevices   = async () => { try { setDevices(await api.getDevices()) } catch {} }
+  const loadSummaries = async () => { try { setSummaries(await api.getDeviceSummaries()) } catch {} }
+
+  useEffect(() => {
+    loadDevices()
+    loadSummaries()
+    const t = setInterval(loadSummaries, 15_000)
+    return () => clearInterval(t)
+  }, [])
 
   const save = async (d: Device) => {
     setSaving(true)
@@ -594,7 +676,7 @@ function DevicesTab() {
       }
       setEditing(null)
       setAdding(false)
-      await load()
+      await loadDevices()
     } catch (e: any) {
       setError(e.message || 'Failed to save')
     } finally {
@@ -605,19 +687,24 @@ function DevicesTab() {
   const del = async (id: number) => {
     if (!confirm('Remove this device?')) return
     await api.deleteDevice(id)
-    await load()
+    await loadDevices()
   }
+
+  // Join: managed devices + live summaries keyed by IP
+  const summaryMap = Object.fromEntries(summaries.map(s => [s.sampler_ip, s]))
+  const managedIPs = new Set(devices.map(d => d.ip))
+  const unregistered = summaries.filter(s => !managedIPs.has(s.sampler_ip))
 
   const DeviceForm = ({ d }: { d: Device }) => {
     const [form, setForm] = useState<Device>(d)
     const f = <K extends keyof Device>(k: K, v: Device[K]) => setForm(x => ({ ...x, [k]: v }))
     return (
       <tr>
-        <td colSpan={7} className="px-4 py-4 bg-gray-800/50">
+        <td colSpan={8} className="px-4 py-4 bg-gray-800/50">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
             {([['IP', 'ip', '192.168.1.1'], ['Name', 'name', 'Core Switch'], ['Site', 'site', 'medical']] as const).map(([label, key, ph]) => (
               <div key={key}>
-                <label className="block text-xs text-gray-400 mb-1">{label}</label>
+                <label className="block text-xs text-white mb-1">{label}</label>
                 <input
                   value={form[key] as string}
                   onChange={e => f(key, e.target.value)}
@@ -628,17 +715,26 @@ function DevicesTab() {
             ))}
             <div className="flex items-end gap-4">
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Allowed</label>
+                <label className="block text-xs text-white mb-1">Allowed</label>
                 <Toggle value={form.allowed} onChange={v => f('allowed', v)} />
               </div>
             </div>
+          </div>
+          <div className="mb-3">
+            <label className="block text-xs text-white mb-1">Notes</label>
+            <input
+              value={form.notes}
+              onChange={e => f('notes', e.target.value)}
+              placeholder="Optional notes"
+              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
           </div>
           {error && <p className="text-xs text-red-400 mb-2">{error}</p>}
           <div className="flex gap-2">
             <button onClick={() => save(form)} disabled={saving} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs rounded px-3 py-1.5">
               {saving ? 'Saving…' : 'Save'}
             </button>
-            <button onClick={() => { setEditing(null); setAdding(false) }} className="text-gray-400 hover:text-white text-xs border border-gray-700 rounded px-3 py-1.5">
+            <button onClick={() => { setEditing(null); setAdding(false) }} className="text-white hover:text-white text-xs border border-gray-700 rounded px-3 py-1.5">
               Cancel
             </button>
           </div>
@@ -648,8 +744,9 @@ function DevicesTab() {
   }
 
   return (
-    <div className="text-left">
-      <div className="flex justify-end mb-3">
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs text-gray-500">Live stats refresh every 15s</p>
         <button onClick={() => { setAdding(true); setEditing(null) }} className="bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg px-4 py-2">
           + Add device
         </button>
@@ -658,41 +755,89 @@ function DevicesTab() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-800">
-              {['IP', 'Name', 'Site', 'Allowed', 'Notes', ''].map(h => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-400">{h}</th>
-              ))}
+              <th className="px-4 py-3 w-6"></th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-white">Device</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-white">Site</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-white">Status</th>
+              <th className="px-4 py-3 text-right text-xs font-medium text-white">Flows/s</th>
+              <th className="px-4 py-3 text-right text-xs font-medium text-white">Bytes/hr</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-white">Ingest</th>
+              <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800/50">
             {adding && <DeviceForm d={EMPTY} />}
-            {devices.map(d => (
+            {devices.map(d => {
+              const s = summaryMap[d.ip]
+              const status = samplerStatus(s?.last_seen)
+              return editing?.id === d.id ? (
+                <DeviceForm key={`edit-${d.id}`} d={d} />
+              ) : (
+                <tr key={d.id} className="hover:bg-gray-800/30 transition-colors">
+                  <td className="px-4 py-3">
+                    <span className={`w-2 h-2 rounded-full inline-block ${STATUS_DOT[status]}`} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <p className="text-white font-medium">{d.name || d.ip}</p>
+                    <p className="text-xs font-mono text-blue-300">{d.ip}</p>
+                  </td>
+                  <td className="px-4 py-3 text-white text-sm">{d.site || '—'}</td>
+                  <td className={`px-4 py-3 capitalize text-xs font-medium ${STATUS_TEXT[status]}`}>{status}</td>
+                  <td className="px-4 py-3 text-right font-mono text-white text-xs">{s ? s.flows_per_sec.toFixed(1) : '—'}</td>
+                  <td className="px-4 py-3 text-right font-mono text-white text-xs">{s ? fmtDevBytes(s.bytes_last_hour) : '—'}</td>
+                  <td className="px-4 py-3">
+                    <span className={`text-xs px-2 py-0.5 rounded ${d.allowed ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                      {d.allowed ? 'Allowed' : 'Blocked'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-3">
+                      <button onClick={() => { setEditing(d); setAdding(false) }} className="text-xs text-white hover:text-blue-400 transition-colors">Edit</button>
+                      <button onClick={() => del(d.id)} className="text-xs text-white hover:text-red-400 transition-colors">Remove</button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+            {unregistered.length > 0 && (
               <>
-                {editing?.id === d.id ? (
-                  <DeviceForm key={`edit-${d.id}`} d={d} />
-                ) : (
-                  <tr key={d.id} className="hover:bg-gray-800/30 transition-colors">
-                    <td className="px-4 py-3 font-mono text-sm text-blue-300">{d.ip}</td>
-                    <td className="px-4 py-3 text-white">{d.name}</td>
-                    <td className="px-4 py-3 text-gray-400">{d.site}</td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs px-2 py-0.5 rounded ${d.allowed ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                        {d.allowed ? 'Allowed' : 'Blocked'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{d.notes}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-3">
-                        <button onClick={() => { setEditing(d); setAdding(false) }} className="text-xs text-gray-500 hover:text-blue-400 transition-colors">Edit</button>
-                        <button onClick={() => del(d.id)} className="text-xs text-gray-500 hover:text-red-400 transition-colors">Remove</button>
-                      </div>
-                    </td>
-                  </tr>
-                )}
+                <tr>
+                  <td colSpan={8} className="px-4 pt-4 pb-1">
+                    <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">Unregistered samplers — sending data but not in device list</p>
+                  </td>
+                </tr>
+                {unregistered.map(s => {
+                  const status = samplerStatus(s.last_seen)
+                  return (
+                    <tr key={s.sampler_ip} className="hover:bg-gray-800/30 transition-colors opacity-70">
+                      <td className="px-4 py-3">
+                        <span className={`w-2 h-2 rounded-full inline-block ${STATUS_DOT[status]}`} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className="text-gray-400 font-medium">{s.sampler_name || s.sampler_ip}</p>
+                        <p className="text-xs font-mono text-blue-300/70">{s.sampler_ip}</p>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-sm">{s.site || '—'}</td>
+                      <td className={`px-4 py-3 capitalize text-xs font-medium ${STATUS_TEXT[status]}`}>{status}</td>
+                      <td className="px-4 py-3 text-right font-mono text-gray-400 text-xs">{s.flows_per_sec.toFixed(1)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-gray-400 text-xs">{fmtDevBytes(s.bytes_last_hour)}</td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs px-2 py-0.5 rounded bg-gray-700 text-gray-400">Unregistered</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => { setAdding(true); setEditing(null) }}
+                          className="text-xs text-white hover:text-blue-400 transition-colors"
+                        >Register</button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </>
-            ))}
-            {devices.length === 0 && !adding && (
+            )}
+            {devices.length === 0 && unregistered.length === 0 && !adding && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">No devices yet</td>
+                <td colSpan={8} className="px-4 py-8 text-center text-sm text-white">No devices yet</td>
               </tr>
             )}
           </tbody>
