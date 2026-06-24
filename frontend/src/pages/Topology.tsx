@@ -90,6 +90,111 @@ function TopologyGraph({
       .attr('markerWidth', 5).attr('markerHeight', 5).attr('orient', 'auto')
       .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', '#4b5563')
 
+    // ── Cluster hulls ─────────────────────────────────────────────────────────
+    const HULL_PADDING = 32
+
+    // Group nodes by site; only sites with ≥2 nodes get a hull
+    const siteNodes = new Map<string, D3Node[]>()
+    nodes.forEach(n => {
+      const s = n.site || 'unknown'
+      if (!siteNodes.has(s)) siteNodes.set(s, [])
+      siteNodes.get(s)!.push(n)
+    })
+    const activeSites = [...siteNodes.entries()].filter(([, ns]) => ns.length >= 2)
+
+    // Hull group goes first so it renders behind links and nodes
+    const hullGroup = g.append('g').attr('class', 'hulls')
+    const hullLabelGroup = g.append('g').attr('class', 'hull-labels')
+
+    const hullLine = d3.line<[number, number]>()
+      .x(p => p[0]).y(p => p[1])
+      .curve(d3.curveCatmullRomClosed)
+
+    function computeHullPath(pts: [number, number][], padding: number): string {
+      if (pts.length < 2) return ''
+      let shapePts: [number, number][]
+      if (pts.length === 2) {
+        // Two nodes: build a capsule shape around both
+        const [p0, p1] = pts
+        const angle = Math.atan2(p1[1] - p0[1], p1[0] - p0[0])
+        const steps = 12
+        const cap: [number, number][] = []
+        for (let i = 0; i <= steps; i++) {
+          const a = angle + Math.PI / 2 + (Math.PI * i / steps)
+          cap.push([p0[0] + Math.cos(a) * padding, p0[1] + Math.sin(a) * padding])
+        }
+        for (let i = 0; i <= steps; i++) {
+          const a = angle - Math.PI / 2 + (Math.PI * i / steps)
+          cap.push([p1[0] + Math.cos(a) * padding, p1[1] + Math.sin(a) * padding])
+        }
+        shapePts = cap
+      } else {
+        const hull = d3.polygonHull(pts)
+        if (!hull) return ''
+        const cx = d3.mean(hull, p => p[0])!
+        const cy = d3.mean(hull, p => p[1])!
+        shapePts = hull.map(p => {
+          const dx = p[0] - cx, dy = p[1] - cy
+          const len = Math.sqrt(dx * dx + dy * dy) || 1
+          return [p[0] + dx / len * padding, p[1] + dy / len * padding] as [number, number]
+        })
+      }
+      return hullLine(shapePts) ?? ''
+    }
+
+    const hullPaths = new Map<string, d3.Selection<SVGPathElement, unknown, null, undefined>>()
+    const hullTexts = new Map<string, d3.Selection<SVGTextElement, unknown, null, undefined>>()
+    const hullBgs   = new Map<string, d3.Selection<SVGRectElement, unknown, null, undefined>>()
+    activeSites.forEach(([site]) => {
+      const color = siteColor(site)
+      hullPaths.set(site,
+        hullGroup.append('path')
+          .attr('fill', color).attr('fill-opacity', 0.11)
+          .attr('stroke', color).attr('stroke-opacity', 0.55)
+          .attr('stroke-width', 1.5).attr('stroke-dasharray', '5,3')
+      )
+      // Background pill for the label — added to hullLabelGroup later
+      hullBgs.set(site,
+        hullLabelGroup.append('rect')
+          .attr('fill', '#111827').attr('fill-opacity', 0.65)
+          .attr('rx', 4).attr('ry', 4)
+          .attr('pointer-events', 'none')
+      )
+      hullTexts.set(site,
+        hullLabelGroup.append('text')
+          .text(site.toUpperCase())
+          .attr('fill', color).attr('fill-opacity', 0.9)
+          .attr('font-size', '12px').attr('font-weight', '700')
+          .attr('text-anchor', 'middle').attr('pointer-events', 'none')
+          .attr('letter-spacing', '0.1em')
+      )
+    })
+
+    function updateHulls() {
+      activeSites.forEach(([site, sNodes]) => {
+        const pts = sNodes.map(n => [n.x ?? 0, n.y ?? 0] as [number, number])
+        hullPaths.get(site)!.attr('d', computeHullPath(pts, HULL_PADDING))
+        const cx = d3.mean(pts, p => p[0])!
+        const cy = d3.mean(pts, p => p[1])!
+        const txt = hullTexts.get(site)!.attr('x', cx).attr('y', cy + 4)
+        // Size the background pill to the text
+        const tNode = txt.node()
+        if (tNode) {
+          const bb = (tNode as SVGTextElement).getBBox?.()
+          if (bb && bb.width > 0) {
+            hullBgs.get(site)!
+              .attr('x', cx - bb.width / 2 - 5)
+              .attr('y', cy - bb.height + 1)
+              .attr('width', bb.width + 10)
+              .attr('height', bb.height + 2)
+          }
+        }
+      })
+      // Keep labels on top of nodes
+      hullLabelGroup.raise()
+    }
+
+    // ── Links ─────────────────────────────────────────────────────────────────
     const link = g.append('g').selectAll<SVGLineElement, D3Link>('line')
       .data(links).join('line')
       .attr('stroke', '#374151')
@@ -168,6 +273,18 @@ function TopologyGraph({
       })
       .on('mousemove', moveTip).on('mouseleave', hideTip)
 
+    // Site target positions evenly distributed around canvas centre
+    const siteList = [...siteNodes.keys()]
+    const siteTargets = new Map<string, { x: number; y: number }>()
+    siteList.forEach((site, i) => {
+      const angle = (i / siteList.length) * 2 * Math.PI - Math.PI / 2
+      const r = Math.min(width, height) * 0.28
+      siteTargets.set(site, {
+        x: width / 2 + Math.cos(angle) * r,
+        y: height / 2 + Math.sin(angle) * r,
+      })
+    })
+
     const sim = d3.forceSimulation<D3Node>(nodes)
       .force('link', d3.forceLink<D3Node, D3Link>(links)
         .id(d => d._id)
@@ -176,8 +293,11 @@ function TopologyGraph({
       .force('charge', d3.forceManyBody<D3Node>().strength(d => -120 - rScale(d.bytes) * 5))
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force('collide', d3.forceCollide<D3Node>().radius(d => rScale(d.bytes) + 8))
+      .force('site-x', d3.forceX<D3Node>(d => siteTargets.get(d.site || 'unknown')?.x ?? width / 2).strength(0.06))
+      .force('site-y', d3.forceY<D3Node>(d => siteTargets.get(d.site || 'unknown')?.y ?? height / 2).strength(0.06))
 
     sim.on('tick', () => {
+      updateHulls()
       link
         .attr('x1', d => (d.source as D3Node).x ?? 0)
         .attr('y1', d => (d.source as D3Node).y ?? 0)

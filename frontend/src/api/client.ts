@@ -102,6 +102,10 @@ export const api = {
     request<ProtocolStat[]>(`/flows/protocols?${new URLSearchParams(params as any)}`),
   getTopPorts: (params: TopPortsParams) =>
     request<PortStat[]>(`/flows/ports/top?${new URLSearchParams(params as any)}`),
+  getDailyTimeseries: (days: number, sampler_ip?: string) =>
+    request<TimeSeriesPoint[]>(`/flows/timeseries/daily?days=${days}${sampler_ip ? `&sampler_ip=${sampler_ip}` : ''}`),
+  getHourlyTimeseries: (window: string, sampler_ip?: string) =>
+    request<TimeSeriesPoint[]>(`/flows/timeseries/hourly?window=${window}${sampler_ip ? `&sampler_ip=${sampler_ip}` : ''}`),
 
   getDevices: () => request<Device[]>('/devices/'),
   createDevice: (d: DeviceIn) => request<Device>('/devices/', { method: 'POST', body: JSON.stringify(d) }),
@@ -135,6 +139,16 @@ export const api = {
 
   restartService: () =>
     request<{ status: string; message: string }>('/system/restart', { method: 'POST' }),
+
+  runCleanup: () =>
+    request<{
+      flows_eligible: number
+      hourly_eligible: number
+      alert_events_deleted: number
+      notification_log_deleted: number
+      clickhouse_status: string
+      status: string
+    }>('/system/cleanup', { method: 'POST' }),
 
   createLucidchart: (params: URLSearchParams) =>
     request<{ edit_url: string; document_id: string }>(
@@ -222,6 +236,8 @@ export interface AlertEvent {
   details: Record<string, unknown>
   fired_at: string
   acked_at: string | null
+  resolved_at: string | null
+  auto_resolved: number  // 1 = engine auto-resolved, 0 = not
 }
 
 export interface UserIn {

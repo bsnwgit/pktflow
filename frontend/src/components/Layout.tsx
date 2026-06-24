@@ -71,10 +71,9 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
 }
 
 const NAV = [
-  { to: '/',          label: 'Dashboard',     icon: '⬡', adminOnly: false },
-  { to: '/devices',   label: 'Devices',       icon: '◈', adminOnly: false },
+  { to: '/',          label: 'Analytics',     icon: '◑', adminOnly: false },
+  { to: '/devices',   label: 'Collectors',    icon: '◈', adminOnly: false },
   { to: '/explorer',  label: 'Flow Explorer', icon: '⊕', adminOnly: false },
-  { to: '/analytics', label: 'Analytics',     icon: '◑', adminOnly: false },
   { to: '/topology',  label: 'Topology',      icon: '⟳', adminOnly: false },
   { to: '/alerts',    label: 'Alerts',        icon: '△', adminOnly: false },
   { to: '/settings',  label: 'Settings',      icon: '⚙', adminOnly: false },
@@ -137,7 +136,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           api.getAlertEvents(true),
         ])
         setFps(rateData.flows_per_sec)
-        setUnacked(events.length)
+        setUnacked(events.filter(e => !e.resolved_at).length)
       } catch {}
     }
     tick()
