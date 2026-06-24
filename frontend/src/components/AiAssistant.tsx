@@ -93,12 +93,12 @@ export default function AiAssistant({ context = {} }: AiAssistantProps) {
             <div className="flex items-center gap-2">
               <span className="text-blue-400 text-sm">✦</span>
               <span className="text-sm font-semibold text-white">AI Assistant</span>
-              <span className="text-xs text-gray-500">Claude</span>
+              <span className="text-xs text-white">Claude</span>
             </div>
             {messages.length > 0 && (
               <button
                 onClick={() => setMessages([])}
-                className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                className="text-xs text-white hover:text-white transition-colors"
               >
                 Clear
               </button>
@@ -114,7 +114,7 @@ export default function AiAssistant({ context = {} }: AiAssistantProps) {
               </div>
             )}
             {messages.length === 0 && configured !== false && (
-              <div className="text-gray-500 text-xs space-y-2">
+              <div className="text-white text-xs space-y-2">
                 <p>Ask anything about your network traffic:</p>
                 {[
                   'Why is this device sending so much traffic?',
@@ -124,7 +124,7 @@ export default function AiAssistant({ context = {} }: AiAssistantProps) {
                   <button
                     key={q}
                     onClick={() => { setInput(q); }}
-                    className="block text-left text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg px-3 py-2 w-full transition-colors text-xs"
+                    className="block text-left text-white hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg px-3 py-2 w-full transition-colors text-xs"
                   >
                     {q}
                   </button>
@@ -146,7 +146,7 @@ export default function AiAssistant({ context = {} }: AiAssistantProps) {
             ))}
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-gray-800 rounded-xl px-3 py-2 text-xs text-gray-400 animate-pulse">
+                <div className="bg-gray-800 rounded-xl px-3 py-2 text-xs text-white animate-pulse">
                   Thinking…
                 </div>
               </div>

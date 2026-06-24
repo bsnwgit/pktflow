@@ -651,3 +651,18 @@ class DuckDBBackend(StorageBackend):
             )
             for r in rows
         ]
+
+    async def purge_sampler(self, sampler_ip: str) -> None:
+        def _delete():
+            self._wconn.execute("DELETE FROM flows WHERE sampler_ip = ?", [sampler_ip])
+        await self._write(_delete)
+        log.info("DuckDB: purged all flows for sampler_ip=%s", sampler_ip)
+
+    async def get_metric_in_window(self, metric: str, window_min: int, sampler_ip=None) -> float:
+        raise NotImplementedError("get_metric_in_window not implemented for DuckDB")
+
+    async def get_metric_baseline(self, metric: str, baseline_days: int, window_min: int, sampler_ip=None) -> float:
+        raise NotImplementedError("get_metric_baseline not implemented for DuckDB")
+
+    async def get_port_flow_count(self, port: int, protocol, direction: str, window_min: int, sampler_ip=None) -> int:
+        raise NotImplementedError("get_port_flow_count not implemented for DuckDB")

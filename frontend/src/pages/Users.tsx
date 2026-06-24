@@ -11,16 +11,16 @@ const ROLES = ['admin', 'viewer', 'analyst']
 function badge(active: boolean) {
   return active
     ? 'bg-green-900/40 text-green-400 border border-green-700/40'
-    : 'bg-gray-800 text-gray-500 border border-gray-700'
+    : 'bg-gray-800 text-white border border-gray-700'
 }
 
 function roleBadge(role: string) {
   const map: Record<string, string> = {
     admin:   'bg-blue-900/40 text-blue-300 border border-blue-700/40',
-    viewer:  'bg-gray-800 text-gray-400 border border-gray-700',
+    viewer:  'bg-gray-800 text-white border border-gray-700',
     analyst: 'bg-purple-900/40 text-purple-300 border border-purple-700/40',
   }
-  return map[role] ?? 'bg-gray-800 text-gray-400 border border-gray-700'
+  return map[role] ?? 'bg-gray-800 text-white border border-gray-700'
 }
 
 interface ModalProps {
@@ -64,25 +64,25 @@ function UserModal({ user, onClose, onSaved }: ModalProps) {
         <h2 className="text-lg font-semibold text-white mb-5">{editing ? `Edit — ${user!.username}` : 'New User'}</h2>
         <form onSubmit={submit} className="space-y-4">
           <div>
-            <label className="text-xs text-gray-400 block mb-1">Username</label>
+            <label className="text-xs text-white block mb-1">Username</label>
             <input value={form.username} onChange={e => set('username', e.target.value)} required
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" />
           </div>
           <div>
-            <label className="text-xs text-gray-400 block mb-1">Email</label>
+            <label className="text-xs text-white block mb-1">Email</label>
             <input type="email" value={form.email} onChange={e => set('email', e.target.value)} required
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" />
           </div>
           <div>
-            <label className="text-xs text-gray-400 block mb-1">
-              Password {editing && <span className="text-gray-600">(leave blank to keep current)</span>}
+            <label className="text-xs text-white block mb-1">
+              Password {editing && <span className="text-white">(leave blank to keep current)</span>}
             </label>
             <input type="password" value={form.password} onChange={e => set('password', e.target.value)}
               placeholder={editing ? '••••••••' : 'Required'}
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" />
           </div>
           <div>
-            <label className="text-xs text-gray-400 block mb-1">Role</label>
+            <label className="text-xs text-white block mb-1">Role</label>
             <select value={form.role} onChange={e => set('role', e.target.value)}
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
               {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
@@ -91,7 +91,7 @@ function UserModal({ user, onClose, onSaved }: ModalProps) {
           {error && <p className="text-red-400 text-xs">{error}</p>}
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose}
-              className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">
+              className="px-4 py-2 text-sm text-white hover:text-white transition-colors">
               Cancel
             </button>
             <button type="submit" disabled={saving}
@@ -133,21 +133,21 @@ function ResetPasswordModal({ user, onClose }: ResetPwProps) {
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
         <h2 className="text-lg font-semibold text-white mb-1">Reset Password</h2>
-        <p className="text-sm text-gray-400 mb-5">Set a new password for <span className="text-white font-medium">{user.username}</span></p>
+        <p className="text-sm text-white mb-5">Set a new password for <span className="text-white font-medium">{user.username}</span></p>
         <form onSubmit={submit} className="space-y-4">
           <div>
-            <label className="text-xs text-gray-400 block mb-1">New Password</label>
+            <label className="text-xs text-white block mb-1">New Password</label>
             <input type="password" value={pw} onChange={e => setPw(e.target.value)} required autoFocus
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" />
           </div>
           <div>
-            <label className="text-xs text-gray-400 block mb-1">Confirm Password</label>
+            <label className="text-xs text-white block mb-1">Confirm Password</label>
             <input type="password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} required
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500" />
           </div>
           {err && <p className="text-red-400 text-xs">{err}</p>}
           <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">Cancel</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-white hover:text-white transition-colors">Cancel</button>
             <button type="submit" disabled={saving}
               className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors disabled:opacity-50">
               {saving ? 'Saving…' : 'Set Password'}
@@ -192,7 +192,7 @@ export default function Users() {
   }
 
   if (me?.role !== 'admin') {
-    return <div className="flex items-center justify-center h-48 text-gray-500">Admin access required</div>
+    return <div className="flex items-center justify-center h-48 text-white">Admin access required</div>
   }
 
   return (
@@ -214,16 +214,16 @@ export default function Users() {
 
       <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
         {loading ? (
-          <div className="flex items-center justify-center h-32 text-gray-500 text-sm">Loading…</div>
+          <div className="flex items-center justify-center h-32 text-white text-sm">Loading…</div>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800">
-                <th className="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Last Login</th>
+                <th className="text-left px-5 py-3 text-xs font-medium text-white uppercase tracking-wider">User</th>
+                <th className="text-left px-5 py-3 text-xs font-medium text-white uppercase tracking-wider">Email</th>
+                <th className="text-left px-5 py-3 text-xs font-medium text-white uppercase tracking-wider">Role</th>
+                <th className="text-left px-5 py-3 text-xs font-medium text-white uppercase tracking-wider">Status</th>
+                <th className="text-left px-5 py-3 text-xs font-medium text-white uppercase tracking-wider">Last Login</th>
                 <th className="px-5 py-3"></th>
               </tr>
             </thead>
@@ -237,11 +237,11 @@ export default function Users() {
                       </div>
                       <div>
                         <p className="text-white font-medium">{u.username}</p>
-                        {u.username === me?.username && <p className="text-xs text-gray-600">you</p>}
+                        {u.username === me?.username && <p className="text-xs text-white">you</p>}
                       </div>
                     </div>
                   </td>
-                  <td className="px-5 py-3.5 text-gray-400">{u.email}</td>
+                  <td className="px-5 py-3.5 text-white">{u.email}</td>
                   <td className="px-5 py-3.5">
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${roleBadge(u.role)}`}>
                       {u.role}
@@ -252,21 +252,21 @@ export default function Users() {
                       {u.is_active ? 'Active' : 'Disabled'}
                     </span>
                   </td>
-                  <td className="px-5 py-3.5 text-gray-500 text-xs">
+                  <td className="px-5 py-3.5 text-white text-xs">
                     {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never'}
                   </td>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center justify-end gap-1">
                       {/* Reset Password */}
                       <button onClick={() => setResetPw(u)} title="Reset Password"
-                        className="p-1.5 text-gray-500 hover:text-purple-400 hover:bg-purple-900/20 rounded transition-colors">
+                        className="p-1.5 text-white hover:text-purple-400 hover:bg-purple-900/20 rounded transition-colors">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/>
                         </svg>
                       </button>
                       {/* Edit */}
                       <button onClick={() => setModal(u)} title="Edit"
-                        className="p-1.5 text-gray-500 hover:text-blue-400 hover:bg-blue-900/20 rounded transition-colors">
+                        className="p-1.5 text-white hover:text-blue-400 hover:bg-blue-900/20 rounded transition-colors">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"/>
                         </svg>
@@ -276,8 +276,8 @@ export default function Users() {
                         <button onClick={() => toggle(u)} title={u.is_active ? 'Disable' : 'Enable'}
                           className={`p-1.5 rounded transition-colors ${
                             u.is_active
-                              ? 'text-gray-500 hover:text-yellow-400 hover:bg-yellow-900/20'
-                              : 'text-gray-500 hover:text-green-400 hover:bg-green-900/20'
+                              ? 'text-white hover:text-yellow-400 hover:bg-yellow-900/20'
+                              : 'text-white hover:text-green-400 hover:bg-green-900/20'
                           }`}>
                           {u.is_active
                             ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
@@ -288,7 +288,7 @@ export default function Users() {
                       {/* Delete */}
                       {u.username !== me?.username && (
                         <button onClick={() => setConfirm(u)} title="Delete"
-                          className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-900/20 rounded transition-colors">
+                          className="p-1.5 text-white hover:text-red-400 hover:bg-red-900/20 rounded transition-colors">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/>
                           </svg>
@@ -303,10 +303,10 @@ export default function Users() {
         )}
       </div>
 
-      <p className="text-xs text-gray-600">
-        Roles: <strong className="text-gray-500">admin</strong> — full access &nbsp;·&nbsp;
-        <strong className="text-gray-500">analyst</strong> — read + export &nbsp;·&nbsp;
-        <strong className="text-gray-500">viewer</strong> — read-only
+      <p className="text-xs text-white">
+        Roles: <strong className="text-white">admin</strong> — full access &nbsp;·&nbsp;
+        <strong className="text-white">analyst</strong> — read + export &nbsp;·&nbsp;
+        <strong className="text-white">viewer</strong> — read-only
       </p>
 
       {/* Reset password modal */}
@@ -326,13 +326,13 @@ export default function Users() {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
           <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-sm w-full">
             <h3 className="text-white font-semibold mb-2">Delete user?</h3>
-            <p className="text-gray-400 text-sm mb-5">
+            <p className="text-white text-sm mb-5">
               <strong className="text-white">{confirm.username}</strong> will be permanently removed.
               This cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
               <button onClick={() => setConfirm(null)}
-                className="px-4 py-2 text-sm text-gray-400 hover:text-white">Cancel</button>
+                className="px-4 py-2 text-sm text-white hover:text-white">Cancel</button>
               <button onClick={() => del(confirm)}
                 className="px-4 py-2 text-sm bg-red-600 hover:bg-red-500 text-white rounded-lg">Delete</button>
             </div>

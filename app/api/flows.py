@@ -9,14 +9,16 @@ import io
 import json
 import socket
 import struct
+import urllib.request
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.dependencies import CurrentUser
-from app.models.flow import TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge, ProtocolStat
+from app.dependencies import CurrentUser, AdminUser
+from app.models.flow import TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge, ProtocolStat, PortStat
 from app.storage.factory import get_storage
 
 router = APIRouter()
@@ -59,6 +61,13 @@ async def list_device_summaries(_: CurrentUser):
     return await get_storage().get_device_summaries()
 
 
+@router.delete("/samplers/{sampler_ip}", status_code=204)
+async def purge_sampler(_: AdminUser, sampler_ip: str):
+    """Delete all flow records for a sampler IP (admin only). Used to remove stale dashboard cards."""
+    await get_storage().purge_sampler(sampler_ip)
+    return None
+
+
 @router.get("/rate")
 async def current_flow_rate(_: CurrentUser):
     """Current flows/sec (last 60 seconds) — for the live header counter."""
@@ -72,6 +81,9 @@ async def current_flow_rate(_: CurrentUser):
 async def flow_time_series(
     _: CurrentUser,
     sampler_ip: Optional[str] = Query(None, description="Filter to a single sampler"),
+    site: Optional[str] = Query(None, description="Filter to a site (Site-B, Site-A, etc.)"),
+    dst_port: Optional[int] = Query(None, ge=0, le=65535, description="Filter to a destination port"),
+    protocol: Optional[int] = Query(None, ge=0, le=255, description="Filter to IP protocol number"),
     window: str = Query("1h", description="Time window: 1h, 6h, 24h, 7d, 30d"),
     start: Optional[datetime] = Query(None, description="Custom start (ISO 8601, overrides window)"),
     end: Optional[datetime] = Query(None, description="Custom end (ISO 8601, overrides window)"),
@@ -84,7 +96,10 @@ async def flow_time_series(
         s, e = _parse_window(window)
         bucket = _bucket_for_window(window)
 
-    return await get_storage().get_time_series(sampler_ip, s, e, bucket)
+    return await get_storage().get_time_series(
+        sampler_ip, s, e, bucket,
+        dst_port=dst_port, protocol=protocol, site=site,
+    )
 
 
 @router.get("/top-talkers", response_model=list[TopTalker])
@@ -169,6 +184,26 @@ async def protocol_distribution(
     return await get_storage().get_protocol_distribution(s, e, sampler_ip)
 
 
+# ── Port analytics ───────────────────────────────────────────────────────────
+
+@router.get("/ports/top", response_model=list[PortStat])
+async def top_ports(
+    _: CurrentUser,
+    window: str = Query("1h"),
+    sampler_ip: Optional[str] = Query(None),
+    site: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None),
+):
+    """Top destination ports by byte volume — for port analytics page."""
+    if start and end:
+        s, e = start, end
+    else:
+        s, e = _parse_window(window)
+    return await get_storage().get_top_ports(s, e, sampler_ip=sampler_ip, site=site, limit=limit)
+
+
 # ── Topology ──────────────────────────────────────────────────────────────────
 
 from pydantic import BaseModel as _BaseModel
@@ -204,6 +239,133 @@ async def get_topology(
         limit=limit,
     )
     return TopologyResponse(nodes=nodes, edges=edges)
+
+
+# ── Lucidchart diagram export ─────────────────────────────────────────────────
+
+def _fmt_bytes_lucid(b: int) -> str:
+    if b >= 1_000_000_000: return f"{b/1e9:.1f}GB"
+    if b >= 1_000_000:     return f"{b/1e6:.1f}MB"
+    if b >= 1_000:         return f"{b/1e3:.1f}KB"
+    return f"{b}B"
+
+SITE_COLORS_LUCID = ["#3b82f6","#8b5cf6","#10b981","#f59e0b","#ef4444","#06b6d4"]
+PROTO_NAMES_LUCID = {1:"ICMP",6:"TCP",17:"UDP",47:"GRE",50:"ESP"}
+
+def _build_lucid_standard_import(nodes, edges, title: str) -> dict:
+    """Convert topology nodes/edges to Lucidchart Standard Import JSON."""
+    sites = list(dict.fromkeys(n.site or "unknown" for n in nodes))
+    site_color = lambda s: SITE_COLORS_LUCID[sites.index(s) % len(SITE_COLORS_LUCID)]
+
+    max_bytes = max((n.bytes for n in nodes), default=1)
+    max_edge_bytes = max((e.bytes for e in edges), default=1)
+
+    cols = max(1, int(len(nodes) ** 0.5) + 1)
+    SPACING = 160
+    MIN_SZ, MAX_SZ = 50, 100
+
+    shapes = []
+    node_shape_id: dict[str, str] = {}
+
+    for i, node in enumerate(nodes):
+        sid = f"n{i}"
+        node_shape_id[node.id] = sid
+        col, row = i % cols, i // cols
+        ratio = (node.bytes / max_bytes) ** 0.5
+        sz = int(MIN_SZ + ratio * (MAX_SZ - MIN_SZ))
+        color = site_color(node.site or "unknown")
+        label = (node.sampler_name or node.id)[:30]
+        shapes.append({
+            "id": sid,
+            "type": "circle",
+            "boundingBox": {"x": col * SPACING, "y": row * SPACING, "w": sz, "h": sz},
+            "text": label,
+            "style": {
+                "fill": {"type": "color", "color": color},
+                "stroke": {"color": "#ffffff" if node.is_sampler else "#00000033", "width": 2 if node.is_sampler else 1, "style": "solid"},
+                "textColor": "#ffffff",
+            },
+        })
+
+    lines = []
+    for i, edge in enumerate(edges):
+        src = node_shape_id.get(edge.source)
+        dst = node_shape_id.get(edge.target)
+        if not src or not dst:
+            continue
+        proto = PROTO_NAMES_LUCID.get(edge.protocol, f"P{edge.protocol}")
+        port_str = f":{edge.dst_port}" if edge.dst_port else ""
+        ratio = (edge.bytes / max_edge_bytes) ** 0.5
+        stroke_w = max(1, int(1 + ratio * 5))
+        lines.append({
+            "id": f"e{i}",
+            "lineType": "elbow",
+            "endpoint1": {"type": "shapeEndpoint", "style": "none", "shapeId": src},
+            "endpoint2": {"type": "shapeEndpoint", "style": "arrow", "shapeId": dst},
+            "stroke": {"color": "#6b7280", "width": stroke_w, "style": "solid"},
+            "text": [{"text": f"{proto}{port_str} {_fmt_bytes_lucid(edge.bytes)}", "position": 0.5, "side": "middle"}],
+        })
+
+    return {
+        "version": 1,
+        "title": title,
+        "product": "lucidchart",
+        "pages": [{"id": "page1", "title": "Network Topology", "shapes": shapes, "lines": lines}],
+    }
+
+
+@router.post("/topology/lucidchart")
+async def export_topology_lucidchart(
+    _: CurrentUser,
+    window: str = Query("1h"),
+    sampler_ip: Optional[str] = Query(None),
+    min_bytes: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    """Create a Lucidchart diagram from the current topology and return the edit URL."""
+    import aiosqlite, json as _json
+    from app.database import DB_PATH
+
+    # Load API token from settings
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT value FROM settings WHERE key = 'lucid_api_token'") as cur:
+            row = await cur.fetchone()
+    token = _json.loads(row[0]) if row else ""
+    if not token:
+        raise HTTPException(status_code=400, detail="Lucidchart API token not configured. Add it in Settings → Integrations.")
+
+    s, e = _parse_window(window)
+    nodes, edges = await get_storage().get_topology(
+        start=s, end=e, sampler_ip=sampler_ip, min_bytes=min_bytes, limit=limit,
+    )
+    if not nodes:
+        raise HTTPException(status_code=404, detail="No topology data in this window.")
+
+    title = f"pktFlow Topology ({window})"
+    payload = _build_lucid_standard_import(nodes, edges, title)
+    body = _json.dumps(payload).encode()
+
+    req = urllib.request.Request(
+        "https://api.lucid.co/documents",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/vnd.lucid.standardImport",
+            "Lucid-Api-Version": "1",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = _json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")
+        raise HTTPException(status_code=502, detail=f"Lucidchart API error {exc.code}: {detail[:300]}")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Lucidchart API unreachable: {exc}")
+
+    edit_url = result.get("editUrl") or result.get("documentUrl") or result.get("url") or f"https://lucid.app/lucidchart/{result.get('documentId','')}/edit"
+    return {"edit_url": edit_url, "document_id": result.get("documentId")}
 
 
 # ── Export endpoints ──────────────────────────────────────────────────────────
