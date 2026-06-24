@@ -55,6 +55,12 @@ async def lifespan(app: FastAPI):
     await cleanup.start()
     log.info("Alert cleanup started")
 
+    # Start backup scheduler
+    from app.backup import BackupScheduler
+    backup_scheduler = BackupScheduler()
+    await backup_scheduler.start()
+    log.info("Backup scheduler started")
+
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
@@ -62,6 +68,7 @@ async def lifespan(app: FastAPI):
     await buffer.stop()
     await engine.stop()
     await cleanup.stop()
+    await backup_scheduler.stop()
     storage = get_storage()
     if hasattr(storage, "close"):
         await storage.close()

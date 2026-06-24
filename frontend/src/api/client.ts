@@ -150,6 +150,37 @@ export const api = {
       status: string
     }>('/system/cleanup', { method: 'POST' }),
 
+  runBackupNow: () =>
+    request<{ status: string; path: string; files: string[]; kept: number }>('/system/backup', { method: 'POST' }),
+
+  listBackups: () =>
+    request<Array<{ name: string; path: string; size_bytes: number; files: string[] }>>('/system/backup/list'),
+
+  importBundle: async (file: File): Promise<Record<string, string>> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const headers: Record<string, string> = {}
+    if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+    const res = await fetch('/api/system/import', { method: 'POST', headers, body: formData })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(err.detail || res.statusText)
+    }
+    return res.json()
+  },
+
+  exportConfig: async (): Promise<{ blob: Blob; filename: string }> => {
+    const headers: Record<string, string> = {}
+    if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+    const res = await fetch('/api/system/export', { headers })
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    const blob = await res.blob()
+    const cd = res.headers.get('Content-Disposition') ?? ''
+    const match = cd.match(/filename="([^"]+)"/)
+    const filename = match ? match[1] : 'pktflow-export.tar.gz'
+    return { blob, filename }
+  },
+
   createLucidchart: (params: URLSearchParams) =>
     request<{ edit_url: string; document_id: string }>(
       `/flows/topology/lucidchart?${params}`,
