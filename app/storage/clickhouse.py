@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone
 from typing import Optional
 
 from clickhouse_driver import Client
@@ -305,10 +305,11 @@ class ClickHouseBackend(StorageBackend):
             params["sampler_ip"] = sampler_ip
         where = " AND ".join(where_parts)
 
-        # Edges: top IP pairs by bytes
+        # Edges: top IP pairs by bytes (include site so non-sampler nodes get enriched)
         edge_query = f"""
             SELECT src_ip, dst_ip, sum(bytes) AS bytes, sum(packets) AS packets,
-                   count() AS flows, any(protocol) AS protocol, any(dst_port) AS dst_port
+                   count() AS flows, any(protocol) AS protocol, any(dst_port) AS dst_port,
+                   any(site) AS site
             FROM {settings.clickhouse_database}.flows
             WHERE {where}
             GROUP BY src_ip, dst_ip
@@ -328,12 +329,14 @@ class ClickHouseBackend(StorageBackend):
         sampler_rows = await asyncio.to_thread(self._execute, sampler_query, params)
         sampler_map = {str(r[0]): {"name": r[1], "site": r[2]} for r in sampler_rows}
 
-        # Build edges
+        # Build edges; track dominant site per IP from flow data
         edges: list[TopologyEdge] = []
         node_bytes: dict[str, int] = {}
         node_flows: dict[str, int] = {}
+        node_site: dict[str, str] = {}   # site from actual flows (first non-empty wins)
         for r in edge_rows:
             src, dst = str(r[0]), str(r[1])
+            edge_site = str(r[7]) if len(r) > 7 and r[7] else ""
             edges.append(TopologyEdge(
                 source=src, target=dst,
                 bytes=r[2], packets=r[3], flows=r[4],
@@ -343,16 +346,21 @@ class ClickHouseBackend(StorageBackend):
             node_bytes[dst] = node_bytes.get(dst, 0) + r[2]
             node_flows[src] = node_flows.get(src, 0) + r[4]
             node_flows[dst] = node_flows.get(dst, 0) + r[4]
+            if edge_site:
+                node_site.setdefault(src, edge_site)
+                node_site.setdefault(dst, edge_site)
 
         # Build nodes from IPs seen in edges
         all_ips = set(node_bytes.keys())
         nodes: list[TopologyNode] = []
         for ip in all_ips:
             info = sampler_map.get(ip, {})
+            # Prefer sampler_map site; fall back to site inferred from edge flow data
+            site = info.get("site", "") or node_site.get(ip, "")
             nodes.append(TopologyNode(
                 id=ip,
                 sampler_name=info.get("name", ""),
-                site=info.get("site", ""),
+                site=site,
                 bytes=node_bytes.get(ip, 0),
                 flows=node_flows.get(ip, 0),
                 is_sampler=ip in sampler_map,
@@ -593,3 +601,66 @@ class ClickHouseBackend(StorageBackend):
         query = f"SELECT count() FROM {settings.clickhouse_database}.flows WHERE {where}"
         rows = await asyncio.to_thread(self._execute, query, params)
         return int(rows[0][0]) if rows and rows[0][0] is not None else 0
+
+    async def get_daily_timeseries(
+        self,
+        days: int = 30,
+        sampler_ip: Optional[str] = None,
+    ) -> list[TimeSeriesPoint]:
+        """Daily rollup from flows_daily. Filters out bad epoch-0 entries."""
+        conditions = [
+            "day >= today() - %(days)s",
+            "day >= toDate('2020-01-01')",
+        ]
+        params: dict = {"days": days}
+        if sampler_ip:
+            conditions.append("sampler_ip = %(sampler_ip)s")
+            params["sampler_ip"] = sampler_ip
+        where = " AND ".join(conditions)
+        query = f"""
+            SELECT day, sum(bytes) AS bytes, sum(packets) AS packets, sum(flow_count) AS flow_count
+            FROM {settings.clickhouse_database}.flows_daily
+            WHERE {where}
+            GROUP BY day
+            ORDER BY day
+        """
+        rows = await asyncio.to_thread(self._execute, query, params)
+        result = []
+        for r in rows:
+            d = r[0]
+            # ClickHouse Date → Python date; convert to midnight UTC datetime
+            if isinstance(d, date) and not isinstance(d, datetime):
+                ts = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+            else:
+                ts = d if getattr(d, 'tzinfo', None) else d.replace(tzinfo=timezone.utc)
+            result.append(TimeSeriesPoint(timestamp=ts, bytes=int(r[1]), packets=int(r[2]), flow_count=int(r[3])))
+        return result
+
+    async def get_hourly_timeseries(
+        self,
+        start: datetime,
+        end: datetime,
+        sampler_ip: Optional[str] = None,
+    ) -> list[TimeSeriesPoint]:
+        """Hourly rollup from flows_hourly."""
+        conditions = ["hour BETWEEN %(start)s AND %(end)s"]
+        params: dict = {"start": start, "end": end}
+        if sampler_ip:
+            conditions.append("sampler_ip = %(sampler_ip)s")
+            params["sampler_ip"] = sampler_ip
+        where = " AND ".join(conditions)
+        query = f"""
+            SELECT hour, sum(bytes) AS bytes, sum(packets) AS packets, sum(flow_count) AS flow_count
+            FROM {settings.clickhouse_database}.flows_hourly
+            WHERE {where}
+            GROUP BY hour
+            ORDER BY hour
+        """
+        rows = await asyncio.to_thread(self._execute, query, params)
+        return [
+            TimeSeriesPoint(
+                timestamp=r[0] if getattr(r[0], 'tzinfo', None) else r[0].replace(tzinfo=timezone.utc),
+                bytes=int(r[1]), packets=int(r[2]), flow_count=int(r[3]),
+            )
+            for r in rows
+        ]

@@ -4,17 +4,18 @@ This file is the ground truth for working in this project. Read it before doing 
 
 **Todo list:** All pending work is tracked in `TODO.md`. When asked for the todo list, read `todo_widget.html` and render it using the `show_widget` tool — do NOT show it as plain text or as a separate artifact panel.
 
-**CRITICAL — Backup before marking complete:** Every time the user says to mark a todo item as done, run the O2 backup rotation script FIRST, then mark the item. Never mark complete without backing up.
+**CRITICAL — Backup before marking complete:** Every time the user says to mark a todo item as done (or the Mark Complete button is clicked), run the local backup script FIRST, then mark the item. Never mark complete without backing up.
 
-```
-# Run via Paramiko on O2:
-/mnt/software/pktflow_backup.sh
+```bash
+python "C:\Users\robert.barnett\My Drive\Documents\Claude\Projects\pktFlow\backup.py"
 ```
 
-Backup rotation keeps 2 revisions at `/mnt/software/pktflow_backups/`:
-- `backup_1/` = most recent snapshot
-- `backup_2/` = previous snapshot
+Backup rotation keeps 2 revisions at `C:\Users\robert.barnett\My Drive\Documents\Claude\Projects\pktFlow_backups\`:
+- `backup_1\` = most recent snapshot (local project files only — nothing to do with O2)
+- `backup_2\` = previous snapshot
 - When a new backup runs: backup_2 is dropped, backup_1 → backup_2, current → backup_1
+
+To restore: copy files from `backup_1\` back into the project folder, then redeploy to O2.
 
 ---
 
