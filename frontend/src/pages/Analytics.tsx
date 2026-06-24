@@ -2,18 +2,22 @@
  * Analytics — visual data exploration
  * Four chart types: area, pie, Sankey, node-link network map
  */
-import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  PieChart, Pie, Cell, Legend, ResponsiveContainer,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import * as d3 from 'd3'
-import { api, ProtocolStat, TimeSeriesPoint, TopologyResponse } from '../api/client'
+import { api, TimeSeriesPoint, TopologyResponse } from '../api/client'
 
 // ── Colour palette ─────────────────────────────────────────────────────────────
 const COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#84cc16','#ec4899','#a78bfa']
 
 const WINDOWS = ['1h','6h','24h','7d','30d']
+const HIST_WINDOWS = [
+  { label: '7d',  days: 7 },
+  { label: '30d', days: 30 },
+  { label: '90d', days: 90 },
+]
 
 function fmt(n: number, unit: 'bytes' | 'flows' = 'bytes') {
   if (unit === 'flows') return n >= 1e6 ? `${(n/1e6).toFixed(1)}M` : n >= 1e3 ? `${(n/1e3).toFixed(1)}K` : String(n)
@@ -40,16 +44,12 @@ function buildSankeyLayout(
   height: number,
   padding = 8,
 ) {
-  // Separate source-only and target-only buckets for left/right columns
   const srcIdx = new Set(links.map(l => l.source))
   const dstIdx = new Set(links.map(l => l.target))
-  const srcNodes = nodes.filter((_, i) => srcIdx.has(i))
-  const dstNodes = nodes.filter((_, i) => dstIdx.has(i))
 
   const nodeW = 14
   const colX = { src: 20, dst: width - 20 - nodeW }
 
-  // Compute node totals
   const srcTotals = new Map<number, number>()
   const dstTotals = new Map<number, number>()
   links.forEach(l => {
@@ -60,7 +60,6 @@ function buildSankeyLayout(
   const totalVal = links.reduce((s, l) => s + l.value, 0) || 1
   const usableH = height - padding * 2
 
-  // Layout left column
   let y = padding
   const positioned: (SankeyNode & { x: number; y: number; h: number; value: number })[] = new Array(nodes.length)
   const srcList = [...srcIdx].sort((a, b) => (srcTotals.get(b) ?? 0) - (srcTotals.get(a) ?? 0))
@@ -70,7 +69,6 @@ function buildSankeyLayout(
     y += srcH + padding
   })
 
-  // Layout right column
   y = padding
   const dstList = [...dstIdx].sort((a, b) => (dstTotals.get(b) ?? 0) - (dstTotals.get(a) ?? 0))
   const dstH = (usableH - padding * (dstList.length - 1)) / dstList.length
@@ -79,7 +77,6 @@ function buildSankeyLayout(
     y += dstH + padding
   })
 
-  // Build path data for each link
   const srcOffsets = new Map<number, number>()
   const dstOffsets = new Map<number, number>()
   const paths = links.map(l => {
@@ -100,11 +97,21 @@ function buildSankeyLayout(
 }
 
 function SankeyChart({ topology }: { topology: TopologyResponse }) {
-  const W = 760, H = 340
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [dims, setDims] = useState({ w: 760, h: 340 })
+
+  useEffect(() => {
+    if (!containerRef.current) return
+    const obs = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect
+      if (width > 50 && height > 50) setDims({ w: width, h: height })
+    })
+    obs.observe(containerRef.current)
+    return () => obs.disconnect()
+  }, [])
 
   const { nodes, links } = useMemo(() => {
     const top = topology.edges.slice(0, 20)
-    // Create separate src/dst namespace so IPs don't collide as same node
     const srcIPs = [...new Set(top.map(e => e.source))].slice(0, 10)
     const dstIPs = [...new Set(top.map(e => e.target))].slice(0, 10)
     const srcNodes: SankeyNode[] = srcIPs.map(ip => ({ name: ip }))
@@ -127,39 +134,54 @@ function SankeyChart({ topology }: { topology: TopologyResponse }) {
 
   if (!links.length) return <Empty msg="No flow data for Sankey" />
 
+  const { W, H } = { W: dims.w, H: dims.h }
   const { positioned, paths } = buildSankeyLayout(nodes, links, W, H)
 
   return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="overflow-visible">
-      {paths.map((p, i) => p && (
-        <path key={i} d={p.d} fill={COLORS[i % COLORS.length]} opacity={0.55}>
-          <title>{fmt(p.value)}</title>
-        </path>
-      ))}
-      {positioned.filter(Boolean).map((n, i) => (
-        <g key={i}>
-          <rect x={n.x} y={n.y} width={14} height={Math.max(n.h, 4)} fill={COLORS[i % COLORS.length]} rx={2} />
-          <text
-            x={n.x < W/2 ? n.x + 18 : n.x - 4}
-            y={n.y + n.h / 2}
-            textAnchor={n.x < W/2 ? 'start' : 'end'}
-            dominantBaseline="middle"
-            fontSize={10}
-            fill="#9ca3af"
-          >{n.name}</text>
-        </g>
-      ))}
-    </svg>
+    <div ref={containerRef} className="w-full h-full">
+      <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} className="overflow-visible">
+        {paths.map((p, i) => p && (
+          <path key={i} d={p.d} fill={COLORS[i % COLORS.length]} opacity={0.55}>
+            <title>{fmt(p.value)}</title>
+          </path>
+        ))}
+        {positioned.filter(Boolean).map((n, i) => (
+          <g key={i}>
+            <rect x={n.x} y={n.y} width={14} height={Math.max(n.h, 4)} fill={COLORS[i % COLORS.length]} rx={2} />
+            <text
+              x={n.x < W/2 ? n.x + 18 : n.x - 4}
+              y={n.y + n.h / 2}
+              textAnchor={n.x < W/2 ? 'start' : 'end'}
+              dominantBaseline="middle"
+              fontSize={10}
+              fill="#9ca3af"
+            >{n.name}</text>
+          </g>
+        ))}
+      </svg>
+    </div>
   )
 }
 
 // ── Node-link network map (D3) ─────────────────────────────────────────────────
 function NetworkMap({ topology }: { topology: TopologyResponse }) {
+  const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+  const [dims, setDims] = useState({ w: 760, h: 380 })
+
+  useEffect(() => {
+    if (!containerRef.current) return
+    const obs = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect
+      if (width > 50 && height > 50) setDims({ w: width, h: height })
+    })
+    obs.observe(containerRef.current)
+    return () => obs.disconnect()
+  }, [])
 
   useEffect(() => {
     if (!svgRef.current || !topology.nodes.length) return
-    const W = svgRef.current.clientWidth || 760, H = 380
+    const W = dims.w, H = dims.h
 
     const svg = d3.select(svgRef.current)
     svg.selectAll('*').remove()
@@ -169,6 +191,14 @@ function NetworkMap({ topology }: { topology: TopologyResponse }) {
       .attr('refX',16).attr('refY',0).attr('markerWidth',6).attr('markerHeight',6)
       .attr('orient','auto')
       .append('path').attr('d','M0,-4L8,0L0,4').attr('fill','#4b5563')
+
+    const g = svg.append('g')
+
+    const zoom = d3.zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.2, 8])
+      .on('zoom', (ev) => g.attr('transform', ev.transform))
+
+    svg.call(zoom).on('dblclick.zoom', null)
 
     const maxBytes = d3.max(topology.nodes, n => n.bytes) || 1
     const rScale = d3.scaleSqrt().domain([0, maxBytes]).range([4, 22])
@@ -188,12 +218,12 @@ function NetworkMap({ topology }: { topology: TopologyResponse }) {
       .force('center', d3.forceCenter(W / 2, H / 2))
       .force('collision', d3.forceCollide().radius((d: any) => rScale(d.bytes) + 4))
 
-    const link = svg.append('g').selectAll('line').data(edges).join('line')
+    const link = g.append('g').selectAll('line').data(edges).join('line')
       .attr('stroke','#374151').attr('stroke-opacity',0.6)
       .attr('stroke-width', (d: any) => edgeScale(d.bytes))
       .attr('marker-end','url(#arrow)')
 
-    const node = svg.append('g').selectAll('g').data(nodes).join('g')
+    const node = g.append('g').selectAll('g').data(nodes).join('g')
       .call(d3.drag<any, any>()
         .on('start', (ev, d) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y })
         .on('drag',  (ev, d) => { d.fx=ev.x; d.fy=ev.y })
@@ -220,11 +250,27 @@ function NetworkMap({ topology }: { topology: TopologyResponse }) {
       node.attr('transform', (d: any) => `translate(${d.x},${d.y})`)
     })
 
+    const controls = svg.append('g').attr('transform', `translate(${W - 58}, 10)`)
+    const btnData = [{ label: '+', dy: 0, fn: () => svg.transition().duration(200).call(zoom.scaleBy, 1.4) },
+                     { label: '−', dy: 28, fn: () => svg.transition().duration(200).call(zoom.scaleBy, 0.7) },
+                     { label: '⤢', dy: 56, fn: () => svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity) }]
+    btnData.forEach(({ label, dy, fn }) => {
+      const btn = controls.append('g').attr('transform', `translate(0,${dy})`).style('cursor','pointer').on('click', fn)
+      btn.append('rect').attr('width', 22).attr('height', 22).attr('rx', 4)
+        .attr('fill','#1f2937').attr('stroke','#374151').attr('stroke-width', 0.5)
+      btn.append('text').text(label).attr('x', 11).attr('y', 15)
+        .attr('text-anchor','middle').attr('font-size', 13).attr('fill','#9ca3af')
+    })
+
     return () => { sim.stop() }
-  }, [topology])
+  }, [topology, dims])
 
   if (!topology.nodes.length) return <Empty msg="No topology data" />
-  return <svg ref={svgRef} className="w-full" style={{ height: 380 }} />
+  return (
+    <div ref={containerRef} className="w-full h-full">
+      <svg ref={svgRef} className="w-full h-full" style={{ cursor: 'grab' }} />
+    </div>
+  )
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -232,11 +278,11 @@ function Empty({ msg }: { msg: string }) {
   return <div className="flex items-center justify-center h-32 text-white text-sm">{msg}</div>
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function Card({ title, children, className = '' }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-      <h2 className="text-sm font-semibold text-white mb-3">{title}</h2>
-      {children}
+    <div className={`bg-gray-900 rounded-xl border border-gray-800 p-4 flex flex-col ${className}`}>
+      <h2 className="text-sm font-semibold text-white mb-3 flex-shrink-0">{title}</h2>
+      <div className="flex-1 min-h-0">{children}</div>
     </div>
   )
 }
@@ -244,24 +290,27 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 // ── Main page ──────────────────────────────────────────────────────────────────
 export default function Analytics() {
   const [window, setWindow] = useState('1h')
-  const [timeSeries, setTimeSeries]   = useState<TimeSeriesPoint[]>([])
-  const [protocols,  setProtocols]    = useState<ProtocolStat[]>([])
-  const [topology,   setTopology]     = useState<TopologyResponse>({ nodes: [], edges: [] })
-  const [loading,    setLoading]      = useState(true)
-  const [metric,     setMetric]       = useState<'bytes'|'packets'|'flow_count'>('bytes')
+  const [timeSeries, setTimeSeries] = useState<TimeSeriesPoint[]>([])
+  const [topology,   setTopology]   = useState<TopologyResponse>({ nodes: [], edges: [] })
+  const [loading,    setLoading]    = useState(true)
+  const [metric,     setMetric]     = useState<'bytes'|'packets'|'flow_count'>('bytes')
+  const [histDays,   setHistDays]   = useState(30)
+  const [dailyData,  setDailyData]  = useState<TimeSeriesPoint[]>([])
 
   useEffect(() => {
     setLoading(true)
     Promise.all([
       api.getTimeSeries({ window }),
-      api.getProtocolStats({ window }),
       api.getTopology({ window, limit: '60' }),
-    ]).then(([ts, proto, topo]) => {
+    ]).then(([ts, topo]) => {
       setTimeSeries(ts)
-      setProtocols(proto)
       setTopology(topo)
     }).catch(console.error).finally(() => setLoading(false))
   }, [window])
+
+  useEffect(() => {
+    api.getDailyTimeseries(histDays).then(setDailyData).catch(console.error)
+  }, [histDays])
 
   const tsData = useMemo(() =>
     timeSeries.map(p => ({ ...p, t: fmtTime(p.timestamp, window) })),
@@ -271,10 +320,10 @@ export default function Analytics() {
   const metricLabel = { bytes: 'Bytes', packets: 'Packets', flow_count: 'Flows' }[metric]
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col h-full gap-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-white">Analytics</h1>
+      <div className="flex items-center justify-between flex-shrink-0">
+        <h1 className="text-xl font-semibold text-white">Dashboard</h1>
         <div className="flex items-center gap-2">
           {loading && <span className="text-xs text-white animate-pulse">Loading…</span>}
           <div className="flex bg-gray-800 rounded-lg p-0.5 gap-0.5">
@@ -291,91 +340,92 @@ export default function Analytics() {
         </div>
       </div>
 
-      {/* Area chart — full width */}
-      <Card title="Traffic Over Time">
-        <div className="flex gap-2 mb-3">
-          {(['bytes','packets','flow_count'] as const).map(m => (
-            <button key={m} onClick={() => setMetric(m)}
-              className={`px-2 py-0.5 rounded text-xs ${metric===m ? 'bg-blue-600 text-white' : 'text-white hover:text-gray-200'}`}>
-              {metricLabel === { bytes:'Bytes', packets:'Packets', flow_count:'Flows' }[m] ? metricLabel : { bytes:'Bytes', packets:'Packets', flow_count:'Flows' }[m]}
-            </button>
-          ))}
-        </div>
-        <ResponsiveContainer width="100%" height={200}>
-          <AreaChart data={tsData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
-            <defs>
-              <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-            <XAxis dataKey="t" tick={{ fill:'#6b7280', fontSize:10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-            <YAxis tick={{ fill:'#6b7280', fontSize:10 }} tickLine={false} axisLine={false}
-              tickFormatter={v => metric === 'bytes' ? fmt(v) : fmt(v, 'flows')} />
-            <Tooltip
-              contentStyle={{ background:'#111827', border:'1px solid #374151', borderRadius:8, fontSize:12 }}
-              labelStyle={{ color:'#9ca3af' }}
-              formatter={(v: number) => [metric === 'bytes' ? fmt(v) : fmt(v, 'flows'), metricLabel]}
-            />
-            <Area type="monotone" dataKey={metric} stroke="#3b82f6" fill="url(#areaGrad)" strokeWidth={2} dot={false} />
-          </AreaChart>
-        </ResponsiveContainer>
-      </Card>
+      {/* Traffic Over Time + Historical Trend side by side */}
+      <div className="grid grid-cols-2 gap-4 flex-shrink-0">
+        <Card title="Traffic Over Time">
+          <div className="flex gap-2 mb-3">
+            {(['bytes','packets','flow_count'] as const).map(m => (
+              <button key={m} onClick={() => setMetric(m)}
+                className={`px-2 py-0.5 rounded text-xs ${metric===m ? 'bg-blue-600 text-white' : 'text-white hover:text-gray-200'}`}>
+                {({ bytes:'Bytes', packets:'Packets', flow_count:'Flows' } as const)[m]}
+              </button>
+            ))}
+          </div>
+          <ResponsiveContainer width="100%" height={180}>
+            <AreaChart data={tsData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
+              <defs>
+                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+              <XAxis dataKey="t" tick={{ fill:'#6b7280', fontSize:10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+              <YAxis tick={{ fill:'#6b7280', fontSize:10 }} tickLine={false} axisLine={false}
+                tickFormatter={v => metric === 'bytes' ? fmt(v) : fmt(v, 'flows')} />
+              <Tooltip
+                contentStyle={{ background:'#111827', border:'1px solid #374151', borderRadius:8, fontSize:12 }}
+                labelStyle={{ color:'#9ca3af' }}
+                formatter={(v: number) => [metric === 'bytes' ? fmt(v) : fmt(v, 'flows'), metricLabel]}
+              />
+              <Area type="monotone" dataKey={metric} stroke="#3b82f6" fill="url(#areaGrad)" strokeWidth={2} dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </Card>
 
-      {/* Pie + Sankey row */}
-      <div className="grid grid-cols-5 gap-4">
-        {/* Pie chart */}
-        <div className="col-span-2">
-          <Card title="Protocol Distribution">
-            {protocols.length === 0
-              ? <Empty msg="No protocol data" />
-              : (
-                <ResponsiveContainer width="100%" height={280}>
-                  <PieChart>
-                    <Pie
-                      data={protocols}
-                      dataKey="bytes"
-                      nameKey="name"
-                      cx="50%"
-                      cy="45%"
-                      outerRadius={90}
-                      innerRadius={45}
-                      paddingAngle={2}
-                      label={({ name, pct_bytes }) => `${name} ${pct_bytes}%`}
-                      labelLine={false}
-                    >
-                      {protocols.map((_, i) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{ background:'#111827', border:'1px solid #374151', borderRadius:8, fontSize:12 }}
-                      formatter={(v: number, name: string) => [fmt(v), name]}
-                    />
-                    <Legend
-                      formatter={(v) => <span style={{ color:'#9ca3af', fontSize:11 }}>{v}</span>}
-                      iconSize={8}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              )
-            }
-          </Card>
-        </div>
-
-        {/* Sankey */}
-        <div className="col-span-3">
-          <Card title="Traffic Flow — Source → Destination">
-            <SankeyChart topology={topology} />
-          </Card>
-        </div>
+        <Card title="Historical Trend — Daily Traffic">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs text-gray-500">Bytes per day</span>
+            <div className="flex bg-gray-800 rounded-lg p-0.5 gap-0.5">
+              {HIST_WINDOWS.map(w => (
+                <button key={w.days} onClick={() => setHistDays(w.days)}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                    histDays === w.days ? 'bg-blue-600 text-white' : 'text-white hover:text-white'
+                  }`}>{w.label}</button>
+              ))}
+            </div>
+          </div>
+          {dailyData.length < 2 ? (
+            <div className="flex items-center justify-center h-[180px] text-xs text-gray-500">
+              Accumulating data… ({dailyData.length} day{dailyData.length === 1 ? '' : 's'} so far)
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={180}>
+              <AreaChart data={dailyData.map(p => ({
+                t: new Date(p.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' }),
+                bytes: p.bytes,
+                flows: p.flow_count,
+              }))} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
+                <defs>
+                  <linearGradient id="histGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#10b981" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                <XAxis dataKey="t" tick={{ fill: '#6b7280', fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => fmt(v)} />
+                <Tooltip
+                  contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8, fontSize: 12 }}
+                  labelStyle={{ color: '#9ca3af' }}
+                  formatter={(v: number) => [fmt(v), 'Bytes']}
+                />
+                <Area type="monotone" dataKey="bytes" stroke="#10b981" fill="url(#histGrad)" strokeWidth={2} dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </Card>
       </div>
 
-      {/* Node-link network map */}
-      <Card title="Network Map — Node-Link Graph  (drag to rearrange · blue = sampler)">
-        <NetworkMap topology={topology} />
-      </Card>
+      {/* Network map + Traffic flow — expands to fill remaining height */}
+      <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
+        <Card title="Network Map — scroll to zoom · drag to pan · blue = sampler" className="h-full">
+          <NetworkMap topology={topology} />
+        </Card>
+        <Card title="Traffic Flow — Source → Destination" className="h-full">
+          <SankeyChart topology={topology} />
+        </Card>
+      </div>
     </div>
   )
 }

@@ -49,12 +49,19 @@ async def lifespan(app: FastAPI):
     await engine.start()
     log.info("Alert engine started")
 
+    # Start alert event cleanup job
+    from app.alerts.cleanup import AlertCleanup
+    cleanup = AlertCleanup()
+    await cleanup.start()
+    log.info("Alert cleanup started")
+
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
     log.info("pktFlow shutting down")
     await buffer.stop()
     await engine.stop()
+    await cleanup.stop()
     storage = get_storage()
     if hasattr(storage, "close"):
         await storage.close()
