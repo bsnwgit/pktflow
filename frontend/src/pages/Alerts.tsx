@@ -22,18 +22,29 @@ const RULE_TYPES = ['threshold', 'rate_spike', 'new_host', 'data_gap', 'port_pro
 // ── Alert event card ──────────────────────────────────────────────────────────
 function EventCard({ event, onAck }: { event: AlertEvent; onAck: (id: number) => void }) {
   const [expanded, setExpanded] = useState(false)
-  const isAcked = Boolean(event.acked_at)
+  const isAcked     = Boolean(event.acked_at)
+  const isResolved  = Boolean(event.resolved_at) && !isAcked
 
   return (
-    <div className={`bg-gray-900 border rounded-xl p-4 transition-opacity ${isAcked ? 'opacity-50 border-gray-800' : 'border-gray-700'}`}>
+    <div className={`bg-gray-900 border rounded-xl p-4 transition-opacity ${
+      isAcked ? 'opacity-40 border-gray-800' : isResolved ? 'opacity-70 border-gray-700' : 'border-gray-700'
+    }`}>
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-3 min-w-0">
           <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-medium capitalize ${SEV_STYLES[event.severity] ?? SEV_STYLES.info}`}>
             {event.severity}
           </span>
+          {isResolved && (
+            <span className="shrink-0 text-xs px-2 py-0.5 rounded-full font-medium bg-green-500/20 text-green-400 border border-green-500/40">
+              auto-resolved
+            </span>
+          )}
           <div className="min-w-0">
             <p className="text-sm font-medium text-white truncate">{event.rule_name}</p>
             <p className="text-sm text-white mt-0.5">{event.message}</p>
+            {isResolved && (
+              <p className="text-xs text-green-500/70 mt-0.5">Resolved {fmtTime(event.resolved_at!)}</p>
+            )}
           </div>
         </div>
         <div className="shrink-0 flex items-center gap-2">
@@ -319,9 +330,15 @@ export default function Alerts() {
         <div>
           <h1 className="text-xl font-bold text-white">Alerts</h1>
           <p className="text-sm text-white mt-0.5">
-            {events.length > 0
-              ? `${events.length} unacknowledged alert${events.length !== 1 ? 's' : ''}`
-              : 'No active alerts'}
+            {(() => {
+              const active   = events.filter(e => !e.resolved_at).length
+              const resolved = events.filter(e => e.resolved_at).length
+              if (active > 0)
+                return `${active} active alert${active !== 1 ? 's' : ''}${resolved > 0 ? `, ${resolved} auto-resolved` : ''}`
+              if (resolved > 0)
+                return `${resolved} auto-resolved alert${resolved !== 1 ? 's' : ''} — all conditions cleared`
+              return 'No active alerts'
+            })()}
           </p>
         </div>
         {tab === 'active' && events.length > 0 && (
@@ -353,9 +370,9 @@ export default function Alerts() {
             }`}
           >
             {t}
-            {t === 'active' && events.length > 0 && (
+            {t === 'active' && events.filter(e => !e.resolved_at).length > 0 && (
               <span className="ml-1.5 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5">
-                {events.length}
+                {events.filter(e => !e.resolved_at).length}
               </span>
             )}
           </button>
