@@ -229,13 +229,13 @@ function NetworkMap({ topology }: { topology: TopologyResponse }) {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 function Empty({ msg }: { msg: string }) {
-  return <div className="flex items-center justify-center h-32 text-gray-500 text-sm">{msg}</div>
+  return <div className="flex items-center justify-center h-32 text-white text-sm">{msg}</div>
 }
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-      <h2 className="text-sm font-semibold text-gray-300 mb-3">{title}</h2>
+      <h2 className="text-sm font-semibold text-white mb-3">{title}</h2>
       {children}
     </div>
   )
@@ -276,14 +276,14 @@ export default function Analytics() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-white">Analytics</h1>
         <div className="flex items-center gap-2">
-          {loading && <span className="text-xs text-gray-500 animate-pulse">Loading…</span>}
+          {loading && <span className="text-xs text-white animate-pulse">Loading…</span>}
           <div className="flex bg-gray-800 rounded-lg p-0.5 gap-0.5">
             {WINDOWS.map(w => (
               <button
                 key={w}
                 onClick={() => setWindow(w)}
                 className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  window === w ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+                  window === w ? 'bg-blue-600 text-white' : 'text-white hover:text-white'
                 }`}
               >{w}</button>
             ))}
@@ -296,7 +296,7 @@ export default function Analytics() {
         <div className="flex gap-2 mb-3">
           {(['bytes','packets','flow_count'] as const).map(m => (
             <button key={m} onClick={() => setMetric(m)}
-              className={`px-2 py-0.5 rounded text-xs ${metric===m ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}>
+              className={`px-2 py-0.5 rounded text-xs ${metric===m ? 'bg-blue-600 text-white' : 'text-white hover:text-gray-200'}`}>
               {metricLabel === { bytes:'Bytes', packets:'Packets', flow_count:'Flows' }[m] ? metricLabel : { bytes:'Bytes', packets:'Packets', flow_count:'Flows' }[m]}
             </button>
           ))}

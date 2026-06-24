@@ -35,12 +35,12 @@ export default function Login() {
             </svg>
             <span className="text-2xl font-bold text-white tracking-tight">pktFlow</span>
           </div>
-          <p className="text-gray-400 text-sm">NetFlow Visualization Platform</p>
+          <p className="text-white text-sm">NetFlow Visualization Platform</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-xl p-8 space-y-5">
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Username or Email</label>
+            <label className="block text-sm font-medium text-white mb-1.5">Username or Email</label>
             <input
               type="text"
               value={username}
@@ -52,7 +52,7 @@ export default function Login() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Password</label>
+            <label className="block text-sm font-medium text-white mb-1.5">Password</label>
             <input
               type="password"
               value={password}
