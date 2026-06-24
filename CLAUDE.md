@@ -196,20 +196,36 @@ def _execute(self, query, params=None, data=None):
 
 Always build in Linux `/tmp`. **CRITICAL: always sync the full `frontend/src` from local to O2 first** — the O2 copy can drift from the local project. Skipping this means new pages/components get silently excluded from the bundle.
 
-Full frontend deploy process (use Paramiko SFTP + SSH):
+**USE THE PERMANENT DEPLOY SCRIPT — do not rewrite it each session:**
+```
+C:\Users\user\My Drive\Documents\Claude\Projects\pktFlow\scripts\deploy_frontend.py
+```
+Run it via Desktop Commander `start_process` (cmd shell):
+```
+C:\Users\user\AppData\Local\Programs\Python\Python313\python.exe "C:\Users\user\My Drive\Documents\Claude\Projects\pktFlow\scripts\deploy_frontend.py"
+```
+
+**What the script does (in order):**
 ```
 1. SFTP entire frontend/src/ tree → /mnt/software/pktflow/frontend/src/ on O2
 2. SSH: rm -rf /tmp/pktflow-fe && cp -r /mnt/software/pktflow/frontend /tmp/pktflow-fe
-3. SSH: cd /tmp/pktflow-fe && npm install && npm run build
-4. SSH: rm -rf /mnt/software/pktflow/frontend/dist && cp -r /tmp/pktflow-fe/dist /mnt/software/pktflow/frontend/dist
-5. SSH: sudo systemctl restart pktflow
+3. SSH: npm install   ← REQUIRED every time — node_modules is not in the repo
+4. SSH: npm run build > /dev/null 2>&1 && echo 'build ok' || echo 'BUILD FAILED'
+5. SSH: cp dist back to /mnt/software/pktflow/frontend/dist
+6. SSH: sudo systemctl restart pktflow
+7. Wait 4s, check systemctl is-active + ingest/stats
 ```
 
-To verify the build includes all pages, check for lazy chunk filenames:
-```bash
-ls /mnt/software/pktflow/frontend/dist/assets/
-# Expected chunks: Users-*.js, Alerts-*.js, Settings-*.js, DeviceView-*.js, etc.
+**If the build fails**, run `scripts/check_build.py` to see the TypeScript/Vite error output:
 ```
+C:\Users\user\AppData\Local\Programs\Python\Python313\python.exe "C:\Users\user\My Drive\Documents\Claude\Projects\pktFlow\scripts\check_build.py"
+```
+
+**Critical rules that cause deploy failures if ignored:**
+- **Always use script files** — never `python -c "..."` in cmd shell. Output is lost and pipes break.
+- **`npm install` is mandatory** — `cp -r` does not copy `node_modules` (gitignored). Without it, `tsc: command not found`.
+- **Redirect npm build output** — Vite uses Unicode box chars. Use `> /dev/null 2>&1 && echo 'build ok' || echo 'BUILD FAILED'`, never capture directly.
+- **IIFE in JSX ternary** — inside `) : (`, write `(() => { ... })()` not `{(() => { ... })()}`. The `{` causes TS error "Property assignment expected".
 
 Node is installed via nvm on O2: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh"` before any npm command.
 
