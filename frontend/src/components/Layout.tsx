@@ -77,7 +77,6 @@ const NAV = [
   { to: '/topology',  label: 'Topology',      icon: '⟳', adminOnly: false },
   { to: '/alerts',    label: 'Alerts',        icon: '△', adminOnly: false },
   { to: '/settings',  label: 'Settings',      icon: '⚙', adminOnly: false },
-  { to: '/users',     label: 'Users',         icon: '◎', adminOnly: true  },
 ]
 
 const INTERVALS = [
