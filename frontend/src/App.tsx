@@ -10,7 +10,6 @@ const FlowExplorer = lazy(() => import('./pages/FlowExplorer'))
 const Topology     = lazy(() => import('./pages/Topology'))
 const Alerts       = lazy(() => import('./pages/Alerts'))
 const Settings     = lazy(() => import('./pages/Settings'))
-const Users        = lazy(() => import('./pages/Users'))
 const Ports        = lazy(() => import('./pages/Ports'))
 
 function PageFallback() {
@@ -61,11 +60,7 @@ export default function App() {
               <Suspense fallback={<PageFallback />}><Settings /></Suspense>
             </ProtectedRoute>
           } />
-          <Route path="/users" element={
-            <ProtectedRoute>
-              <Suspense fallback={<PageFallback />}><Users /></Suspense>
-            </ProtectedRoute>
-          } />
+          <Route path="/users" element={<Navigate to="/settings" replace />} />
           <Route path="/ports" element={
             <ProtectedRoute>
               <Suspense fallback={<PageFallback />}><Ports /></Suspense>

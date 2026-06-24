@@ -334,6 +334,7 @@ export default function Topology() {
   const [sampler, setSampler]  = useState('')
   const [minBytes, setMinBytes] = useState('')
   const [devices, setDevices]  = useState<DeviceSummary[]>([])
+  const [deviceNames, setDeviceNames] = useState<Map<string, string>>(new Map())
   const [data, setData]        = useState<{ nodes: TopologyNode[]; edges: TopologyEdge[] } | null>(null)
   const [loading, setLoading]  = useState(false)
   const [selected, setSelected] = useState<TopologyNode | null>(null)
@@ -352,7 +353,12 @@ export default function Topology() {
     return () => ro.disconnect()
   }, [])
 
-  useEffect(() => { api.getDeviceSummaries().then(setDevices) }, [])
+  useEffect(() => {
+    api.getDeviceSummaries().then(setDevices)
+    api.getDevices().then(ds => {
+      setDeviceNames(new Map(ds.map(d => [d.ip, d.name])))
+    })
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -390,7 +396,7 @@ export default function Topology() {
           className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">All samplers</option>
           {devices.map(d => (
-            <option key={d.sampler_ip} value={d.sampler_ip}>{d.sampler_name || d.sampler_ip}</option>
+            <option key={d.sampler_ip} value={d.sampler_ip}>{(() => { const n = deviceNames.get(d.sampler_ip) || d.sampler_name; return n ? `${n} (${d.sampler_ip})` : d.sampler_ip; })()}</option>
           ))}
         </select>
 
@@ -411,37 +417,6 @@ export default function Topology() {
       </div>
 
       {error && <p className="text-sm text-red-400 shrink-0">{error}</p>}
-
-      {/* Graph canvas */}
-      <div ref={containerRef}
-        className="flex-1 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden relative">
-
-        {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80 z-10">
-            <p className="text-sm text-white">Building topology…</p>
-          </div>
-        )}
-
-        {!loading && data && data.nodes.length === 0 && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
-            <p className="text-sm">No flow data in this window.</p>
-            <p className="text-xs mt-1">Try a longer window or lower the min-bytes filter.</p>
-          </div>
-        )}
-
-        {data && data.nodes.length > 0 && (
-          <TopologyGraph
-            data={data}
-            onNodeClick={setSelected}
-            width={dims.w}
-            height={dims.h}
-          />
-        )}
-
-        <p className="absolute bottom-3 left-3 text-xs text-white pointer-events-none select-none">
-          Scroll to zoom · Drag nodes · Click to inspect
-        </p>
-      </div>
 
       {/* Node detail panel */}
       {selected && (
@@ -484,6 +459,37 @@ export default function Topology() {
           </div>
         </div>
       )}
+
+      {/* Graph canvas */}
+      <div ref={containerRef}
+        className="flex-1 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden relative">
+
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80 z-10">
+            <p className="text-sm text-white">Building topology…</p>
+          </div>
+        )}
+
+        {!loading && data && data.nodes.length === 0 && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
+            <p className="text-sm">No flow data in this window.</p>
+            <p className="text-xs mt-1">Try a longer window or lower the min-bytes filter.</p>
+          </div>
+        )}
+
+        {data && data.nodes.length > 0 && (
+          <TopologyGraph
+            data={data}
+            onNodeClick={setSelected}
+            width={dims.w}
+            height={dims.h}
+          />
+        )}
+
+        <p className="absolute bottom-3 left-3 text-xs text-white pointer-events-none select-none">
+          Scroll to zoom · Drag nodes · Click to inspect
+        </p>
+      </div>
     </div>
   )
 }
