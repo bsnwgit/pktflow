@@ -85,6 +85,13 @@ DEFAULTS: dict[str, Any] = {
 
     # Alerts
     "alert_event_retention_days": 90, # Days to keep alert_events + notification_log rows
+
+    # Backup
+    "backup_enabled": False,
+    "backup_interval_hours": 24,
+    "backup_rotation_count": 5,
+    "backup_path": "/mnt/software/pktflow_backups",
+    "backup_include_clickhouse": True,
 }
 
 

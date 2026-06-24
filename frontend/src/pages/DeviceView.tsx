@@ -680,6 +680,13 @@ export default function DeviceView() {
             <span>{fmtBytes(device.bytes_last_hour)}/hr</span>
             <span>·</span>
             <span className="text-white font-medium">{fmtBps(device.bytes_last_hour, 3600)} avg</span>
+            <span>·</span>
+            <button
+              onClick={() => navigate(`/explorer?sampler_ip=${device.sampler_ip}&window=${window}`)}
+              className="text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              View in Flow Explorer →
+            </button>
           </div>
         )}
 

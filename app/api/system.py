@@ -4,14 +4,21 @@ System management endpoints — restart, health, cleanup, etc.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import os
+import shutil
 import signal
 import subprocess
+import tarfile
+import tempfile
+from datetime import datetime
+from pathlib import Path
 
 import aiosqlite
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
 from app.dependencies import require_admin
@@ -135,6 +142,213 @@ async def run_cleanup() -> dict:
         f"alert_events_deleted={result['alert_events_deleted']}"
     )
     return result
+
+
+@router.get("/export", dependencies=[Depends(require_admin)])
+async def export_bundle():
+    """
+    Download a full backup bundle as a .tar.gz archive.
+    Includes: SQLite DB + config.yaml + ClickHouse flows (CSVWithNames, gzipped).
+    Streams directly to avoid holding large data in memory.
+    """
+    cfg = get_settings()
+    date_str = datetime.utcnow().strftime("%Y-%m-%d")
+    filename = f"pktflow-export-{date_str}.tar.gz"
+
+    def _build_archive(out_path: Path) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+
+            # ── SQLite DB ────────────────────────────────────────────────────
+            db = Path(cfg.db_path)
+            if db.exists():
+                shutil.copy2(str(db), str(tmp_path / "pktflow.db"))
+
+            # ── config.yaml ──────────────────────────────────────────────────
+            for candidate in [Path("config.yaml"), Path("/mnt/software/pktflow/config.yaml")]:
+                if candidate.exists():
+                    shutil.copy2(str(candidate), str(tmp_path / "config.yaml"))
+                    break
+
+            # ── ClickHouse flows → flows.csv.gz ──────────────────────────────
+            flows_gz = tmp_path / "flows.csv.gz"
+            try:
+                import gzip as _gzip
+                with _gzip.open(str(flows_gz), "wb") as gz_f:
+                    proc = subprocess.Popen(
+                        [
+                            "clickhouse-client",
+                            "--host", "localhost",
+                            "--port", "9000",
+                            "--database", cfg.clickhouse_database,
+                            "--query", "SELECT * FROM flows FORMAT CSVWithNames",
+                        ],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    )
+                    shutil.copyfileobj(proc.stdout, gz_f)
+                    proc.wait(timeout=600)
+                    if proc.returncode != 0:
+                        err = proc.stderr.read().decode("utf-8", errors="replace")
+                        log.warning(f"ClickHouse export error: {err}")
+            except Exception as e:
+                log.warning(f"ClickHouse export failed, skipping: {e}")
+                if flows_gz.exists():
+                    flows_gz.unlink()
+
+            # ── RESTORE.md ───────────────────────────────────────────────────
+            ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+            ch_note = (
+                "- flows.csv.gz — ClickHouse flows table (CSVWithNames format, gzip compressed)"
+                if flows_gz.exists() and flows_gz.stat().st_size > 100
+                else "- flows.csv.gz — NOT included (ClickHouse export failed or table empty)"
+            )
+            instructions = f"""# pktFlow Full Restore Bundle
+Generated: {ts}
+
+## Contents
+- pktflow.db   — SQLite: users, settings, alert rules, registered devices
+- config.yaml  — Server startup config (ports, ClickHouse connection, JWT secret)
+{ch_note}
+
+## Restore procedure (fresh install)
+1. Deploy pktFlow to the new server per the README.
+2. Stop the service:     sudo systemctl stop pktflow
+3. Copy pktflow.db    →  /mnt/software/pktflow/pktflow.db
+4. Copy config.yaml   →  /mnt/software/pktflow/config.yaml
+5. Start the service:    sudo systemctl start pktflow
+
+## Restore ClickHouse flow history (if flows.csv.gz is present)
+On the new server, after ClickHouse is running and the pktflow database exists:
+
+  gunzip -c flows.csv.gz | clickhouse-client \\
+    --database pktflow \\
+    --query "INSERT INTO flows FORMAT CSVWithNames"
+
+This inserts historical flows on top of any new flows already collected.
+
+## Notes
+- The JWT secret in config.yaml will invalidate existing browser sessions —
+  users on the old server will need to log in again after restore.
+- If you use the UI restore endpoint, the service will need a manual restart
+  after restore for config.yaml changes to take effect.
+"""
+            (tmp_path / "RESTORE.md").write_text(instructions)
+
+            # ── Bundle into tar.gz ────────────────────────────────────────────
+            with tarfile.open(str(out_path), "w:gz") as tar:
+                for f in tmp_path.iterdir():
+                    tar.add(str(f), arcname=f.name)
+
+    # Write to a named temp file so we can stream without holding bytes in RAM
+    tmp_out = Path(tempfile.mktemp(suffix=".tar.gz"))
+    try:
+        await asyncio.to_thread(_build_archive, tmp_out)
+
+        def _iterfile():
+            try:
+                with open(tmp_out, "rb") as f:
+                    while chunk := f.read(65536):
+                        yield chunk
+            finally:
+                tmp_out.unlink(missing_ok=True)
+
+        return StreamingResponse(
+            _iterfile(),
+            media_type="application/gzip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception:
+        tmp_out.unlink(missing_ok=True)
+        raise
+
+
+@router.post("/import", dependencies=[Depends(require_admin)])
+async def import_bundle(file: UploadFile = File(...)):
+    """
+    Restore from a pktflow export bundle (.tar.gz).
+    Restores: SQLite DB, config.yaml, and optionally imports ClickHouse flows.
+    Requires a service restart after restore for config changes to take effect.
+    """
+    cfg = get_settings()
+    data = await file.read()
+
+    def _do_restore(raw: bytes) -> dict:
+        result: dict = {}
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            archive_path = tmp_path / "upload.tar.gz"
+            archive_path.write_bytes(raw)
+
+            try:
+                with tarfile.open(str(archive_path), "r:gz") as tar:
+                    tar.extractall(tmp_path)
+            except Exception as e:
+                return {"error": f"Failed to extract archive: {e}"}
+
+            # ── SQLite ────────────────────────────────────────────────────────
+            db_src = tmp_path / "pktflow.db"
+            if db_src.exists():
+                shutil.copy2(str(db_src), cfg.db_path)
+                result["sqlite"] = "restored"
+            else:
+                result["sqlite"] = "not found in bundle"
+
+            # ── config.yaml ───────────────────────────────────────────────────
+            cfg_src = tmp_path / "config.yaml"
+            cfg_dest = Path("/mnt/software/pktflow/config.yaml")
+            if cfg_src.exists():
+                shutil.copy2(str(cfg_src), str(cfg_dest))
+                result["config"] = "restored (restart required)"
+            else:
+                result["config"] = "not found in bundle"
+
+            # ── ClickHouse flows ──────────────────────────────────────────────
+            flows_gz = tmp_path / "flows.csv.gz"
+            if flows_gz.exists() and flows_gz.stat().st_size > 100:
+                try:
+                    cmd = (
+                        f"gunzip -c '{flows_gz}' | clickhouse-client "
+                        f"--host localhost --database {cfg.clickhouse_database} "
+                        f"--query 'INSERT INTO flows FORMAT CSVWithNames'"
+                    )
+                    proc = subprocess.run(
+                        cmd,
+                        shell=True,
+                        capture_output=True,
+                        timeout=600,
+                        text=True,
+                    )
+                    if proc.returncode == 0:
+                        result["flows"] = "imported"
+                    else:
+                        result["flows"] = f"error: {proc.stderr[:300]}"
+                except Exception as e:
+                    result["flows"] = f"error: {e}"
+            else:
+                result["flows"] = "not present in bundle"
+
+        return result
+
+    result = await asyncio.to_thread(_do_restore, data)
+    return result
+
+
+@router.post("/backup", dependencies=[Depends(require_admin)])
+async def run_backup_now() -> dict:
+    """Trigger an immediate backup run regardless of schedule."""
+    from app.backup import run_backup_sync
+    cfg = get_settings()
+    result = await asyncio.to_thread(run_backup_sync, cfg.db_path, cfg.clickhouse_database)
+    return result
+
+
+@router.get("/backup/list", dependencies=[Depends(require_admin)])
+async def list_backups() -> list:
+    """List existing backup snapshots on the server, newest first."""
+    from app.backup import list_backups_sync
+    cfg = get_settings()
+    return await asyncio.to_thread(list_backups_sync, cfg.db_path)
 
 
 @router.post("/restart", dependencies=[Depends(require_admin)])
