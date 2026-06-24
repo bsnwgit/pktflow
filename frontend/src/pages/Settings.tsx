@@ -893,6 +893,9 @@ function DevicesTab() {
   const [adding, setAdding]       = useState(false)
   const [saving, setSaving]       = useState(false)
   const [error, setError]         = useState('')
+  const [csvImporting, setCsvImporting] = useState(false)
+  const [csvResult, setCsvResult]       = useState<{ created: number; updated: number; skipped: number; errors: Array<{ row: number; reason: string }> } | null>(null)
+  const [csvError, setCsvError]         = useState<string | null>(null)
 
   const EMPTY: Device = { id: 0, ip: '', name: '', site: '', notes: '', allowed: true }
 
@@ -930,6 +933,35 @@ function DevicesTab() {
     if (!confirm('Remove this device?')) return
     await api.deleteDevice(id)
     await loadDevices()
+  }
+
+  const handleCsvImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setCsvImporting(true)
+    setCsvResult(null)
+    setCsvError(null)
+    try {
+      const result = await api.importDevicesCsv(file)
+      setCsvResult(result)
+      await loadDevices()
+    } catch (err: any) {
+      setCsvError(err.message || 'Import failed')
+    } finally {
+      setCsvImporting(false)
+    }
+  }
+
+  const downloadTemplate = () => {
+    const csv = 'ip,name,site,notes,allowed\n192.168.1.1,Core Switch,medical,Main distribution switch,true\n10.0.0.1,Edge Router,dental,,true\n'
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'devices-template.csv'
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   // Join: managed devices + live summaries keyed by IP
@@ -987,12 +1019,42 @@ function DevicesTab() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <p className="text-xs text-gray-500">Live stats refresh every 15s</p>
-        <button onClick={() => { setAdding(true); setEditing(null) }} className="bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg px-4 py-2">
-          + Add device
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={downloadTemplate} className="text-xs text-white hover:text-white border border-gray-700 hover:border-gray-500 rounded-lg px-3 py-2 transition-colors">
+            Download template
+          </button>
+          <label className={`text-xs rounded-lg px-3 py-2 transition-colors cursor-pointer border ${csvImporting ? 'opacity-50 cursor-not-allowed border-gray-700 text-gray-500' : 'border-gray-700 text-white hover:border-gray-500 hover:text-white'}`}>
+            {csvImporting ? 'Importing…' : 'Import CSV'}
+            <input type="file" accept=".csv" className="hidden" onChange={handleCsvImport} disabled={csvImporting} />
+          </label>
+          <button onClick={() => { setAdding(true); setEditing(null) }} className="bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg px-4 py-2">
+            + Add device
+          </button>
+        </div>
       </div>
+      {csvResult && (
+        <div className="mb-3 text-xs rounded-lg border border-gray-700 bg-gray-800/50 px-4 py-3 space-y-1">
+          <p className="text-white font-medium">Import complete</p>
+          <p className="text-white">
+            <span className="text-green-400">{csvResult.created} created</span>
+            {' · '}
+            <span className="text-blue-400">{csvResult.updated} updated</span>
+            {csvResult.skipped > 0 && <><span className="text-white"> · </span><span className="text-amber-400">{csvResult.skipped} skipped</span></>}
+          </p>
+          {csvResult.errors.length > 0 && (
+            <div className="mt-1 space-y-0.5">
+              {csvResult.errors.map((e, i) => (
+                <p key={i} className="text-red-400">Row {e.row}: {e.reason}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {csvError && (
+        <p className="mb-3 text-xs text-red-400 px-1">{csvError}</p>
+      )}
       <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead>
