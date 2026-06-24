@@ -896,6 +896,7 @@ function DevicesTab() {
   const [csvImporting, setCsvImporting] = useState(false)
   const [csvResult, setCsvResult]       = useState<{ created: number; updated: number; skipped: number; errors: Array<{ row: number; reason: string }> } | null>(null)
   const [csvError, setCsvError]         = useState<string | null>(null)
+  const [deviceFilter, setDeviceFilter] = useState('')
 
   const EMPTY: Device = { id: 0, ip: '', name: '', site: '', notes: '', allowed: true }
 
@@ -1022,6 +1023,13 @@ function DevicesTab() {
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <p className="text-xs text-gray-500">Live stats refresh every 15s</p>
         <div className="flex items-center gap-2">
+          <input
+            value={deviceFilter}
+            onChange={e => setDeviceFilter(e.target.value)}
+            placeholder="Filter devices…"
+            className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-600 w-40 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          {deviceFilter && <button onClick={() => setDeviceFilter('')} className="text-xs text-white hover:text-white">✕</button>}
           <button onClick={downloadTemplate} className="text-xs text-white hover:text-white border border-gray-700 hover:border-gray-500 rounded-lg px-3 py-2 transition-colors">
             Download template
           </button>
@@ -1071,7 +1079,13 @@ function DevicesTab() {
           </thead>
           <tbody className="divide-y divide-gray-800/50">
             {adding && <DeviceForm d={EMPTY} />}
-            {devices.map(d => {
+            {(deviceFilter.trim()
+              ? devices.filter(d => {
+                  const q = deviceFilter.toLowerCase()
+                  return d.ip.includes(q) || d.name.toLowerCase().includes(q) || d.site.toLowerCase().includes(q)
+                })
+              : devices
+            ).map(d => {
               const s = summaryMap[d.ip]
               const status = samplerStatus(s?.last_seen)
               return editing?.id === d.id ? (
@@ -1312,6 +1326,14 @@ function UsersTab() {
   const [confirm, setConfirm] = useState<User | null>(null)
   const [resetPw, setResetPw] = useState<User | null>(null)
   const [error, setError]   = useState('')
+  const [userFilter, setUserFilter]     = useState('')
+  const [userSortKey, setUserSortKey]   = useState<keyof User | null>(null)
+  const [userSortDir, setUserSortDir]   = useState<'asc' | 'desc'>('asc')
+
+  const toggleUserSort = (key: keyof User) => {
+    if (userSortKey === key) setUserSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setUserSortKey(key); setUserSortDir('asc') }
+  }
 
   const load = () => {
     setLoading(true)
@@ -1338,12 +1360,21 @@ function UsersTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center gap-3 flex-wrap">
         <p className="text-xs text-gray-500">Local accounts only — Okta SSO users are managed in Okta</p>
-        <button onClick={() => setModal('create')}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors">
-          <span className="text-base leading-none">+</span> Add User
-        </button>
+        <div className="flex items-center gap-2 ml-auto">
+          <input
+            value={userFilter}
+            onChange={e => setUserFilter(e.target.value)}
+            placeholder="Filter users…"
+            className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-600 w-40 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          {userFilter && <button onClick={() => setUserFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+          <button onClick={() => setModal('create')}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors">
+            <span className="text-base leading-none">+</span> Add User
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -1357,19 +1388,52 @@ function UsersTab() {
         {loading ? (
           <div className="flex items-center justify-center h-32 text-white text-sm">Loading…</div>
         ) : (
+          (() => {
+            const USER_COLS: Array<{ label: string; key: keyof User | null; cls?: string }> = [
+              { label: 'User',       key: 'username' },
+              { label: 'Email',      key: 'email' },
+              { label: 'Role',       key: 'role' },
+              { label: 'Status',     key: 'is_active' },
+              { label: 'Last Login', key: 'last_login' },
+              { label: '',           key: null, cls: 'px-5 py-3' },
+            ]
+            const displayedUsers = users
+              .filter(u => {
+                if (!userFilter) return true
+                const q = userFilter.toLowerCase()
+                return u.username.toLowerCase().includes(q) ||
+                  u.email.toLowerCase().includes(q) ||
+                  u.role.toLowerCase().includes(q)
+              })
+              .sort((a, b) => {
+                if (!userSortKey) return 0
+                const av = a[userSortKey] as any
+                const bv = b[userSortKey] as any
+                if (typeof av === 'boolean') return userSortDir === 'asc' ? (av ? 1 : 0) - (bv ? 1 : 0) : (bv ? 1 : 0) - (av ? 1 : 0)
+                if (typeof av === 'number') return userSortDir === 'asc' ? av - bv : bv - av
+                return userSortDir === 'asc'
+                  ? String(av ?? '').localeCompare(String(bv ?? ''))
+                  : String(bv ?? '').localeCompare(String(av ?? ''))
+              })
+            return (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800">
-                <th className="text-left px-5 py-3 text-xs font-medium text-white uppercase tracking-wider">User</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-white uppercase tracking-wider">Email</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-white uppercase tracking-wider">Role</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-white uppercase tracking-wider">Status</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-white uppercase tracking-wider">Last Login</th>
-                <th className="px-5 py-3"></th>
+                {USER_COLS.map(col => (
+                  <th
+                    key={col.label}
+                    onClick={() => col.key && toggleUserSort(col.key)}
+                    className={`text-left px-5 py-3 text-xs font-medium uppercase tracking-wider select-none
+                      ${col.key ? `cursor-pointer ${userSortKey === col.key ? 'text-blue-400' : 'text-white hover:text-gray-200'}` : (col.cls ?? 'text-white')}`}
+                  >
+                    {col.label}
+                    {userSortKey === col.key && col.key && <span className="ml-1">{userSortDir === 'asc' ? '↑' : '↓'}</span>}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800/60">
-              {users.map(u => (
+              {displayedUsers.map(u => (
                 <tr key={u.id} className="hover:bg-gray-800/30 transition-colors">
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-2.5">
@@ -1437,6 +1501,8 @@ function UsersTab() {
               ))}
             </tbody>
           </table>
+            )
+          })()
         )}
       </div>
 
