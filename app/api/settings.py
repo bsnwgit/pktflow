@@ -30,8 +30,6 @@ DEFAULTS: dict[str, Any] = {
     "ingest_udp_port_netflow": 2055,
     "ingest_udp_port_sflow": 6343,
     "allowed_hosts": [],                 # Empty = allow all
-    "migration_mode": False,
-    "migration_o2_url": "",
 
     # Auth
     "auth_local_enabled": True,
@@ -92,7 +90,20 @@ DEFAULTS: dict[str, Any] = {
     "backup_rotation_count": 5,
     "backup_path": "/mnt/software/pktflow_backups",
     "backup_include_clickhouse": True,
+
+    # Live updates (WebSocket)
+    "ws_stream_raw_flows": False,  # Push raw FlowRecord batch to WS clients after each flush
+    "ws_max_raw_flows": 100,       # Max flows per push (capped to prevent flooding)
 }
+
+
+# Sentinel mask written over secret values in GET responses.
+# If the UI sends this value back on Save, we treat it as "unchanged" and skip the write.
+_MASK = "••••••••"
+_SECRET_KEYS = frozenset({
+    "ingest_token", "okta_client_secret", "notify_email_password",
+    "notify_pagerduty_integration_key", "anthropic_api_key", "lucid_api_token",
+})
 
 
 async def _ensure_defaults(db: aiosqlite.Connection) -> None:
@@ -114,11 +125,9 @@ async def get_all_settings(_: CurrentUser, db: aiosqlite.Connection = Depends(ge
     result = {r[0]: json.loads(r[1]) for r in rows}
 
     # Mask secrets in API response
-    for secret_key in ("ingest_token", "okta_client_secret", "notify_email_password",
-                        "notify_pagerduty_integration_key", "anthropic_api_key",
-                        "lucid_api_token"):
+    for secret_key in _SECRET_KEYS:
         if result.get(secret_key):
-            result[secret_key] = "••••••••"
+            result[secret_key] = _MASK
 
     return result
 
@@ -146,6 +155,10 @@ async def update_setting(
     if key not in DEFAULTS:
         raise HTTPException(status_code=400, detail=f"Unknown setting key: {key}")
 
+    # Never overwrite a secret with the display mask
+    if key in _SECRET_KEYS and body.value == _MASK:
+        return {"key": key, "updated": False, "skipped": "mask value"}
+
     await db.execute(
         "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
@@ -172,11 +185,17 @@ async def bulk_update(
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unknown keys: {unknown}")
 
+    skipped = []
     for key, value in updates.items():
+        # Never overwrite a secret with the display mask (user saved without changing it)
+        if key in _SECRET_KEYS and value == _MASK:
+            skipped.append(key)
+            continue
         await db.execute(
             "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
             (key, json.dumps(value)),
         )
     await db.commit()
-    return {"updated": list(updates.keys())}
+    written = [k for k in updates if k not in skipped]
+    return {"updated": written, "skipped": skipped}

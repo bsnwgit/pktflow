@@ -2,12 +2,13 @@
  * Analytics — visual data exploration
  * Four chart types: area, pie, Sankey, node-link network map
  */
-import { useEffect, useState, useRef, useMemo } from 'react'
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import * as d3 from 'd3'
 import { api, TimeSeriesPoint, TopologyResponse } from '../api/client'
+import { useWebSocket, type WsMessage, type IngestStats } from '../hooks/useWebSocket'
 
 // ── Colour palette ─────────────────────────────────────────────────────────────
 const COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#84cc16','#ec4899','#a78bfa']
@@ -296,6 +297,13 @@ export default function Analytics() {
   const [metric,     setMetric]     = useState<'bytes'|'packets'|'flow_count'>('bytes')
   const [histDays,   setHistDays]   = useState(30)
   const [dailyData,  setDailyData]  = useState<TimeSeriesPoint[]>([])
+  const [wsStats,    setWsStats]    = useState<IngestStats | null>(null)
+
+  const handleWsMessage = useCallback((msg: WsMessage) => {
+    if (msg.type === 'ingest_stats') setWsStats(msg.data)
+  }, [])
+
+  const { connected: wsConnected } = useWebSocket(handleWsMessage)
 
   useEffect(() => {
     setLoading(true)
@@ -323,7 +331,20 @@ export default function Analytics() {
     <div className="flex flex-col h-full gap-4">
       {/* Header */}
       <div className="flex items-center justify-between flex-shrink-0">
-        <h1 className="text-xl font-semibold text-white">Dashboard</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-semibold text-white">Dashboard</h1>
+          {wsConnected && (
+            <span className="flex items-center gap-1.5 text-xs text-green-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+              Live
+            </span>
+          )}
+          {wsStats && wsConnected && (
+            <span className="text-xs text-white">
+              {wsStats.total_flushed.toLocaleString()} flows ingested
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           {loading && <span className="text-xs text-white animate-pulse">Loading…</span>}
           <div className="flex bg-gray-800 rounded-lg p-0.5 gap-0.5">
@@ -339,6 +360,7 @@ export default function Analytics() {
           </div>
         </div>
       </div>
+
 
       {/* Traffic Over Time + Historical Trend side by side */}
       <div className="grid grid-cols-2 gap-4 flex-shrink-0">
