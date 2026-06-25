@@ -3,7 +3,7 @@
  * Nodes = IP addresses; edges = aggregated flows between them.
  * Node size  ∝ total bytes.  Edge width ∝ bytes.  Color = site.
  */
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, RefObject } from 'react'
 import * as d3 from 'd3'
 import { useNavigate } from 'react-router-dom'
 import { api, TopologyNode, TopologyEdge, DeviceSummary } from '../api/client'
@@ -34,18 +34,18 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
 }
 
 function TopologyGraph({
+  svgRef,
   data,
   onNodeClick,
   width,
   height,
 }: {
+  svgRef: RefObject<SVGSVGElement>
   data: { nodes: TopologyNode[]; edges: TopologyEdge[] }
   onNodeClick: (node: TopologyNode) => void
   width: number
   height: number
 }) {
-  const svgRef = useRef<SVGSVGElement>(null)
-
   useEffect(() => {
     if (!svgRef.current || !data.nodes.length) return
 
@@ -93,7 +93,6 @@ function TopologyGraph({
     // ── Cluster hulls ─────────────────────────────────────────────────────────
     const HULL_PADDING = 32
 
-    // Group nodes by site; only sites with ≥2 nodes get a hull
     const siteNodes = new Map<string, D3Node[]>()
     nodes.forEach(n => {
       const s = n.site || 'unknown'
@@ -102,7 +101,6 @@ function TopologyGraph({
     })
     const activeSites = [...siteNodes.entries()].filter(([, ns]) => ns.length >= 2)
 
-    // Hull group goes first so it renders behind links and nodes
     const hullGroup = g.append('g').attr('class', 'hulls')
     const hullLabelGroup = g.append('g').attr('class', 'hull-labels')
 
@@ -114,7 +112,6 @@ function TopologyGraph({
       if (pts.length < 2) return ''
       let shapePts: [number, number][]
       if (pts.length === 2) {
-        // Two nodes: build a capsule shape around both
         const [p0, p1] = pts
         const angle = Math.atan2(p1[1] - p0[1], p1[0] - p0[0])
         const steps = 12
@@ -153,7 +150,6 @@ function TopologyGraph({
           .attr('stroke', color).attr('stroke-opacity', 0.55)
           .attr('stroke-width', 1.5).attr('stroke-dasharray', '5,3')
       )
-      // Background pill for the label — added to hullLabelGroup later
       hullBgs.set(site,
         hullLabelGroup.append('rect')
           .attr('fill', '#111827').attr('fill-opacity', 0.65)
@@ -177,7 +173,6 @@ function TopologyGraph({
         const cx = d3.mean(pts, p => p[0])!
         const cy = d3.mean(pts, p => p[1])!
         const txt = hullTexts.get(site)!.attr('x', cx).attr('y', cy + 4)
-        // Size the background pill to the text
         const tNode = txt.node()
         if (tNode) {
           const bb = (tNode as SVGTextElement).getBBox?.()
@@ -190,7 +185,6 @@ function TopologyGraph({
           }
         }
       })
-      // Keep labels on top of nodes
       hullLabelGroup.raise()
     }
 
@@ -234,7 +228,7 @@ function TopologyGraph({
       .attr('fill', '#d1d5db').attr('font-size', '10px')
       .attr('pointer-events', 'none')
 
-    // Tooltip (attached to document body to escape SVG stacking)
+    // Tooltip
     const tip = d3.select('body').append('div')
       .style('position', 'fixed').style('background', '#111827')
       .style('border', '1px solid #374151').style('border-radius', '8px')
@@ -273,7 +267,7 @@ function TopologyGraph({
       })
       .on('mousemove', moveTip).on('mouseleave', hideTip)
 
-    // Site target positions evenly distributed around canvas centre
+    // Site target positions
     const siteList = [...siteNodes.keys()]
     const siteTargets = new Map<string, { x: number; y: number }>()
     siteList.forEach((site, i) => {
@@ -316,9 +310,18 @@ function TopologyGraph({
     })
 
     return () => { sim.stop(); tip.remove() }
-  }, [data, width, height, onNodeClick])
+  }, [data, width, height, onNodeClick, svgRef])
 
   return <svg ref={svgRef} width={width} height={height} />
+}
+
+// ── Export helpers ────────────────────────────────────────────────────────────
+
+function dlBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename; a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
@@ -328,17 +331,21 @@ const WINDOWS = ['15m', '1h', '6h', '24h', '7d']
 export default function Topology() {
   const navigate       = useNavigate()
   const containerRef   = useRef<HTMLDivElement>(null)
+  const svgRef         = useRef<SVGSVGElement>(null)
+  const exportMenuRef  = useRef<HTMLDivElement>(null)
   const [dims, setDims] = useState({ w: 900, h: 600 })
 
-  const [window_, setWindow]   = useState('1h')
-  const [sampler, setSampler]  = useState('')
-  const [minBytes, setMinBytes] = useState('')
-  const [devices, setDevices]  = useState<DeviceSummary[]>([])
+  const [window_, setWindow]     = useState('1h')
+  const [sampler, setSampler]    = useState('')
+  const [minBytes, setMinBytes]  = useState('')
+  const [devices, setDevices]    = useState<DeviceSummary[]>([])
   const [deviceNames, setDeviceNames] = useState<Map<string, string>>(new Map())
-  const [data, setData]        = useState<{ nodes: TopologyNode[]; edges: TopologyEdge[] } | null>(null)
-  const [loading, setLoading]  = useState(false)
-  const [selected, setSelected] = useState<TopologyNode | null>(null)
-  const [error, setError]      = useState('')
+  const [data, setData]          = useState<{ nodes: TopologyNode[]; edges: TopologyEdge[] } | null>(null)
+  const [loading, setLoading]    = useState(false)
+  const [selected, setSelected]  = useState<TopologyNode | null>(null)
+  const [error, setError]        = useState('')
+  const [showExport, setShowExport] = useState(false)
+  const [exportMsg, setExportMsg]   = useState('')
 
   // Responsive sizing
   useEffect(() => {
@@ -351,6 +358,17 @@ export default function Topology() {
     const ro = new ResizeObserver(measure)
     if (containerRef.current) ro.observe(containerRef.current)
     return () => ro.disconnect()
+  }, [])
+
+  // Close export dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setShowExport(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
   }, [])
 
   useEffect(() => {
@@ -375,6 +393,167 @@ export default function Topology() {
   }, [window_, sampler, minBytes])
 
   useEffect(() => { load() }, [])
+
+  // ── Export functions ────────────────────────────────────────────────────────
+
+  /** Clone the SVG with zoom transform removed and viewBox fitted to all content. */
+  function buildFullSVGClone(): { clone: SVGSVGElement; w: number; h: number } | null {
+    if (!svgRef.current) return null
+    const svgEl = svgRef.current
+    // The zoom group is the first <g> child of the SVG
+    const zoomG = svgEl.querySelector(':scope > g') as SVGGElement | null
+    if (!zoomG) return null
+
+    // getBBox() returns the bounding box of all content in g's LOCAL coordinate
+    // space (before the zoom/pan transform is applied) — exactly what we want.
+    const bbox = zoomG.getBBox()
+    const pad = 48
+    const vx = bbox.x - pad
+    const vy = bbox.y - pad
+    const vw = bbox.width  + pad * 2
+    const vh = bbox.height + pad * 2
+
+    const clone = svgEl.cloneNode(true) as SVGSVGElement
+    // Strip the zoom transform so all nodes render in their simulation positions
+    const cloneZoomG = clone.querySelector(':scope > g') as SVGGElement | null
+    if (cloneZoomG) cloneZoomG.removeAttribute('transform')
+
+    // Add a dark background so PNG doesn't render on transparent
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+    bg.setAttribute('x', String(vx)); bg.setAttribute('y', String(vy))
+    bg.setAttribute('width', String(vw)); bg.setAttribute('height', String(vh))
+    bg.setAttribute('fill', '#111827')
+    cloneZoomG?.insertBefore(bg, cloneZoomG.firstChild)
+
+    clone.setAttribute('viewBox', `${vx} ${vy} ${vw} ${vh}`)
+    clone.setAttribute('width',  String(vw))
+    clone.setAttribute('height', String(vh))
+
+    return { clone, w: vw, h: vh }
+  }
+
+  function doExportSVG() {
+    const result = buildFullSVGClone()
+    if (!result) return
+    const s = new XMLSerializer().serializeToString(result.clone)
+    dlBlob(new Blob([s], { type: 'image/svg+xml' }), 'pktflow-topology.svg')
+    setShowExport(false)
+  }
+
+  function doExportPNG() {
+    setShowExport(false)
+    const result = buildFullSVGClone()
+    if (!result) return
+    const { clone, w, h } = result
+    const s = new XMLSerializer().serializeToString(clone)
+    const blob = new Blob([s], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const img = new Image()
+    img.onload = () => {
+      const c = document.createElement('canvas')
+      c.width = w; c.height = h
+      const ctx = c.getContext('2d')!
+      ctx.fillStyle = '#111827'
+      ctx.fillRect(0, 0, w, h)
+      ctx.drawImage(img, 0, 0)
+      c.toBlob(b => { if (b) dlBlob(b, 'pktflow-topology.png') }, 'image/png')
+      URL.revokeObjectURL(url)
+    }
+    img.src = url
+  }
+
+  function doExportJSON() {
+    if (!data) return
+    dlBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), 'pktflow-topology.json')
+    setShowExport(false)
+  }
+
+  function doExportDOT() {
+    if (!data) return
+    let dot = 'digraph pktflow_topology {\n'
+    dot += '  graph [bgcolor="#111827" fontcolor="#d1d5db"];\n'
+    dot += '  node [shape=circle fontcolor="#d1d5db" style=filled fontsize=10];\n'
+    dot += '  edge [color="#4b5563" fontsize=9 fontcolor="#9ca3af"];\n\n'
+    data.nodes.forEach(n => {
+      const label = (n.sampler_name || n.id).replace(/"/g, '\\"')
+      const tooltip = `${fmtBytes(n.bytes)}, ${n.flows} flows`.replace(/"/g, '\\"')
+      dot += `  "${n.id}" [label="${label}" tooltip="${tooltip}"];\n`
+    })
+    dot += '\n'
+    data.edges.forEach(e => {
+      const src = typeof e.source === 'string' ? e.source : (e.source as any).id
+      const dst = typeof e.target === 'string' ? e.target : (e.target as any).id
+      dot += `  "${src}" -> "${dst}" [label="${fmtBytes(e.bytes)}"];\n`
+    })
+    dot += '}'
+    dlBlob(new Blob([dot], { type: 'text/plain' }), 'pktflow-topology.dot')
+    setShowExport(false)
+  }
+
+  function doExportDrawio() {
+    if (!data) return
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    xml += '<mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">\n'
+    xml += '  <root>\n    <mxCell id="0"/>\n    <mxCell id="1" parent="0"/>\n'
+
+    const cols = Math.ceil(Math.sqrt(data.nodes.length)) || 1
+    data.nodes.forEach((n, i) => {
+      const label = esc(n.sampler_name || n.id)
+      const x = 60 + (i % cols) * 160
+      const y = 60 + Math.floor(i / cols) * 160
+      const color = SITE_COLORS[0]
+      xml += `    <mxCell id="n_${i}" value="${label}" style="ellipse;fillColor=${color};strokeColor=#1d4ed8;fontColor=#ffffff;fontSize=10;fontStyle=1;" vertex="1" parent="1">`
+      xml += `<mxGeometry x="${x}" y="${y}" width="80" height="80" as="geometry"/></mxCell>\n`
+    })
+
+    const nodeIndex = new Map(data.nodes.map((n, i) => [n.id, i]))
+    data.edges.forEach((e, i) => {
+      const src = typeof e.source === 'string' ? e.source : (e.source as any).id
+      const dst = typeof e.target === 'string' ? e.target : (e.target as any).id
+      const si = nodeIndex.get(src)
+      const ti = nodeIndex.get(dst)
+      if (si === undefined || ti === undefined) return
+      const lbl = esc(fmtBytes(e.bytes))
+      xml += `    <mxCell id="e_${i}" value="${lbl}" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;exitX=0.5;exitY=0;entryX=0.5;entryY=1;fontSize=9;fontColor=#9ca3af;" edge="1" source="n_${si}" target="n_${ti}" parent="1">`
+      xml += `<mxGeometry relative="1" as="geometry"/></mxCell>\n`
+    })
+
+    xml += '  </root>\n</mxGraphModel>'
+    dlBlob(new Blob([xml], { type: 'application/xml' }), 'pktflow-topology.drawio')
+    setShowExport(false)
+  }
+
+  async function doExportLucidchart() {
+    if (!svgRef.current) return
+    setShowExport(false)
+    setExportMsg('Sending to Lucidchart…')
+    const svgStr = new XMLSerializer().serializeToString(svgRef.current)
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('/api/topology/export/lucidchart', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ svg: svgStr }),
+      })
+      if (res.ok) {
+        const { url } = await res.json()
+        window.open(url, '_blank')
+        setExportMsg('')
+      } else {
+        setExportMsg('Lucidchart export requires an API token in Settings → Integrations.')
+        setTimeout(() => setExportMsg(''), 4000)
+      }
+    } catch {
+      setExportMsg('Lucidchart export requires an API token in Settings → Integrations.')
+      setTimeout(() => setExportMsg(''), 4000)
+    }
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col gap-3" style={{ height: 'calc(100vh - 7rem)' }}>
@@ -409,6 +588,46 @@ export default function Topology() {
           {loading ? 'Loading…' : 'Refresh'}
         </button>
 
+        {/* Export dropdown */}
+        <div className="relative" ref={exportMenuRef}>
+          <button
+            onClick={() => setShowExport(v => !v)}
+            disabled={!data || data.nodes.length === 0}
+            className="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 disabled:opacity-40 border border-gray-700 text-white text-sm font-medium rounded-lg px-3 py-1.5 transition-colors"
+            title="Export topology">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Export
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+
+          {showExport && (
+            <div className="absolute right-0 top-full mt-1.5 z-50 bg-gray-900 border border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[160px]">
+              {[
+                { label: 'SVG image',      sub: '.svg',     fn: doExportSVG     },
+                { label: 'PNG image',      sub: '.png',     fn: doExportPNG     },
+                { label: 'JSON data',      sub: '.json',    fn: doExportJSON    },
+                { label: 'Graphviz DOT',   sub: '.dot',     fn: doExportDOT     },
+                { label: 'Draw.io',        sub: '.drawio',  fn: doExportDrawio  },
+                { label: 'Lucidchart',     sub: 'API token required', fn: doExportLucidchart },
+              ].map(({ label, sub, fn }) => (
+                <button key={label} onClick={fn}
+                  className="w-full flex items-center justify-between gap-3 px-4 py-2.5 text-sm text-white hover:bg-gray-800 transition-colors text-left">
+                  <span>{label}</span>
+                  <span className="text-xs text-gray-500 shrink-0">{sub}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         {data && (
           <span className="text-xs text-white ml-auto">
             {data.nodes.length} nodes · {data.edges.length} edges
@@ -416,7 +635,8 @@ export default function Topology() {
         )}
       </div>
 
-      {error && <p className="text-sm text-red-400 shrink-0">{error}</p>}
+      {error    && <p className="text-sm text-red-400 shrink-0">{error}</p>}
+      {exportMsg && <p className="text-sm text-yellow-400 shrink-0">{exportMsg}</p>}
 
       {/* Node detail panel */}
       {selected && (
@@ -479,6 +699,7 @@ export default function Topology() {
 
         {data && data.nodes.length > 0 && (
           <TopologyGraph
+            svgRef={svgRef}
             data={data}
             onNodeClick={setSelected}
             width={dims.w}
