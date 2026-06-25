@@ -24,6 +24,7 @@ passlib[bcrypt]>=1.7.4             # Password hashing
 authlib>=1.3.0                     # Okta OIDC
 itsdangerous>=2.2.0                # Session signing
 httpx>=0.27.0                      # Async HTTP (Okta token exchange + notifiers)
+python3-saml>=1.16.0               # Okta SAML 2.0 SP (requires xmlsec1 native lib on host)
 
 # Background jobs
 apscheduler>=3.10.4

@@ -30,6 +30,8 @@ class UserOut(BaseModel):
     is_active: bool
     created_at: str
     last_login: Optional[str]
+    has_password: bool = True
+    auth_provider: str = "local"
 
 
 class PasswordChange(BaseModel):
@@ -44,8 +46,12 @@ class PasswordReset(BaseModel):
 # ── /me endpoints (must be before /{user_id} to avoid path collision) ──────────
 
 @router.get("/me", response_model=UserOut)
-async def get_me(user: CurrentUser):
-    return user
+async def get_me(user: CurrentUser, db: aiosqlite.Connection = Depends(get_db)):
+    async with db.execute("SELECT hashed_password, auth_provider FROM users WHERE id=?", (user["id"],)) as cur:
+        row = await cur.fetchone()
+    has_pw = bool(row and row["hashed_password"])
+    provider = (row["auth_provider"] if row else None) or "local"
+    return {**dict(user), "has_password": has_pw, "auth_provider": provider}
 
 
 @router.patch("/me/password", status_code=status.HTTP_204_NO_CONTENT)
