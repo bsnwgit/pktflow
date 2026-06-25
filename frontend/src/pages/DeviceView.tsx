@@ -288,15 +288,16 @@ function TopTalkersTable({ talkers, totalBytes, window, externalExpanded, onExte
   return (
     <div>
       <TalkerPieCharts talkers={talkers} totalBytes={totalBytes} />
+      <p className="text-sm font-semibold text-white mb-3">Top Talkers</p>
       <div className="flex items-center gap-3 mb-3 px-1">
         <input
           value={filter}
           onChange={e => setFilter(e.target.value)}
-          placeholder="Filter by IP, port, proto…"
-          className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-600 w-52 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          placeholder="Filter by IP, port, or protocol…"
+          className="bg-gray-800 border border-gray-700 text-white text-xs rounded-lg px-3 py-1.5 w-64 focus:outline-none focus:border-blue-500 placeholder:text-white"
         />
-        {filter && <button onClick={() => setFilter('')} className="text-xs text-white hover:text-white">✕</button>}
-        {filter && <span className="text-xs text-gray-500">{displayed.length} of {sorted.length}</span>}
+        <button onClick={() => setFilter('')} className="text-red-400 hover:text-red-300 transition-colors text-sm font-bold">✕</button>
+        <span className="text-xs text-white">{displayed.length} talkers</span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -353,7 +354,7 @@ function TopTalkersTable({ talkers, totalBytes, window, externalExpanded, onExte
                         href={`/explorer?src_ip=${encodeURIComponent(t.src_ip)}&dst_ip=${encodeURIComponent(t.dst_ip)}&dst_port=${t.dst_port}&protocol=${t.protocol}&window=${window}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-gray-500 hover:text-blue-400 transition-colors"
+                        className="text-blue-400 hover:text-blue-300 transition-colors"
                         title="View in Flow Explorer"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

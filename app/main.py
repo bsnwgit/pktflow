@@ -61,10 +61,33 @@ async def lifespan(app: FastAPI):
     await backup_scheduler.start()
     log.info("Backup scheduler started")
 
+    # Start UDP NetFlow listener if ingest_method is "udp" or "both"
+    udp_listener = None
+    try:
+        import aiosqlite as _aiosqlite
+        import json as _json
+        _db_path = Path(__file__).parent.parent / "pktflow.db"
+        async with _aiosqlite.connect(str(_db_path)) as _db:
+            async with _db.execute(
+                "SELECT key, value FROM settings WHERE key IN ('ingest_method', 'ingest_udp_port_netflow')"
+            ) as _cur:
+                _rows = {r[0]: _json.loads(r[1]) for r in await _cur.fetchall()}
+        _method = _rows.get("ingest_method", "http")
+        if _method in ("udp", "both"):
+            _port = int(_rows.get("ingest_udp_port_netflow", 2055))
+            from app.ingest.udp_listener import UDPNetFlowListener
+            udp_listener = UDPNetFlowListener()
+            await udp_listener.start(port=_port)
+            log.info("UDP NetFlow listener active on port %d", _port)
+    except Exception as _e:
+        log.warning("UDP listener not started: %s", _e)
+
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
     log.info("pktFlow shutting down")
+    if udp_listener:
+        await udp_listener.stop()
     await buffer.stop()
     await engine.stop()
     await cleanup.stop()

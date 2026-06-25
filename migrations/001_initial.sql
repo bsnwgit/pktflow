@@ -70,8 +70,7 @@ CREATE TABLE IF NOT EXISTS alert_rules (
     name            TEXT NOT NULL,
     description     TEXT NOT NULL DEFAULT '',
     enabled         INTEGER NOT NULL DEFAULT 1,
-    rule_type       TEXT NOT NULL
-                        CHECK (rule_type IN ('threshold','rate_spike','port_protocol','new_host','data_gap')),
+    rule_type       TEXT NOT NULL,
     conditions      TEXT NOT NULL DEFAULT '{}',  -- JSON: type-specific params
     time_window_min INTEGER NOT NULL DEFAULT 5,
     severity        TEXT NOT NULL DEFAULT 'warning'
