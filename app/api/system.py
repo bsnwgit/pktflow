@@ -351,6 +351,58 @@ async def list_backups() -> list:
     return await asyncio.to_thread(list_backups_sync, cfg.db_path)
 
 
+@router.post("/test-connection", dependencies=[Depends(require_admin)])
+async def test_connection() -> dict:
+    """
+    Test the currently configured storage backend connection.
+    Returns { ok, backend, message } — safe to call at any time, no side effects.
+    """
+    cfg = get_settings()
+
+    # Read storage_backend from the settings table
+    backend = "duckdb"
+    async with aiosqlite.connect(cfg.db_path) as db:
+        async with db.execute("SELECT value FROM settings WHERE key='storage_backend'") as cur:
+            row = await cur.fetchone()
+            if row:
+                try:
+                    backend = json.loads(row[0])
+                except Exception:
+                    pass
+
+    if backend != "clickhouse":
+        return {"ok": True, "backend": backend, "message": "DuckDB is always available (embedded, no connection needed)"}
+
+    # ── ClickHouse test ───────────────────────────────────────────────────────
+    def _test() -> tuple[bool, str]:
+        try:
+            from clickhouse_driver import Client
+            client = Client(
+                host=cfg.clickhouse_host,
+                port=cfg.clickhouse_port,
+                database=cfg.clickhouse_database,
+                user=cfg.clickhouse_user,
+                password=cfg.clickhouse_password,
+                connect_timeout=5,
+                settings={"use_numpy": False},
+            )
+            version_rows = client.execute("SELECT version()")
+            version = version_rows[0][0] if version_rows else "unknown"
+            count_rows = client.execute("SELECT count() FROM flows")
+            flow_count = int(count_rows[0][0]) if count_rows else 0
+            client.disconnect()
+            return True, f"Connected — ClickHouse {version} · {flow_count:,} flows stored"
+        except Exception as e:
+            return False, str(e)
+
+    try:
+        ok, message = await asyncio.wait_for(asyncio.to_thread(_test), timeout=8.0)
+    except asyncio.TimeoutError:
+        ok, message = False, "Connection timed out (>8 s) — check host/port and firewall"
+
+    return {"ok": ok, "backend": "clickhouse", "message": message}
+
+
 @router.post("/restart", dependencies=[Depends(require_admin)])
 async def restart_service() -> dict:
     """
