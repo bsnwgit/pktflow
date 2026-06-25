@@ -155,3 +155,114 @@ class StorageBackend(ABC):
         """Hourly rollup: bytes/packets/flows per hour from flows_hourly.
         Default implementation returns empty list (ClickHouse-only feature)."""
         return []
+
+    @abstractmethod
+    async def get_top_talker_in_window(
+        self,
+        metric: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> tuple[str, float]:
+        """Return (src_ip, value) for the single highest-traffic IP in the window.
+        metric: 'bytes', 'packets', or 'flows'. Returns ('', 0.0) when no data."""
+
+    @abstractmethod
+    async def get_elephant_flow_stats(
+        self,
+        threshold_bytes: float,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> tuple[int, float]:
+        """Return (count, max_bytes) for flows exceeding threshold_bytes in the window.
+        Returns (0, 0.0) when none found."""
+
+    @abstractmethod
+    async def get_inter_site_metric(
+        self,
+        metric: str,
+        window_min: int,
+        site_a: Optional[str] = None,
+        site_b: Optional[str] = None,
+    ) -> float:
+        """Sum of metric for flows involving site_a and/or site_b in window_min minutes.
+        If both sites specified, matches flows where site is either. If neither, matches all."""
+
+    @abstractmethod
+    async def get_top_connection_count(
+        self,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> tuple[str, int]:
+        """Return (src_ip, flow_count) for the src_ip with most connections in the window.
+        Returns ('', 0) when no data."""
+
+    @abstractmethod
+    async def get_top_unique_dst_ports(
+        self,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> tuple[str, int]:
+        """Return (src_ip, distinct_port_count) for the src_ip hitting the most distinct
+        destination ports in the window. Returns ('', 0) when no data."""
+
+    @abstractmethod
+    async def get_top_unique_dst_ips(
+        self,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+        src_subnet: Optional[str] = None,
+    ) -> tuple[str, int]:
+        """Return (src_ip, distinct_dst_count) for the src_ip reaching the most distinct
+        destination IPs in the window. Optionally filter src_ip by CIDR subnet.
+        Returns ('', 0) when no data."""
+
+    @abstractmethod
+    async def get_unexpected_proto_count(
+        self,
+        port: int,
+        expected_proto: int,
+        direction: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> int:
+        """Count of flows on the given port using a protocol other than expected_proto.
+        direction: 'src', 'dst', or 'any'. expected_proto is an integer (6=TCP, 17=UDP, 1=ICMP)."""
+
+    async def get_clickhouse_table_size_gb(self, table: str = "flows") -> float:
+        """Return compressed size of the named ClickHouse table in GB.
+        Default implementation returns 0.0 (ClickHouse-only feature)."""
+        return 0.0
+
+    @abstractmethod
+    async def get_inter_site_top_contributors(
+        self,
+        metric: str,
+        window_min: int,
+        site_a: Optional[str] = None,
+        site_b: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        """Return top (src_ip, dst_ip, site, value) contributor dicts driving inter-site traffic.
+        Sorted by value descending. Returns [] when no data."""
+
+    @abstractmethod
+    async def get_elephant_flow_top(
+        self,
+        threshold_bytes: float,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        """Return top oversized flow dicts: {src_ip, dst_ip, bytes, protocol}.
+        Only flows with bytes >= threshold_bytes, sorted descending. Returns [] when none."""
+
+    @abstractmethod
+    async def get_threshold_top_ips(
+        self,
+        metric: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        """Return top {src_ip, value} dicts contributing to a threshold metric.
+        Sorted by value descending. Returns [] when no data."""

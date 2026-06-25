@@ -37,6 +37,75 @@ class DeviceOut(BaseModel):
     updated_at: str
 
 
+@router.get("/unknown-samplers")
+async def get_unknown_samplers(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)):
+    """
+    Return samplers that are actively sending flows but not yet in the device registry,
+    split into two buckets: unknown (needs review) and dismissed.
+    """
+    from app.storage.factory import get_storage
+
+    summaries = await get_storage().get_device_summaries()
+
+    async with db.execute("SELECT ip FROM devices") as cur:
+        managed_ips = {r[0] for r in await cur.fetchall()}
+
+    async with db.execute("SELECT sampler_ip, dismissed_at FROM sampler_dismissals") as cur:
+        dismissed_rows = await cur.fetchall()
+    dismissed_map = {r[0]: r[1] for r in dismissed_rows}
+
+    unknown = []
+    for s in summaries:
+        ip = s["sampler_ip"] if isinstance(s, dict) else s.sampler_ip
+        if ip not in managed_ips and ip not in dismissed_map:
+            unknown.append({
+                "sampler_ip":    ip,
+                "flows_per_sec": s["flows_per_sec"] if isinstance(s, dict) else s.flows_per_sec,
+                "last_seen":     s["last_seen"]     if isinstance(s, dict) else s.last_seen,
+            })
+
+    dismissed = [{"sampler_ip": ip, "dismissed_at": ts} for ip, ts in dismissed_map.items()]
+    return {"unknown": unknown, "dismissed": dismissed}
+
+
+@router.get("/sites")
+async def get_device_sites(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)):
+    """Return distinct non-empty site values from the devices table, sorted."""
+    async with db.execute(
+        "SELECT DISTINCT site FROM devices WHERE site != '' ORDER BY site"
+    ) as cur:
+        rows = await cur.fetchall()
+    return [r[0] for r in rows]
+
+
+@router.post("/dismiss/{sampler_ip}")
+async def dismiss_sampler(
+    sampler_ip: str,
+    _: AdminUser,
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    """Mark a sampler IP as dismissed — hides it from the Unknown Samplers review list."""
+    await db.execute(
+        "INSERT OR IGNORE INTO sampler_dismissals (sampler_ip) VALUES (?)",
+        (sampler_ip,),
+    )
+    await db.commit()
+    return {"dismissed": sampler_ip}
+
+
+@router.delete("/dismiss/{sampler_ip}", status_code=status.HTTP_204_NO_CONTENT)
+async def undismiss_sampler(
+    sampler_ip: str,
+    _: AdminUser,
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    """Remove a sampler IP from the dismissed list — it will reappear in Unknown Samplers."""
+    await db.execute(
+        "DELETE FROM sampler_dismissals WHERE sampler_ip = ?", (sampler_ip,)
+    )
+    await db.commit()
+
+
 @router.get("/", response_model=list[DeviceOut])
 async def list_devices(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)):
     async with db.execute("SELECT * FROM devices ORDER BY site, name") as cur:

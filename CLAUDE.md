@@ -2,7 +2,26 @@
 
 This file is the ground truth for working in this project. Read it before doing anything.
 
+---
+
+## ⛔ HARD RULES — THESE OVERRIDE EVERYTHING. NO EXCEPTIONS. EVER.
+
+**RULE 1 — NEVER MARK TODO ITEMS COMPLETE WITHOUT EXPLICIT USER INSTRUCTION.**
+The user must say "mark complete" or click the Mark Complete button. Claude never marks items done on its own, even if the work is finished. Not ever.
+
+**RULE 2 — NEVER WRITE CODE OR MAKE FILE CHANGES WITHOUT EXPLICIT USER APPROVAL.**
+"Let's work on X" = discussion only. Do not write a single line of code until the user says to proceed. Always discuss and plan first. Wait for explicit go-ahead.
+
+**RULE 3 — NEVER DEPLOY WITHOUT BEING TOLD TO.**
+Do not run the deploy script unless the user explicitly says "deploy."
+
+Violating these rules is unacceptable regardless of context, intent, or how obvious the action seems.
+
+---
+
 **Todo list:** All pending work is tracked in `TODO.md`. When asked for the todo list, read `todo_widget.html` and render it using the `show_widget` tool — do NOT show it as plain text or as a separate artifact panel.
+
+**"Run GIT"** means: commit all staged changes, push to both `github` and `gitlab` remotes, and create a PR on GitHub + MR on GitLab. All remotes use SSH. Use `gh pr create` for GitHub PR. GitLab MR: use the API if a token is available, otherwise provide the MR creation URL from the push output. Branch is always `feature/initial-build`. Claude creates the PR/MR — user approves and merges.
 
 **CRITICAL — Backup before marking complete:** Every time the user says to mark a todo item as done (or the Mark Complete button is clicked), run the local backup script FIRST, then mark the item. Never mark complete without backing up.
 
