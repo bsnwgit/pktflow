@@ -100,6 +100,9 @@ def normalize_goflow2_record(raw: dict[str, Any]) -> Optional[FlowRecord]:
         sampler_ip = str(_get(raw, "SamplerAddress", "sampler_address", default="0.0.0.0"))
         if not sampler_ip or sampler_ip in ("", "null", "None"):
             sampler_ip = "0.0.0.0"
+        # Reject flows with no valid sampler address — 0.0.0.0 is not a real device
+        if sampler_ip == "0.0.0.0":
+            return None
 
         # Site from Vector transform takes priority, then device cache
         site_from_vector = str(_get(raw, "site", default="") or "")
