@@ -80,9 +80,16 @@ class AlertEngine:
             last_seen = await get_storage().get_sampler_last_seen()
             now = datetime.now(tz=timezone.utc)
 
-            # Fire for any sampler that has gone silent
+            # Load dismissed sampler IPs — these should never trigger gap alerts
+            async with db.execute("SELECT sampler_ip FROM sampler_dismissals") as cur:
+                dismissed = {r[0] for r in await cur.fetchall()}
+            dismissed.add("0.0.0.0")  # always ignore the null address
+
+            # Fire for any sampler that has gone silent (and is not dismissed)
             gapped_samplers: set[str] = set()
             for sampler_ip, ts in last_seen.items():
+                if sampler_ip in dismissed:
+                    continue
                 if ts.tzinfo is None:
                     ts = ts.replace(tzinfo=timezone.utc)
                 if (now - ts) > timedelta(minutes=silence_min):

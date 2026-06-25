@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 import aiosqlite
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
@@ -31,16 +31,17 @@ router = APIRouter()
 async def _delayed_restart(delay: float = 1.5) -> None:
     """Wait briefly, then signal systemd to restart this service."""
     await asyncio.sleep(delay)
-    try:
-        # Preferred: ask systemd to restart (requires ec2-user passwordless sudo for this command)
-        subprocess.Popen(
-            ["sudo", "systemctl", "restart", "pktflow"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception:
-        # Fallback: kill the current process; systemd Restart=on-failure|always will revive it
-        os.kill(os.getpid(), signal.SIGTERM)
+    # Try systemd first; if sudo isn't configured fall back to killing the
+    # master uvicorn process (ppid) so systemd restarts the whole thing.
+    proc = subprocess.run(
+        ["sudo", "systemctl", "restart", "pktflow"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if proc.returncode != 0:
+        # Kill the master process; systemd Restart= will revive it.
+        # os.getppid() targets the uvicorn master, not just this worker.
+        os.kill(os.getppid(), signal.SIGTERM)
 
 
 @router.post("/cleanup", dependencies=[Depends(require_admin)])
@@ -401,6 +402,153 @@ async def test_connection() -> dict:
         ok, message = False, "Connection timed out (>8 s) — check host/port and firewall"
 
     return {"ok": ok, "backend": "clickhouse", "message": message}
+
+
+# ── SSL certificate management ─────────────────────────────────────────────────
+
+_SSL_DIR   = Path("/mnt/software/pktflow/ssl")
+_CERT_FILE = _SSL_DIR / "server.crt"
+_KEY_FILE  = _SSL_DIR / "server.key"
+
+
+def _cert_info() -> dict:
+    """Read cert metadata via openssl CLI. Returns {} on failure."""
+    try:
+        proc = subprocess.run(
+            ["openssl", "x509", "-in", str(_CERT_FILE), "-noout",
+             "-enddate", "-subject", "-issuer"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if proc.returncode != 0:
+            return {"error": proc.stderr.strip()}
+        info: dict = {}
+        for line in proc.stdout.strip().splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                k = k.strip().lower()
+                if "notafter" in k or "enddate" in k:
+                    info["expires"] = v.strip()
+                elif k == "subject":
+                    info["subject"] = v.strip()
+                elif k == "issuer":
+                    info["issuer"] = v.strip()
+        # Parse expiry → days_until_expiry
+        try:
+            from datetime import datetime, timezone
+            exp = datetime.strptime(info["expires"], "%b %d %H:%M:%S %Y %Z").replace(
+                tzinfo=timezone.utc
+            )
+            info["days_until_expiry"] = (exp - datetime.now(timezone.utc)).days
+            info["expires_iso"] = exp.isoformat()
+        except Exception:
+            pass
+        return info
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/ssl/status", dependencies=[Depends(require_admin)])
+async def ssl_status() -> dict:
+    """Return current SSL certificate status."""
+    if not _CERT_FILE.exists() or not _KEY_FILE.exists():
+        return {"installed": False}
+    info = await asyncio.to_thread(_cert_info)
+    return {"installed": True, **info}
+
+
+@router.post("/ssl/upload", dependencies=[Depends(require_admin)])
+async def upload_ssl_cert(
+    cert: UploadFile = File(...),
+    key: UploadFile = File(...),
+) -> dict:
+    """Upload and install a PEM certificate + private key."""
+    cert_data = await cert.read()
+    key_data  = await key.read()
+
+    if b"-----BEGIN CERTIFICATE-----" not in cert_data:
+        raise HTTPException(400, "Invalid certificate — must be PEM format (-----BEGIN CERTIFICATE-----)")
+    if b"PRIVATE KEY-----" not in key_data:
+        raise HTTPException(400, "Invalid private key — must be PEM format (-----BEGIN ... PRIVATE KEY-----)")
+
+    def _save():
+        _SSL_DIR.mkdir(parents=True, exist_ok=True)
+        _CERT_FILE.write_bytes(cert_data)
+        _CERT_FILE.chmod(0o644)
+        _KEY_FILE.write_bytes(key_data)
+        _KEY_FILE.chmod(0o600)
+
+    await asyncio.to_thread(_save)
+    log.info("SSL certificate uploaded and installed")
+    info = await asyncio.to_thread(_cert_info)
+    return {"installed": True, "status": "saved", **info}
+
+
+@router.delete("/ssl/cert", dependencies=[Depends(require_admin)])
+async def delete_ssl_cert() -> dict:
+    """Remove the installed SSL certificate and key."""
+    _CERT_FILE.unlink(missing_ok=True)
+    _KEY_FILE.unlink(missing_ok=True)
+    log.info("SSL certificate removed")
+    return {"installed": False, "status": "removed"}
+
+
+@router.post("/ssl/upload-pfx", dependencies=[Depends(require_admin)])
+async def upload_ssl_pfx(
+    pfx: UploadFile = File(...),
+    passphrase: str = Form(...),
+) -> dict:
+    """
+    Accept a PKCS#12 (.pfx/.p12) bundle + passphrase.
+    Extracts the cert and private key as unencrypted PEM files
+    (server.crt / server.key) so Uvicorn can load them without interaction.
+    """
+    pfx_data = await pfx.read()
+
+    def _extract() -> tuple[bool, str]:
+        import tempfile
+        _SSL_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = Path(tempfile.mktemp(suffix=".pfx"))
+        tmp.write_bytes(pfx_data)
+        try:
+            # Extract certificate chain
+            cert_proc = subprocess.run(
+                ["openssl", "pkcs12",
+                 "-in", str(tmp),
+                 "-clcerts", "-nokeys",
+                 "-passin", f"pass:{passphrase}",
+                 "-out", str(_CERT_FILE)],
+                capture_output=True, text=True, timeout=15,
+            )
+            if cert_proc.returncode != 0:
+                err = cert_proc.stderr.strip()
+                return False, f"Cert extraction failed: {err}"
+
+            # Extract private key — -nodes strips the passphrase
+            key_proc = subprocess.run(
+                ["openssl", "pkcs12",
+                 "-in", str(tmp),
+                 "-nocerts", "-nodes",
+                 "-passin", f"pass:{passphrase}",
+                 "-out", str(_KEY_FILE)],
+                capture_output=True, text=True, timeout=15,
+            )
+            if key_proc.returncode != 0:
+                err = key_proc.stderr.strip()
+                return False, f"Key extraction failed: {err}"
+
+            _CERT_FILE.chmod(0o644)
+            _KEY_FILE.chmod(0o600)
+            return True, "ok"
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    ok, msg = await asyncio.to_thread(_extract)
+    if not ok:
+        raise HTTPException(400, msg)
+
+    log.info("SSL certificate installed from PFX")
+    info = await asyncio.to_thread(_cert_info)
+    return {"installed": True, "status": "saved", **info}
 
 
 @router.post("/restart", dependencies=[Depends(require_admin)])
