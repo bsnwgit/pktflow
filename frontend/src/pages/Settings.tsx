@@ -207,7 +207,17 @@ export default function Settings() {
     setLoading(true)
     try { setSettings(await api.getSettings()) } finally { setLoading(false) }
   }
+  // Silent refresh — updates settings without triggering the loading spinner
+  const silentLoad = async () => {
+    try { setSettings(await api.getSettings()) } catch {}
+  }
   useEffect(() => { load() }, [])
+  // Background poll: re-fetch settings every 60s so the page stays current
+  // if another admin saves changes or a CLI update is made to the DB.
+  useEffect(() => {
+    const t = setInterval(silentLoad, 60_000)
+    return () => clearInterval(t)
+  }, [])
 
   const set = (key: string, value: unknown) =>
     setSettings(s => ({ ...s, [key]: value }))
@@ -224,6 +234,8 @@ export default function Settings() {
   const backupSave = useSave([
     'backup_enabled', 'backup_interval_hours', 'backup_rotation_count', 'backup_path', 'backup_include_clickhouse',
   ], settings, load)
+  const [testConnRunning, setTestConnRunning] = useState(false)
+  const [testConnResult, setTestConnResult]   = useState<{ ok: boolean; message: string } | null>(null)
   const [cleanupRunning, setCleanupRunning] = useState(false)
   const [cleanupResult, setCleanupResult]   = useState<string | null>(null)
   const [exportRunning, setExportRunning]   = useState(false)
@@ -236,6 +248,19 @@ export default function Settings() {
   const [backupResult, setBackupResult]     = useState<string | null>(null)
   const [backups, setBackups]               = useState<Array<{ name: string; path: string; size_bytes: number; files: string[] }>>([])
   const [backupsLoaded, setBackupsLoaded]   = useState(false)
+
+  const testConnection = async () => {
+    setTestConnRunning(true)
+    setTestConnResult(null)
+    try {
+      const r = await api.testStorageConnection()
+      setTestConnResult({ ok: r.ok, message: r.message })
+    } catch (e: any) {
+      setTestConnResult({ ok: false, message: e.message || 'Request failed' })
+    } finally {
+      setTestConnRunning(false)
+    }
+  }
 
   const runCleanup = async () => {
     setCleanupRunning(true)
@@ -320,7 +345,7 @@ export default function Settings() {
   const ingestSave  = useSave([
     'ingest_method', 'ingest_token', 'ingest_http_port',
     'ingest_udp_port_netflow', 'ingest_udp_port_sflow',
-    'allowed_hosts', 'migration_mode', 'migration_o2_url',
+    'allowed_hosts', 'ws_stream_raw_flows', 'ws_max_raw_flows',
   ], settings, load)
   const authSave = useSave([
     'auth_local_enabled', 'auth_okta_enabled', 'okta_issuer', 'okta_client_id',
@@ -341,7 +366,7 @@ export default function Settings() {
   )
 
   const { tick } = useAutoRefresh()
-  useEffect(() => { if (tick > 0) load() }, [tick])
+  useEffect(() => { if (tick > 0) silentLoad() }, [tick])
 
   if (loading) {
     return (
@@ -437,6 +462,22 @@ export default function Settings() {
                 { value: 'clickhouse', label: 'ClickHouse (requires separate install)' },
               ]}
             />
+          </Field>
+          <Field label="Test connection" hint="Verify the backend is reachable and the flows table exists">
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                onClick={testConnection}
+                disabled={testConnRunning}
+                className="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white text-sm rounded-lg px-4 py-2 transition-colors"
+              >
+                {testConnRunning ? 'Testing…' : 'Test Connection'}
+              </button>
+              {testConnResult && (
+                <span className={`text-xs ${testConnResult.ok ? 'text-green-400' : 'text-red-400'}`}>
+                  {testConnResult.ok ? '✓ ' : '✗ '}{testConnResult.message}
+                </span>
+              )}
+            </div>
           </Field>
           <Field label="Raw flow retention" hint="Days to keep individual flow records">
             <div className="flex items-center gap-3">
@@ -629,17 +670,21 @@ export default function Settings() {
               mono
             />
           </Field>
-          <Field label="Migration mode" hint="Forward a copy of all received flows to the old O2 sink during cutover">
-            <Toggle value={bool('migration_mode')} onChange={v => set('migration_mode', v)} />
+
+          <div className="pt-4 pb-1">
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">
+              WebSocket Live Push
+            </p>
+          </div>
+          <Field label="Stream raw flows" hint="Push each ingested flow batch over WebSocket to connected browsers. Disable if bandwidth is a concern.">
+            <Toggle value={bool('ws_stream_raw_flows')} onChange={v => set('ws_stream_raw_flows', v)} />
           </Field>
-          {bool('migration_mode') && (
-            <Field label="O2 forward URL">
-              <TextInput
-                value={str('migration_o2_url')}
-                onChange={v => set('migration_o2_url', v)}
-                placeholder="http://10.20.30.5:5080/api/default/medical_netflow/_json"
-                mono
-              />
+          {bool('ws_stream_raw_flows') && (
+            <Field label="Max flows per push" hint="Cap the number of flow records sent in each WebSocket message (1–1000)">
+              <div className="flex items-center gap-3">
+                <NumberInput value={num('ws_max_raw_flows', 100)} onChange={v => set('ws_max_raw_flows', v)} min={1} max={1000} />
+                <span className="text-sm text-white">flows</span>
+              </div>
             </Field>
           )}
         </Section>
@@ -886,6 +931,15 @@ function fmtDevBytes(b: number): string {
   return b + ' B'
 }
 
+function fmtRelative(ts: string | null | undefined): string {
+  if (!ts) return '—'
+  const secs = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
+  if (secs < 60) return `${secs}s ago`
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`
+  return `${Math.floor(secs / 86400)}d ago`
+}
+
 function DevicesTab() {
   const [devices, setDevices]     = useState<Device[]>([])
   const [summaries, setSummaries] = useState<DeviceSummary[]>([])
@@ -897,17 +951,33 @@ function DevicesTab() {
   const [csvResult, setCsvResult]       = useState<{ created: number; updated: number; skipped: number; errors: Array<{ row: number; reason: string }> } | null>(null)
   const [csvError, setCsvError]         = useState<string | null>(null)
   const [deviceFilter, setDeviceFilter] = useState('')
+  const [unknownSamplers, setUnknownSamplers] = useState<Array<{ sampler_ip: string; flows_per_sec: number; last_seen: string }>>([])
+  const [dismissedSamplers, setDismissedSamplers] = useState<Array<{ sampler_ip: string; dismissed_at: string }>>([])
+  const [knownSites, setKnownSites] = useState<string[]>([])
+  const [registeringIp, setRegisteringIp] = useState<string | null>(null)
+  const [dismissedExpanded, setDismissedExpanded] = useState(false)
 
   const EMPTY: Device = { id: 0, ip: '', name: '', site: '', notes: '', allowed: true }
 
   const loadDevices   = async () => { try { setDevices(await api.getDevices()) } catch {} }
   const loadSummaries = async () => { try { setSummaries(await api.getDeviceSummaries()) } catch {} }
+  const loadUnknown   = async () => {
+    try {
+      const [data, sites] = await Promise.all([api.getUnknownSamplers(), api.getDeviceSites()])
+      setUnknownSamplers(data.unknown)
+      setDismissedSamplers(data.dismissed)
+      setKnownSites(sites)
+    } catch {}
+  }
 
   useEffect(() => {
     loadDevices()
     loadSummaries()
-    const t = setInterval(loadSummaries, 15_000)
-    return () => clearInterval(t)
+    loadUnknown()
+    const t1 = setInterval(loadSummaries, 15_000)
+    // Refresh device list + unknown samplers every 30s (new registrations, dismissals from another session)
+    const t2 = setInterval(() => { loadDevices(); loadUnknown() }, 30_000)
+    return () => { clearInterval(t1); clearInterval(t2) }
   }, [])
 
   const save = async (d: Device) => {
@@ -934,6 +1004,70 @@ function DevicesTab() {
     if (!confirm('Remove this device?')) return
     await api.deleteDevice(id)
     await loadDevices()
+  }
+
+  const dismiss = async (ip: string) => {
+    try { await api.dismissSampler(ip); await loadUnknown() } catch {}
+  }
+  const reconsider = async (ip: string) => {
+    try { await api.undismissSampler(ip); await loadUnknown() } catch {}
+  }
+
+  // Inline registration form for unknown samplers
+  const InlineRegisterForm = ({ ip, onSaved, onCancel }: { ip: string; onSaved: () => void; onCancel: () => void }) => {
+    const [name, setName] = useState('')
+    const [site, setSite] = useState(knownSites[0] || '')
+    const [customSite, setCustomSite] = useState('')
+    const [saving, setSaving] = useState(false)
+    const [err, setErr] = useState('')
+    const effectiveSite = site === '__custom__' ? customSite : site
+    const submit = async () => {
+      setSaving(true); setErr('')
+      try {
+        await api.createDevice({ ip, name, site: effectiveSite, notes: '', allowed: true })
+        await loadDevices()
+        onSaved()
+      } catch (e: any) { setErr(e.message || 'Failed to register') }
+      finally { setSaving(false) }
+    }
+    return (
+      <div className="mt-3 space-y-3 border-t border-gray-700 pt-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Name</label>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Core Router"
+              className="w-full bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Site</label>
+            {knownSites.length > 0 ? (
+              <select value={site} onChange={e => setSite(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                {knownSites.map(s => <option key={s} value={s}>{s}</option>)}
+                <option value="__custom__">Custom…</option>
+              </select>
+            ) : (
+              <input value={customSite} onChange={e => setCustomSite(e.target.value)} placeholder="site name"
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            )}
+            {site === '__custom__' && (
+              <input value={customSite} onChange={e => setCustomSite(e.target.value)} placeholder="site name" className="mt-1 w-full bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            )}
+          </div>
+        </div>
+        {err && <p className="text-xs text-red-400">{err}</p>}
+        <div className="flex gap-2">
+          <button onClick={submit} disabled={saving}
+            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs rounded px-3 py-1.5 transition-colors">
+            {saving ? 'Saving…' : 'Register'}
+          </button>
+          <button onClick={onCancel}
+            className="text-xs border border-gray-700 text-gray-400 hover:text-white rounded px-3 py-1.5 transition-colors">
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
   }
 
   const handleCsvImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -967,8 +1101,6 @@ function DevicesTab() {
 
   // Join: managed devices + live summaries keyed by IP
   const summaryMap = Object.fromEntries(summaries.map(s => [s.sampler_ip, s]))
-  const managedIPs = new Set(devices.map(d => d.ip))
-  const unregistered = summaries.filter(s => !managedIPs.has(s.sampler_ip))
 
   const DeviceForm = ({ d }: { d: Device }) => {
     const [form, setForm] = useState<Device>(d)
@@ -1020,6 +1152,87 @@ function DevicesTab() {
 
   return (
     <div>
+      {/* Unknown Samplers Panel */}
+      {(unknownSamplers.length > 0 || dismissedSamplers.length > 0) && (
+        <div className="mb-4 bg-gray-900 border border-amber-800/40 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-400 inline-block animate-pulse" />
+            <p className="text-sm font-medium text-white">Unknown samplers</p>
+            {unknownSamplers.length > 0 && (
+              <span className="text-xs bg-amber-900/30 text-amber-400 border border-amber-700/40 rounded px-1.5 py-0.5">
+                {unknownSamplers.length} need{unknownSamplers.length === 1 ? 's' : ''} review
+              </span>
+            )}
+          </div>
+
+          {unknownSamplers.length === 0 ? (
+            <p className="px-4 py-3 text-sm text-gray-400">All active samplers are registered or dismissed.</p>
+          ) : (
+            <div className="divide-y divide-gray-800/50">
+              {unknownSamplers.map(s => (
+                <div key={s.sampler_ip} className="px-4 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-mono text-white">{s.sampler_ip}</p>
+                      <p className="text-xs text-gray-400">
+                        {s.flows_per_sec.toFixed(1)} flows/s · last seen {fmtRelative(s.last_seen)}
+                      </p>
+                    </div>
+                    {registeringIp !== s.sampler_ip && (
+                      <div className="flex gap-2 flex-shrink-0">
+                        <button onClick={() => setRegisteringIp(s.sampler_ip)}
+                          className="text-xs bg-blue-600 hover:bg-blue-500 text-white rounded px-3 py-1.5 transition-colors">
+                          Register
+                        </button>
+                        <button onClick={() => dismiss(s.sampler_ip)}
+                          className="text-xs border border-gray-700 text-gray-400 hover:text-white rounded px-3 py-1.5 transition-colors">
+                          Dismiss
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {registeringIp === s.sampler_ip && (
+                    <InlineRegisterForm
+                      ip={s.sampler_ip}
+                      onSaved={async () => { setRegisteringIp(null); await loadUnknown() }}
+                      onCancel={() => setRegisteringIp(null)}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {dismissedSamplers.length > 0 && (
+            <div className="border-t border-gray-800">
+              <button
+                onClick={() => setDismissedExpanded(!dismissedExpanded)}
+                className="w-full px-4 py-2 flex items-center justify-between text-xs text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                <span>Dismissed ({dismissedSamplers.length})</span>
+                <span>{dismissedExpanded ? '▲' : '▼'}</span>
+              </button>
+              {dismissedExpanded && (
+                <div className="divide-y divide-gray-800/50 border-t border-gray-800">
+                  {dismissedSamplers.map(s => (
+                    <div key={s.sampler_ip} className="px-4 py-2 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-mono text-gray-400">{s.sampler_ip}</p>
+                        <p className="text-xs text-gray-500">dismissed {fmtRelative(s.dismissed_at)}</p>
+                      </div>
+                      <button onClick={() => reconsider(s.sampler_ip)}
+                        className="text-xs text-gray-400 hover:text-white transition-colors">
+                        Reconsider
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <p className="text-xs text-gray-500">Live stats refresh every 15s</p>
         <div className="flex items-center gap-2">
@@ -1117,43 +1330,7 @@ function DevicesTab() {
                 </tr>
               )
             })}
-            {unregistered.length > 0 && (
-              <>
-                <tr>
-                  <td colSpan={8} className="px-4 pt-4 pb-1">
-                    <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">Unregistered samplers — sending data but not in device list</p>
-                  </td>
-                </tr>
-                {unregistered.map(s => {
-                  const status = samplerStatus(s.last_seen)
-                  return (
-                    <tr key={s.sampler_ip} className="hover:bg-gray-800/30 transition-colors opacity-70">
-                      <td className="px-4 py-3">
-                        <span className={`w-2 h-2 rounded-full inline-block ${STATUS_DOT[status]}`} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <p className="text-gray-400 font-medium">{s.sampler_name || s.sampler_ip}</p>
-                        <p className="text-xs font-mono text-blue-300/70">{s.sampler_ip}</p>
-                      </td>
-                      <td className="px-4 py-3 text-gray-500 text-sm">{s.site || '—'}</td>
-                      <td className={`px-4 py-3 capitalize text-xs font-medium ${STATUS_TEXT[status]}`}>{status}</td>
-                      <td className="px-4 py-3 text-right font-mono text-gray-400 text-xs">{s.flows_per_sec.toFixed(1)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-gray-400 text-xs">{fmtDevBytes(s.bytes_last_hour)}</td>
-                      <td className="px-4 py-3">
-                        <span className="text-xs px-2 py-0.5 rounded bg-gray-700 text-gray-400">Unregistered</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => { setAdding(true); setEditing(null) }}
-                          className="text-xs text-white hover:text-blue-400 transition-colors"
-                        >Register</button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </>
-            )}
-            {devices.length === 0 && unregistered.length === 0 && !adding && (
+            {devices.length === 0 && !adding && (
               <tr>
                 <td colSpan={8} className="px-4 py-8 text-center text-sm text-white">No devices yet</td>
               </tr>

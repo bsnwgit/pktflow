@@ -107,6 +107,33 @@ class AlertEngine:
         elif rule_type == "port_protocol":
             await self._evaluate_port_protocol(db, rule)
 
+        elif rule_type == "top_talker":
+            await self._evaluate_top_talker(db, rule)
+
+        elif rule_type == "elephant_flow":
+            await self._evaluate_elephant_flow(db, rule)
+
+        elif rule_type == "inter_site_traffic":
+            await self._evaluate_inter_site_traffic(db, rule)
+
+        elif rule_type == "connection_burst":
+            await self._evaluate_connection_burst(db, rule)
+
+        elif rule_type == "port_scan":
+            await self._evaluate_port_scan(db, rule)
+
+        elif rule_type == "internal_spread":
+            await self._evaluate_internal_spread(db, rule)
+
+        elif rule_type == "protocol_anomaly":
+            await self._evaluate_protocol_anomaly(db, rule)
+
+        elif rule_type == "ingest_rate_low":
+            await self._evaluate_ingest_rate_low(db, rule)
+
+        elif rule_type == "clickhouse_size":
+            await self._evaluate_clickhouse_size(db, rule)
+
     async def _evaluate_threshold(self, db: aiosqlite.Connection, rule: dict) -> None:
         from app.storage.factory import get_storage
         conds = rule["conditions"]
@@ -116,17 +143,20 @@ class AlertEngine:
         sampler_ip = conds.get("sampler_ip") or None
         window_min = rule.get("time_window_min", 5)
 
-        current = await get_storage().get_metric_in_window(metric, window_min, sampler_ip)
+        storage = get_storage()
+        current = await storage.get_metric_in_window(metric, window_min, sampler_ip)
         ops = {"gt": current > threshold, "gte": current >= threshold,
                "lt": current < threshold, "lte": current <= threshold}
         if ops.get(operator, False):
             op_sym = {"gt": ">", "gte": "≥", "lt": "<", "lte": "≤"}.get(operator, operator)
             sampler_str = f" from {sampler_ip}" if sampler_ip else ""
+            top_ips = await storage.get_threshold_top_ips(metric, window_min, sampler_ip)
             await self._fire(db, rule, (
                 f"Threshold breached{sampler_str}: {metric} in last {window_min}m "
                 f"= {current:,.0f} {op_sym} {threshold:,.0f}"
             ), {"metric": metric, "current": current, "threshold": threshold,
-                "operator": operator, "sampler_ip": sampler_ip or "all"})
+                "operator": operator, "sampler_ip": sampler_ip or "all",
+                "top_sources": top_ips})
         else:
             await self._auto_resolve(db, rule, f"{metric} back within threshold (current: {current:,.0f})")
 
@@ -182,6 +212,208 @@ class AlertEngine:
                 "flow_count": count, "sampler_ip": sampler_ip or "all"})
         else:
             await self._auto_resolve(db, rule, f"No traffic on port {port}/{proto_str} in last {window_min}m")
+
+    async def _evaluate_top_talker(self, db: aiosqlite.Connection, rule: dict) -> None:
+        from app.storage.factory import get_storage
+        conds = rule["conditions"]
+        metric = conds.get("metric", "bytes")
+        threshold = float(conds.get("threshold", 0))
+        sampler_ip = conds.get("sampler_ip") or None
+        window_min = rule.get("time_window_min", 5)
+
+        top_ip, value = await get_storage().get_top_talker_in_window(metric, window_min, sampler_ip)
+        if not top_ip:
+            await self._auto_resolve(db, rule, "No traffic in window")
+            return
+
+        if value >= threshold:
+            sampler_str = f" on {sampler_ip}" if sampler_ip else ""
+            unit = {"bytes": "bytes", "packets": "pkts", "flows": "flows"}.get(metric, metric)
+            await self._fire(db, rule, (
+                f"Top talker{sampler_str}: {top_ip} used {value:,.0f} {unit} "
+                f"in last {window_min}m (threshold: {threshold:,.0f})"
+            ), {"src_ip": top_ip, "value": value, "metric": metric,
+                "threshold": threshold, "sampler_ip": sampler_ip or "all"})
+        else:
+            await self._auto_resolve(db, rule, f"Top talker {top_ip}: {value:,.0f} {metric} — within threshold")
+
+    async def _evaluate_elephant_flow(self, db: aiosqlite.Connection, rule: dict) -> None:
+        from app.storage.factory import get_storage
+        conds = rule["conditions"]
+        threshold_mb = float(conds.get("threshold_mb", 100))
+        threshold_bytes = threshold_mb * 1_000_000
+        sampler_ip = conds.get("sampler_ip") or None
+        window_min = rule.get("time_window_min", 5)
+
+        storage = get_storage()
+        count, max_bytes = await storage.get_elephant_flow_stats(threshold_bytes, window_min, sampler_ip)
+        if count > 0:
+            sampler_str = f" on {sampler_ip}" if sampler_ip else ""
+            top_flows = await storage.get_elephant_flow_top(threshold_bytes, window_min, sampler_ip)
+            await self._fire(db, rule, (
+                f"Elephant flow detected{sampler_str}: {count} flow{'s' if count != 1 else ''} "
+                f">{threshold_mb:.0f}MB (largest: {max_bytes/1_000_000:.1f}MB) in last {window_min}m"
+            ), {"flow_count": count, "max_bytes": max_bytes, "threshold_mb": threshold_mb,
+                "sampler_ip": sampler_ip or "all", "top_flows": top_flows})
+        else:
+            await self._auto_resolve(db, rule, f"No flows exceed {threshold_mb:.0f}MB threshold in last {window_min}m")
+
+    async def _evaluate_inter_site_traffic(self, db: aiosqlite.Connection, rule: dict) -> None:
+        from app.storage.factory import get_storage
+        conds = rule["conditions"]
+        metric = conds.get("metric", "bytes")
+        threshold = float(conds.get("threshold", 0))
+        site_a = conds.get("site_a") or None
+        site_b = conds.get("site_b") or None
+        window_min = rule.get("time_window_min", 5)
+
+        storage = get_storage()
+        value = await storage.get_inter_site_metric(metric, window_min, site_a, site_b)
+        if value >= threshold:
+            site_desc = f"{site_a}↔{site_b}" if site_a and site_b else (site_a or site_b or "cross-site")
+            unit = {"bytes": "bytes", "packets": "pkts", "flows": "flows"}.get(metric, metric)
+            top = await storage.get_inter_site_top_contributors(metric, window_min, site_a, site_b)
+            await self._fire(db, rule, (
+                f"Inter-site traffic spike ({site_desc}): {value:,.0f} {unit} "
+                f"in last {window_min}m (threshold: {threshold:,.0f})"
+            ), {"metric": metric, "value": value, "threshold": threshold,
+                "site_a": site_a or "any", "site_b": site_b or "any",
+                "top_contributors": top})
+        else:
+            await self._auto_resolve(db, rule, f"Inter-site {metric}: {value:,.0f} — within threshold")
+
+    async def _evaluate_connection_burst(self, db: aiosqlite.Connection, rule: dict) -> None:
+        from app.storage.factory import get_storage
+        conds = rule["conditions"]
+        threshold = int(conds.get("threshold_connections", 1000))
+        sampler_ip = conds.get("sampler_ip") or None
+        window_min = rule.get("time_window_min", 5)
+
+        top_ip, count = await get_storage().get_top_connection_count(window_min, sampler_ip)
+        if not top_ip:
+            await self._auto_resolve(db, rule, "No traffic in window")
+            return
+
+        if count >= threshold:
+            sampler_str = f" on {sampler_ip}" if sampler_ip else ""
+            await self._fire(db, rule, (
+                f"Connection burst{sampler_str}: {top_ip} made {count:,} connections "
+                f"in last {window_min}m (threshold: {threshold:,})"
+            ), {"src_ip": top_ip, "connection_count": count, "threshold": threshold,
+                "sampler_ip": sampler_ip or "all"})
+        else:
+            await self._auto_resolve(db, rule, f"Connection burst: {top_ip} made {count:,} — within threshold")
+
+    async def _evaluate_port_scan(self, db: aiosqlite.Connection, rule: dict) -> None:
+        from app.storage.factory import get_storage
+        conds = rule["conditions"]
+        threshold_ports = int(conds.get("threshold_ports", 50))
+        sampler_ip = conds.get("sampler_ip") or None
+        window_min = rule.get("time_window_min", 5)
+
+        top_ip, distinct_ports = await get_storage().get_top_unique_dst_ports(window_min, sampler_ip)
+        if not top_ip:
+            await self._auto_resolve(db, rule, "No traffic in window")
+            return
+
+        if distinct_ports >= threshold_ports:
+            sampler_str = f" on {sampler_ip}" if sampler_ip else ""
+            await self._fire(db, rule, (
+                f"Port scan detected{sampler_str}: {top_ip} hit {distinct_ports:,} distinct ports "
+                f"in last {window_min}m (threshold: {threshold_ports})"
+            ), {"src_ip": top_ip, "distinct_ports": distinct_ports, "threshold": threshold_ports,
+                "sampler_ip": sampler_ip or "all"})
+        else:
+            await self._auto_resolve(db, rule, f"Port scan: {top_ip} hit {distinct_ports} distinct dst ports — below threshold")
+
+    async def _evaluate_internal_spread(self, db: aiosqlite.Connection, rule: dict) -> None:
+        from app.storage.factory import get_storage
+        conds = rule["conditions"]
+        threshold_ips = int(conds.get("threshold_ips", 30))
+        src_subnet = conds.get("src_subnet") or None
+        sampler_ip = conds.get("sampler_ip") or None
+        window_min = rule.get("time_window_min", 5)
+
+        top_ip, distinct_dsts = await get_storage().get_top_unique_dst_ips(window_min, sampler_ip, src_subnet)
+        if not top_ip:
+            await self._auto_resolve(db, rule, "No traffic in window")
+            return
+
+        if distinct_dsts >= threshold_ips:
+            subnet_str = f" (src subnet: {src_subnet})" if src_subnet else ""
+            sampler_str = f" on {sampler_ip}" if sampler_ip else ""
+            await self._fire(db, rule, (
+                f"Internal spread detected{sampler_str}: {top_ip} reached {distinct_dsts:,} distinct "
+                f"destinations in last {window_min}m (threshold: {threshold_ips}){subnet_str}"
+            ), {"src_ip": top_ip, "distinct_destinations": distinct_dsts, "threshold": threshold_ips,
+                "src_subnet": src_subnet or "any", "sampler_ip": sampler_ip or "all"})
+        else:
+            await self._auto_resolve(db, rule, f"Internal spread: {top_ip} reached {distinct_dsts} destinations — below threshold")
+
+    async def _evaluate_protocol_anomaly(self, db: aiosqlite.Connection, rule: dict) -> None:
+        from app.storage.factory import get_storage
+        conds = rule["conditions"]
+        port = int(conds.get("port", 0))
+        if port <= 0:
+            log.warning(f"protocol_anomaly rule '{rule['name']}' has no valid port configured")
+            return
+        expected_proto_str = (conds.get("expected_proto") or "TCP").upper()
+        direction = conds.get("direction", "dst")
+        sampler_ip = conds.get("sampler_ip") or None
+        window_min = rule.get("time_window_min", 5)
+
+        _PROTO_INT = {"TCP": 6, "UDP": 17, "ICMP": 1}
+        expected_proto_int = _PROTO_INT.get(expected_proto_str, 6)
+
+        count = await get_storage().get_unexpected_proto_count(port, expected_proto_int, direction, window_min, sampler_ip)
+        if count > 0:
+            sampler_str = f" on {sampler_ip}" if sampler_ip else ""
+            dir_str = {"src": "src port", "dst": "dst port", "any": "port"}.get(direction, "port")
+            await self._fire(db, rule, (
+                f"Protocol anomaly{sampler_str}: {count} flow{'s' if count != 1 else ''} on {dir_str} {port} "
+                f"using unexpected protocol (expected {expected_proto_str}) in last {window_min}m"
+            ), {"port": port, "expected_proto": expected_proto_str, "direction": direction,
+                "flow_count": count, "sampler_ip": sampler_ip or "all"})
+        else:
+            await self._auto_resolve(db, rule, f"No unexpected protocol on port {port} in last {window_min}m")
+
+    async def _evaluate_ingest_rate_low(self, db: aiosqlite.Connection, rule: dict) -> None:
+        from app.storage.factory import get_storage
+        conds = rule["conditions"]
+        min_fps = float(conds.get("min_flows_per_sec", 1.0))
+        sampler_ip = conds.get("sampler_ip") or None
+        window_min = rule.get("time_window_min", 5)
+
+        total_flows = await get_storage().get_metric_in_window("flows", window_min, sampler_ip)
+        fps = total_flows / (window_min * 60) if window_min > 0 else 0.0
+
+        if fps < min_fps:
+            sampler_str = f" from {sampler_ip}" if sampler_ip else ""
+            await self._fire(db, rule, (
+                f"Ingest rate low{sampler_str}: {fps:.2f} flows/sec in last {window_min}m "
+                f"(minimum: {min_fps:.2f} flows/sec)"
+            ), {"flows_per_sec": round(fps, 3), "min_flows_per_sec": min_fps,
+                "total_flows": int(total_flows), "sampler_ip": sampler_ip or "all"})
+        else:
+            await self._auto_resolve(db, rule, f"Ingest rate normal: {fps:.2f} flows/sec — above minimum")
+
+    async def _evaluate_clickhouse_size(self, db: aiosqlite.Connection, rule: dict) -> None:
+        from app.storage.factory import get_storage
+        conds = rule["conditions"]
+        threshold_gb = float(conds.get("threshold_gb", 10.0))
+        table = conds.get("table", "flows")
+
+        size_gb = await get_storage().get_clickhouse_table_size_gb(table)
+        if size_gb <= 0:
+            return  # DuckDB backend or table empty — not applicable
+
+        if size_gb >= threshold_gb:
+            await self._fire(db, rule, (
+                f"ClickHouse storage: '{table}' table is {size_gb:.1f}GB "
+                f"(threshold: {threshold_gb:.1f}GB)"
+            ), {"table": table, "size_gb": round(size_gb, 2), "threshold_gb": threshold_gb})
+        else:
+            await self._auto_resolve(db, rule, f"ClickHouse '{table}': {size_gb:.2f}GB — within limit")
 
     async def _auto_resolve(self, db: aiosqlite.Connection, rule: dict, reason: str) -> None:
         """Mark open events for this rule as auto-resolved when the condition has cleared."""
@@ -264,6 +496,19 @@ class AlertEngine:
         await db.commit()
 
         log.warning(f"ALERT [{rule['severity'].upper()}] {rule['name']}: {message}")
+
+        # Broadcast to WebSocket clients (fire-and-forget)
+        try:
+            from app.api.ws import broadcast_alert_fired
+            asyncio.create_task(broadcast_alert_fired(
+                event_id=event_id,
+                rule_name=rule["name"],
+                severity=rule["severity"],
+                message=message,
+                details=details,
+            ))
+        except Exception:
+            pass
 
         # Dispatch to notification channels
         for channel in rule.get("channels", ["inapp"]):
