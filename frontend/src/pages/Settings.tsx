@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { api, DeviceSummary, User, UserIn } from '../api/client'
+import { useEffect, useRef, useState } from 'react'
+import { api, DeviceSummary, User, UserIn, SslStatus } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import { useAuth } from '../store/auth'
 
@@ -114,15 +114,6 @@ function RestartServiceRow() {
   )
 }
 
-// Badge for "Phase 5" to mark not-yet-active features
-function Phase5Badge() {
-  return (
-    <span className="ml-2 text-xs bg-gray-800 text-white border border-gray-700 rounded px-1.5 py-0.5">
-      Phase 5
-    </span>
-  )
-}
-
 // ── Section wrapper with Save ─────────────────────────────────────────────────
 function Section({
   title, children, onSave, saving, saved, error,
@@ -181,6 +172,92 @@ function useSave(keys: string[], settings: Settings, onSuccess: () => void) {
   return { ...state, save }
 }
 
+// ── Drag-and-drop cert/key textarea ──────────────────────────────────────────
+function CertTextarea({ value, onChange, rows = 4, placeholder = 'MIIDp…' }: {
+  value: string; onChange: (v: string) => void; rows?: number; placeholder?: string
+}) {
+  const [dragging, setDragging] = useState(false)
+
+  const stripPem = (raw: string) =>
+    raw
+      .replace(/-----BEGIN[^-]+-----/g, '')
+      .replace(/-----END[^-]+-----/g, '')
+      .replace(/\s+/g, '')
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragging(false)
+    const file = e.dataTransfer.files[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = reader.result as string
+      onChange(stripPem(text))
+    }
+    reader.readAsText(file)
+  }
+
+  return (
+    <div
+      onDragOver={e => { e.preventDefault(); setDragging(true) }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={handleDrop}
+      className={`relative rounded-lg transition-colors ${dragging ? 'ring-2 ring-blue-400 bg-blue-950/30' : ''}`}
+    >
+      <textarea
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        rows={rows}
+        placeholder={placeholder}
+        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono resize-y"
+      />
+      {dragging && (
+        <div className="absolute inset-0 flex items-center justify-center rounded-lg pointer-events-none">
+          <p className="text-blue-300 text-sm font-medium bg-gray-900/80 px-3 py-1 rounded">Drop to import</p>
+        </div>
+      )}
+      <p className="text-xs text-gray-600 mt-1">Paste content or drag &amp; drop a .pem / .crt / .cer file</p>
+    </div>
+  )
+}
+
+// ── SAML metadata paste box ───────────────────────────────────────────────────
+function MetadataPasteBox({ onParsed }: {
+  onParsed: (r: { entity_id: string; sso_url: string; cert: string }) => void
+}) {
+  const [xml, setXml]       = useState('')
+  const [status, setStatus] = useState<'idle' | 'ok' | 'error'>('idle')
+  const [msg, setMsg]       = useState('')
+
+  const handleChange = (raw: string) => {
+    setXml(raw)
+    if (!raw.trim()) { setStatus('idle'); setMsg(''); return }
+    const result = parseIdpMetadata(raw)
+    if (result.error) {
+      setStatus('error')
+      setMsg(result.error)
+    } else {
+      onParsed(result)
+      setStatus('ok')
+      setMsg('Entity ID, SSO URL, and certificate populated below.')
+    }
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <textarea
+        value={xml}
+        onChange={e => handleChange(e.target.value)}
+        rows={5}
+        placeholder={'<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" …>'}
+        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono resize-y"
+      />
+      {status === 'ok'    && <p className="text-xs text-emerald-400">✓ {msg}</p>}
+      {status === 'error' && <p className="text-xs text-red-400">✗ {msg}</p>}
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 type TabId = 'general' | 'storage' | 'backup' | 'ingest' | 'auth' | 'notifications' | 'devices' | 'integrations' | 'users'
 
@@ -196,19 +273,60 @@ const TABS: Array<{ id: TabId; label: string; adminOnly?: boolean }> = [
   { id: 'users',         label: 'Users', adminOnly: true },
 ]
 
+// ── SAML IdP metadata parser ──────────────────────────────────────────────────
+function parseIdpMetadata(xml: string): {
+  entity_id: string; sso_url: string; cert: string; error?: string
+} {
+  try {
+    const doc = new DOMParser().parseFromString(xml, 'application/xml')
+    if (doc.querySelector('parsererror')) return { entity_id: '', sso_url: '', cert: '', error: 'Invalid XML — check the metadata and try again.' }
+
+    const root = doc.querySelector('EntityDescriptor') ?? doc.documentElement
+    const entity_id = root.getAttribute('entityID') ?? ''
+
+    // Prefer HTTP-Redirect binding; fall back to any SSO service
+    let sso_url = ''
+    const ssoNodes = Array.from(doc.querySelectorAll('SingleSignOnService'))
+    const redirect = ssoNodes.find(n => (n.getAttribute('Binding') ?? '').includes('HTTP-Redirect'))
+    sso_url = (redirect ?? ssoNodes[0])?.getAttribute('Location') ?? ''
+
+    // Prefer signing key; fall back to any X509Certificate
+    let cert = ''
+    const keyDescs = Array.from(doc.querySelectorAll('KeyDescriptor'))
+    const signingKd = keyDescs.find(kd => !kd.getAttribute('use') || kd.getAttribute('use') === 'signing')
+    const x509El = signingKd?.querySelector('X509Certificate') ?? doc.querySelector('X509Certificate')
+    cert = x509El?.textContent?.replace(/\s+/g, '') ?? ''
+
+    if (!entity_id && !sso_url && !cert)
+      return { entity_id: '', sso_url: '', cert: '', error: 'No SAML IdP data found in this XML.' }
+
+    return { entity_id, sso_url, cert }
+  } catch {
+    return { entity_id: '', sso_url: '', cert: '', error: 'Failed to parse XML.' }
+  }
+}
+
 export default function Settings() {
   const { user: me }          = useAuth()
   const isAdmin               = me?.role === 'admin'
   const [tab, setTab]         = useState<TabId>('general')
   const [settings, setSettings] = useState<Settings>({})
   const [loading, setLoading] = useState(true)
+  // Tracks whether the user has made unsaved edits.
+  // silentLoad skips the refresh while dirty so in-progress form work isn't overwritten.
+  const dirtyRef = useRef(false)
 
   const load = async () => {
     setLoading(true)
-    try { setSettings(await api.getSettings()) } finally { setLoading(false) }
+    try { setSettings(await api.getSettings()) } finally {
+      setLoading(false)
+      dirtyRef.current = false
+    }
   }
-  // Silent refresh — updates settings without triggering the loading spinner
+  // Silent refresh — updates settings without triggering the loading spinner.
+  // Skipped entirely when the user has unsaved changes.
   const silentLoad = async () => {
+    if (dirtyRef.current) return
     try { setSettings(await api.getSettings()) } catch {}
   }
   useEffect(() => { load() }, [])
@@ -219,8 +337,10 @@ export default function Settings() {
     return () => clearInterval(t)
   }, [])
 
-  const set = (key: string, value: unknown) =>
+  const set = (key: string, value: unknown) => {
+    dirtyRef.current = true
     setSettings(s => ({ ...s, [key]: value }))
+  }
 
   const str  = (k: string, fallback = '') => (settings[k] as string) ?? fallback
   const num  = (k: string, fallback = 0)  => (settings[k] as number) ?? fallback
@@ -350,6 +470,8 @@ export default function Settings() {
   const authSave = useSave([
     'auth_local_enabled', 'auth_okta_enabled', 'okta_issuer', 'okta_client_id',
     'okta_client_secret', 'okta_redirect_uri', 'session_timeout_minutes',
+    'okta_saml_enabled', 'okta_saml_idp_entity_id', 'okta_saml_idp_sso_url',
+    'okta_saml_idp_cert', 'okta_saml_sp_entity_id', 'okta_saml_sp_cert', 'okta_saml_sp_key',
   ], settings, load)
   const notifySave = useSave([
     'notify_slack_enabled', 'notify_slack_webhook_url', 'notify_slack_channel',
@@ -704,10 +826,7 @@ export default function Settings() {
           </Field>
 
           <div className="pt-4 pb-2">
-            <p className="text-xs font-semibold text-white uppercase tracking-wider">
-              Okta OIDC SSO
-              <Phase5Badge />
-            </p>
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">Okta OIDC SSO</p>
           </div>
           <Field label="Enable Okta SSO">
             <Toggle value={bool('auth_okta_enabled')} onChange={v => set('auth_okta_enabled', v)} />
@@ -730,6 +849,61 @@ export default function Settings() {
                   placeholder={`${str('base_url')}/auth/okta/callback`}
                   mono
                 />
+              </Field>
+            </>
+          )}
+
+          <div className="pt-4 pb-2">
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">Okta SAML 2.0 SSO</p>
+          </div>
+          <Field label="Enable SAML SSO">
+            <Toggle value={bool('okta_saml_enabled')} onChange={v => set('okta_saml_enabled', v)} />
+          </Field>
+          {bool('okta_saml_enabled') && (
+            <>
+              {/* ── Metadata paste helper ── */}
+              <Field label="Paste IdP Metadata XML" hint="Paste the full XML from Okta → Sign On → Identity Provider metadata. Fields below will auto-fill.">
+                <MetadataPasteBox onParsed={(r) => {
+                  if (r.entity_id) set('okta_saml_idp_entity_id', r.entity_id)
+                  if (r.sso_url)   set('okta_saml_idp_sso_url', r.sso_url)
+                  if (r.cert)      set('okta_saml_idp_cert', r.cert)
+                }} />
+              </Field>
+
+              <Field label="IdP Entity ID" hint="From Okta metadata: Identity Provider Issuer">
+                <TextInput value={str('okta_saml_idp_entity_id')} onChange={v => set('okta_saml_idp_entity_id', v)} placeholder="http://www.okta.com/..." mono />
+              </Field>
+              <Field label="IdP SSO URL" hint="From Okta metadata: Identity Provider Single Sign-On URL">
+                <TextInput value={str('okta_saml_idp_sso_url')} onChange={v => set('okta_saml_idp_sso_url', v)} placeholder="https://yourorg.okta.com/app/.../sso/saml" mono />
+              </Field>
+              <Field label="IdP X.509 Certificate" hint="PEM headers are stripped automatically">
+                <CertTextarea value={str('okta_saml_idp_cert')} onChange={v => set('okta_saml_idp_cert', v)} rows={4} />
+              </Field>
+              <Field label="SP Entity ID" hint="Leave blank to use the auto-generated metadata URL">
+                <TextInput value={str('okta_saml_sp_entity_id')} onChange={v => set('okta_saml_sp_entity_id', v)} placeholder={`${str('base_url')}/api/auth/saml/metadata`} mono />
+              </Field>
+              <Field label="ACS URL (read-only)" hint="Register this URL as the Single Sign-On URL in your Okta app">
+                <div className="flex items-center gap-2">
+                  <input
+                    readOnly
+                    value={`${str('base_url')}/api/auth/saml/callback`}
+                    className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-400 font-mono cursor-default"
+                  />
+                  <a
+                    href={`${str('base_url')}/api/auth/saml/metadata`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-blue-400 hover:text-blue-300 whitespace-nowrap"
+                  >
+                    View SP metadata ↗
+                  </a>
+                </div>
+              </Field>
+              <Field label="SP Certificate" hint="Optional: for signed authentication requests">
+                <CertTextarea value={str('okta_saml_sp_cert')} onChange={v => set('okta_saml_sp_cert', v)} rows={3} placeholder="Leave blank if not signing requests" />
+              </Field>
+              <Field label="SP Private Key" hint="Optional: private key for signing requests (kept secret)">
+                <CertTextarea value={str('okta_saml_sp_key')} onChange={v => set('okta_saml_sp_key', v)} rows={3} placeholder="Leave blank if not signing requests" />
               </Field>
             </>
           )}
@@ -757,11 +931,9 @@ export default function Settings() {
             </>
           )}
 
-          {/* Email — Phase 5 */}
+          {/* Email */}
           <div className="pt-4 pb-1">
-            <p className="text-xs font-semibold text-white uppercase tracking-wider">
-              Email (SMTP) <Phase5Badge />
-            </p>
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">Email (SMTP)</p>
           </div>
           <Field label="Enable email">
             <Toggle value={bool('notify_email_enabled')} onChange={v => set('notify_email_enabled', v)} />
@@ -796,11 +968,9 @@ export default function Settings() {
             </>
           )}
 
-          {/* PagerDuty — Phase 5 */}
+          {/* PagerDuty */}
           <div className="pt-4 pb-1">
-            <p className="text-xs font-semibold text-white uppercase tracking-wider">
-              PagerDuty <Phase5Badge />
-            </p>
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">PagerDuty</p>
           </div>
           <Field label="Enable PagerDuty">
             <Toggle value={bool('notify_pagerduty_enabled')} onChange={v => set('notify_pagerduty_enabled', v)} />
@@ -811,11 +981,9 @@ export default function Settings() {
             </Field>
           )}
 
-          {/* Webhook — Phase 5 */}
+          {/* Webhook */}
           <div className="pt-4 pb-1">
-            <p className="text-xs font-semibold text-white uppercase tracking-wider">
-              Webhook <Phase5Badge />
-            </p>
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">Webhook</p>
           </div>
           <Field label="Enable webhook">
             <Toggle value={bool('notify_webhook_enabled')} onChange={v => set('notify_webhook_enabled', v)} />
@@ -871,37 +1039,216 @@ export default function Settings() {
           <div className="pt-4 pb-1">
             <p className="text-xs font-semibold text-white uppercase tracking-wider">SSL / TLS</p>
           </div>
-          <Field label="Enable HTTPS" hint="Serve pktFlow over HTTPS and WSS. Requires a valid cert and key file on the server. Restart required.">
-            <Toggle value={bool('ssl_enabled')} onChange={v => set('ssl_enabled', v)} />
-          </Field>
-          {bool('ssl_enabled') && (
-            <>
-              <Field label="Certificate file" hint="Absolute path to the PEM certificate file on the O2 server (e.g. /etc/pktflow/ssl/cert.pem).">
-                <TextInput
-                  value={str('ssl_certfile')}
-                  onChange={v => set('ssl_certfile', v)}
-                  placeholder="/etc/pktflow/ssl/cert.pem"
-                  mono
-                />
-              </Field>
-              <Field label="Private key file" hint="Absolute path to the PEM private key file on the O2 server (e.g. /etc/pktflow/ssl/key.pem).">
-                <TextInput
-                  value={str('ssl_keyfile')}
-                  onChange={v => set('ssl_keyfile', v)}
-                  placeholder="/etc/pktflow/ssl/key.pem"
-                  mono
-                />
-              </Field>
-              <Field label="" hint="">
-                <p className="text-xs text-white bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 leading-relaxed">
-                  Save these settings, then restart the service from the{' '}
-                  <strong className="text-white">General</strong> tab for SSL to take effect.
-                </p>
-              </Field>
-            </>
-          )}
+          <div className="py-3">
+            <SslPanel />
+          </div>
         </Section>
       )}
+    </div>
+  )
+}
+
+// ── SSL certificate upload ─────────────────────────────────────────────────────
+
+function SslDropZone({ label, accept, file, onFile, dragging, onDrag }: {
+  label: string; accept: string; file: File | null
+  onFile: (f: File) => void; dragging: boolean; onDrag: (v: boolean) => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  return (
+    <div
+      className={`flex-1 border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors select-none ${
+        dragging    ? 'border-blue-500 bg-blue-500/10'
+        : file      ? 'border-green-600 bg-green-600/10'
+        : 'border-gray-700 hover:border-gray-600'
+      }`}
+      onClick={() => inputRef.current?.click()}
+      onDragOver={e => { e.preventDefault(); onDrag(true) }}
+      onDragLeave={() => onDrag(false)}
+      onDrop={e => { e.preventDefault(); onDrag(false); const f = e.dataTransfer.files[0]; if (f) onFile(f) }}
+    >
+      <input ref={inputRef} type="file" accept={accept} className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f) }} />
+      {file ? (
+        <>
+          <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <p className="text-xs font-medium text-green-400 text-center break-all">{file.name}</p>
+          <p className="text-xs text-white">{(file.size / 1024).toFixed(1)} KB</p>
+        </>
+      ) : (
+        <>
+          <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m6.75 12H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+          </svg>
+          <p className="text-xs font-medium text-white text-center">{label}</p>
+          <p className="text-xs text-white">Drop or click to browse</p>
+        </>
+      )}
+    </div>
+  )
+}
+
+function SslPanel() {
+  const [status, setStatus]       = useState<SslStatus | null>(null)
+  const [mode, setMode]           = useState<'pem' | 'pfx'>('pfx')
+  // PEM mode
+  const [certFile, setCertFile]   = useState<File | null>(null)
+  const [keyFile,  setKeyFile]    = useState<File | null>(null)
+  const [certDrag, setCertDrag]   = useState(false)
+  const [keyDrag,  setKeyDrag]    = useState(false)
+  // PFX mode
+  const [pfxFile,  setPfxFile]    = useState<File | null>(null)
+  const [pfxDrag,  setPfxDrag]    = useState(false)
+  const [passphrase, setPassphrase] = useState('')
+  // Shared
+  const [uploading, setUploading] = useState(false)
+  const [removing,  setRemoving]  = useState(false)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
+  useEffect(() => {
+    api.getSslStatus().then(setStatus).catch(() => setStatus({ installed: false }))
+  }, [])
+
+  const uploadPem = async () => {
+    if (!certFile || !keyFile) return
+    setUploading(true); setMsg(null)
+    try {
+      const s = await api.uploadSsl(certFile, keyFile)
+      setStatus(s); setCertFile(null); setKeyFile(null)
+      setMsg({ ok: true, text: 'Certificate installed. Restart the service (General tab) to enable HTTPS.' })
+    } catch (e: any) {
+      setMsg({ ok: false, text: e.message ?? 'Upload failed' })
+    } finally { setUploading(false) }
+  }
+
+  const uploadPfx = async () => {
+    if (!pfxFile || !passphrase) return
+    setUploading(true); setMsg(null)
+    try {
+      const s = await api.uploadSslPfx(pfxFile, passphrase)
+      setStatus(s); setPfxFile(null); setPassphrase('')
+      setMsg({ ok: true, text: 'Certificate installed from PFX. Restart the service (General tab) to enable HTTPS.' })
+    } catch (e: any) {
+      setMsg({ ok: false, text: e.message ?? 'Upload failed' })
+    } finally { setUploading(false) }
+  }
+
+  const remove = async () => {
+    setRemoving(true); setMsg(null)
+    try {
+      await api.deleteSsl()
+      setStatus({ installed: false })
+      setMsg({ ok: true, text: 'Certificate removed. Restart service to disable HTTPS.' })
+    } catch (e: any) {
+      setMsg({ ok: false, text: e.message ?? 'Remove failed' })
+    } finally { setRemoving(false) }
+  }
+
+  const daysLeft = status?.days_until_expiry ?? 9999
+  const expColor = daysLeft < 0 ? 'text-red-400' : daysLeft < 30 ? 'text-yellow-400' : 'text-green-400'
+  const expBadge = daysLeft < 0 ? 'Expired' : daysLeft < 30 ? `Expires in ${daysLeft}d` : `Valid · ${daysLeft}d left`
+
+  const pemReady = !!(certFile && keyFile)
+  const pfxReady = !!(pfxFile && passphrase)
+
+  return (
+    <div className="space-y-4">
+      {/* Current cert status */}
+      {status?.installed ? (
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0"></span>
+              <span className="text-sm font-medium text-white">Certificate installed</span>
+            </div>
+            <span className={`text-xs font-medium ${expColor}`}>{expBadge}</span>
+          </div>
+          {status.subject && <p className="text-xs text-white font-mono">{status.subject}</p>}
+          {status.issuer  && <p className="text-xs text-white">Issued by: {status.issuer}</p>}
+          {status.expires && <p className="text-xs text-white">Expires: {status.expires}</p>}
+          {status.error   && <p className="text-xs text-red-400">Warning: {status.error}</p>}
+          <button onClick={remove} disabled={removing}
+            className="text-xs text-red-400 hover:text-red-300 disabled:opacity-50 pt-1">
+            {removing ? 'Removing…' : '× Remove certificate'}
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 text-sm text-white">
+          <span className="w-2 h-2 rounded-full bg-gray-600 flex-shrink-0"></span>
+          No certificate installed · running HTTP
+        </div>
+      )}
+
+      {/* Mode toggle */}
+      <div className="flex items-center gap-1 bg-gray-800 border border-gray-700 rounded-lg p-1 w-fit">
+        <button
+          onClick={() => setMode('pfx')}
+          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${mode === 'pfx' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+          PFX / P12
+        </button>
+        <button
+          onClick={() => setMode('pem')}
+          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${mode === 'pem' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+          PEM (cert + key)
+        </button>
+      </div>
+
+      {mode === 'pfx' ? (
+        /* ── PFX mode ── */
+        <div className="space-y-3">
+          <SslDropZone label="PFX / P12 file (.pfx, .p12)" accept=".pfx,.p12"
+            file={pfxFile} onFile={setPfxFile} dragging={pfxDrag} onDrag={setPfxDrag} />
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Passphrase</label>
+            <input
+              type="password"
+              value={passphrase}
+              onChange={e => setPassphrase(e.target.value)}
+              placeholder="PFX passphrase"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={uploadPfx} disabled={!pfxReady || uploading}
+              className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg disabled:opacity-40 transition-colors">
+              {uploading ? 'Uploading…' : 'Upload & Install'}
+            </button>
+            {!pfxReady && (
+              <span className="text-xs text-gray-500">
+                {!pfxFile ? 'Drop a PFX file above' : 'Enter the passphrase'}
+              </span>
+            )}
+          </div>
+        </div>
+      ) : (
+        /* ── PEM mode ── */
+        <div className="space-y-3">
+          <div className="flex gap-3">
+            <SslDropZone label="Certificate (.crt / .pem)" accept=".crt,.pem,.cer"
+              file={certFile} onFile={setCertFile} dragging={certDrag} onDrag={setCertDrag} />
+            <SslDropZone label="Private Key (.key / .pem)" accept=".key,.pem"
+              file={keyFile} onFile={setKeyFile} dragging={keyDrag} onDrag={setKeyDrag} />
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={uploadPem} disabled={!pemReady || uploading}
+              className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg disabled:opacity-40 transition-colors">
+              {uploading ? 'Uploading…' : 'Upload & Install'}
+            </button>
+            {!pemReady && (
+              <span className="text-xs text-gray-500">Drop both cert and key files above</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {msg && <p className={`text-xs ${msg.ok ? 'text-green-400' : 'text-red-400'}`}>{msg.text}</p>}
+
+      <p className="text-xs text-gray-500 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 leading-relaxed">
+        After uploading, restart the service from the <strong className="text-white">General</strong> tab.
+        The service wrapper auto-detects cert files on startup — no additional config needed.
+      </p>
     </div>
   )
 }
