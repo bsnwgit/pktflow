@@ -112,6 +112,11 @@ export const api = {
   updateDevice: (id: number, d: DeviceIn) =>
     request<Device>(`/devices/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   deleteDevice: (id: number) => request(`/devices/${id}`, { method: 'DELETE' }),
+  getUnknownSamplers: () =>
+    request<{ unknown: Array<{ sampler_ip: string; flows_per_sec: number; last_seen: string }>; dismissed: Array<{ sampler_ip: string; dismissed_at: string }> }>('/devices/unknown-samplers'),
+  getDeviceSites: () => request<string[]>('/devices/sites'),
+  dismissSampler: (ip: string) => request<{ dismissed: string }>(`/devices/dismiss/${encodeURIComponent(ip)}`, { method: 'POST' }),
+  undismissSampler: (ip: string) => request<null>(`/devices/dismiss/${encodeURIComponent(ip)}`, { method: 'DELETE' }),
 
   getAlertRules: () => request<AlertRule[]>('/alerts/rules'),
   getAlertEvents: (unackedOnly = false) =>
@@ -136,6 +141,9 @@ export const api = {
     request(`/users/${id}/reset-password`, { method: 'PATCH', body: JSON.stringify({ new_password: newPassword }) }),
   changeMyPassword: (currentPassword: string, newPassword: string) =>
     request('/users/me/password', { method: 'PATCH', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
+
+  testStorageConnection: () =>
+    request<{ ok: boolean; backend: string; message: string }>('/system/test-connection', { method: 'POST' }),
 
   restartService: () =>
     request<{ status: string; message: string }>('/system/restart', { method: 'POST' }),
@@ -266,4 +274,117 @@ export interface AlertRule {
   rule_type: string
   conditions: Record<string, unknown>
   severity: string
-  channels: st
+  channels: string[]
+  cooldown_min: number
+  last_fired: string | null
+}
+
+export interface AlertEvent {
+  id: number
+  rule_id: number
+  rule_name: string
+  severity: string
+  message: string
+  details: Record<string, unknown>
+  fired_at: string
+  acked_at: string | null
+  resolved_at: string | null
+  auto_resolved: number  // 1 = engine auto-resolved, 0 = not
+}
+
+export interface UserIn {
+  username: string
+  email: string
+  password?: string
+  role: string
+}
+
+export interface User {
+  id: number
+  username: string
+  email: string
+  role: string
+  is_active: boolean
+  created_at: string
+  last_login: string | null
+}
+
+export interface ProtocolStat {
+  protocol: number
+  name: string
+  bytes: number
+  packets: number
+  flow_count: number
+  pct_bytes: number
+}
+
+export interface PortStat {
+  port: number
+  protocol: number
+  proto_name: string
+  service_name: string
+  bytes: number
+  packets: number
+  flow_count: number
+  pct_bytes: number
+}
+
+export interface TopologyNode {
+  id: string
+  sampler_name: string
+  site: string
+  bytes: number
+  flows: number
+  is_sampler: boolean
+}
+
+export interface TopologyEdge {
+  source: string
+  target: string
+  bytes: number
+  packets: number
+  flows: number
+  protocol: number
+  dst_port: number
+}
+
+export interface TopologyResponse {
+  nodes: TopologyNode[]
+  edges: TopologyEdge[]
+}
+
+export type TopologyParams = { window?: string; sampler_ip?: string; min_bytes?: string; limit?: string }
+export type TimeSeriesParams = { sampler_ip?: string; window?: string; dst_port?: string; protocol?: string; site?: string }
+export type TopTalkersParams = { sampler_ip?: string; window?: string; limit?: string }
+export type SearchParams = {
+  src_ip?: string; dst_ip?: string; src_port?: string; dst_port?: string
+  protocol?: string; sampler_ip?: string; window?: string; limit?: string
+}
+export type TopPortsParams = { window?: string; sampler_ip?: string; site?: string; limit?: string }
+
+export async function downloadExport(
+  path: string,
+  params: Record<string, string>,
+  filename: string,
+): Promise<string | null> {
+  const qs = new URLSearchParams(params).toString()
+  const url = `/api${path}${qs ? '?' + qs : ''}`
+  const headers: Record<string, string> = {}
+  if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+  try {
+    const res = await fetch(url, { headers })
+    if (!res.ok) return `Export failed: ${res.status} ${res.statusText}`
+    const blob = await res.blob()
+    const href = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = href
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(href)
+    return null
+  } catch (e) {
+    return String(e)
+  }
+}

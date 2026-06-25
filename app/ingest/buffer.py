@@ -79,8 +79,14 @@ class IngestBuffer:
             log.debug(f"Flushed {len(batch)} records (total flushed: {self._total_flushed})")
             # Notify WebSocket clients of new data (fire-and-forget)
             try:
-                from app.api.ws import broadcast_device_update
+                from app.api.ws import (
+                    broadcast_device_update,
+                    broadcast_ingest_stats,
+                    broadcast_flow_update,
+                )
                 asyncio.create_task(broadcast_device_update())
+                asyncio.create_task(broadcast_ingest_stats(self.stats))
+                asyncio.create_task(broadcast_flow_update([f.model_dump() for f in batch]))
             except Exception:
                 pass
         except Exception as e:

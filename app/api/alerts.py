@@ -94,6 +94,12 @@ async def toggle_rule(rule_id: int, _: AnalystUser, db: aiosqlite.Connection = D
 
 @router.delete("/rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_rule(rule_id: int, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)):
+    # Cascade: notification_log → alert_events → alert_rules (FK chain, foreign_keys=ON)
+    await db.execute(
+        "DELETE FROM notification_log WHERE event_id IN (SELECT id FROM alert_events WHERE rule_id = ?)",
+        (rule_id,),
+    )
+    await db.execute("DELETE FROM alert_events WHERE rule_id = ?", (rule_id,))
     await db.execute("DELETE FROM alert_rules WHERE id = ?", (rule_id,))
     await db.commit()
 

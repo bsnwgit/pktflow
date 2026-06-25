@@ -664,3 +664,253 @@ class ClickHouseBackend(StorageBackend):
             )
             for r in rows
         ]
+
+    # ── Alert engine helpers ──────────────────────────────────────────────────
+
+    async def get_top_talker_in_window(
+        self,
+        metric: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> tuple[str, float]:
+        col = {"bytes": "sum(bytes)", "packets": "sum(packets)", "flows": "count()"}.get(metric, "sum(bytes)")
+        where = "timestamp >= now() - INTERVAL %(window_min)s MINUTE"
+        params: dict = {"window_min": window_min}
+        if sampler_ip:
+            where += " AND sampler_ip = %(sampler_ip)s"
+            params["sampler_ip"] = sampler_ip
+        query = (
+            f"SELECT src_ip, {col} AS val FROM {settings.clickhouse_database}.flows "
+            f"WHERE {where} GROUP BY src_ip ORDER BY val DESC LIMIT 1"
+        )
+        rows = await asyncio.to_thread(self._execute, query, params)
+        if rows:
+            return rows[0][0], float(rows[0][1])
+        return "", 0.0
+
+    async def get_elephant_flow_stats(
+        self,
+        threshold_bytes: float,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> tuple[int, float]:
+        where = "timestamp >= now() - INTERVAL %(window_min)s MINUTE AND bytes >= %(threshold)s"
+        params: dict = {"window_min": window_min, "threshold": int(threshold_bytes)}
+        if sampler_ip:
+            where += " AND sampler_ip = %(sampler_ip)s"
+            params["sampler_ip"] = sampler_ip
+        query = f"SELECT count(), max(bytes) FROM {settings.clickhouse_database}.flows WHERE {where}"
+        rows = await asyncio.to_thread(self._execute, query, params)
+        if rows and rows[0][0]:
+            return int(rows[0][0]), float(rows[0][1])
+        return 0, 0.0
+
+    async def get_inter_site_metric(
+        self,
+        metric: str,
+        window_min: int,
+        site_a: Optional[str] = None,
+        site_b: Optional[str] = None,
+    ) -> float:
+        col = {"bytes": "sum(bytes)", "packets": "sum(packets)", "flows": "count()"}.get(metric, "sum(bytes)")
+        conditions = ["timestamp >= now() - INTERVAL %(window_min)s MINUTE"]
+        params: dict = {"window_min": window_min}
+        if site_a and site_b:
+            conditions.append("(site = %(site_a)s OR site = %(site_b)s)")
+            params["site_a"] = site_a
+            params["site_b"] = site_b
+        elif site_a:
+            conditions.append("site = %(site_a)s")
+            params["site_a"] = site_a
+        elif site_b:
+            conditions.append("site = %(site_b)s")
+            params["site_b"] = site_b
+        where = " AND ".join(conditions)
+        query = f"SELECT {col} FROM {settings.clickhouse_database}.flows WHERE {where}"
+        rows = await asyncio.to_thread(self._execute, query, params)
+        return float(rows[0][0]) if rows and rows[0][0] is not None else 0.0
+
+    async def get_top_connection_count(
+        self,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> tuple[str, int]:
+        where = "timestamp >= now() - INTERVAL %(window_min)s MINUTE"
+        params: dict = {"window_min": window_min}
+        if sampler_ip:
+            where += " AND sampler_ip = %(sampler_ip)s"
+            params["sampler_ip"] = sampler_ip
+        query = (
+            f"SELECT src_ip, count() AS c FROM {settings.clickhouse_database}.flows "
+            f"WHERE {where} GROUP BY src_ip ORDER BY c DESC LIMIT 1"
+        )
+        rows = await asyncio.to_thread(self._execute, query, params)
+        if rows:
+            return rows[0][0], int(rows[0][1])
+        return "", 0
+
+    async def get_top_unique_dst_ports(
+        self,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> tuple[str, int]:
+        where = "timestamp >= now() - INTERVAL %(window_min)s MINUTE"
+        params: dict = {"window_min": window_min}
+        if sampler_ip:
+            where += " AND sampler_ip = %(sampler_ip)s"
+            params["sampler_ip"] = sampler_ip
+        query = (
+            f"SELECT src_ip, uniq(dst_port) AS u FROM {settings.clickhouse_database}.flows "
+            f"WHERE {where} GROUP BY src_ip ORDER BY u DESC LIMIT 1"
+        )
+        rows = await asyncio.to_thread(self._execute, query, params)
+        if rows:
+            return rows[0][0], int(rows[0][1])
+        return "", 0
+
+    async def get_top_unique_dst_ips(
+        self,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+        src_subnet: Optional[str] = None,
+    ) -> tuple[str, int]:
+        where = "timestamp >= now() - INTERVAL %(window_min)s MINUTE"
+        params: dict = {"window_min": window_min}
+        if sampler_ip:
+            where += " AND sampler_ip = %(sampler_ip)s"
+            params["sampler_ip"] = sampler_ip
+        if src_subnet:
+            where += " AND isIPAddressInRange(src_ip, %(subnet)s)"
+            params["subnet"] = src_subnet
+        query = (
+            f"SELECT src_ip, uniq(dst_ip) AS u FROM {settings.clickhouse_database}.flows "
+            f"WHERE {where} GROUP BY src_ip ORDER BY u DESC LIMIT 1"
+        )
+        rows = await asyncio.to_thread(self._execute, query, params)
+        if rows:
+            return rows[0][0], int(rows[0][1])
+        return "", 0
+
+    async def get_unexpected_proto_count(
+        self,
+        port: int,
+        expected_proto: int,
+        direction: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+    ) -> int:
+        if direction == "dst":
+            port_clause = "dst_port = %(port)s"
+        elif direction == "src":
+            port_clause = "src_port = %(port)s"
+        else:
+            port_clause = "(src_port = %(port)s OR dst_port = %(port)s)"
+        conditions = [
+            "timestamp >= now() - INTERVAL %(window_min)s MINUTE",
+            port_clause,
+            "protocol != %(expected_proto)s",
+        ]
+        params: dict = {"window_min": window_min, "port": port, "expected_proto": expected_proto}
+        if sampler_ip:
+            conditions.append("sampler_ip = %(sampler_ip)s")
+            params["sampler_ip"] = sampler_ip
+        where = " AND ".join(conditions)
+        query = f"SELECT count() FROM {settings.clickhouse_database}.flows WHERE {where}"
+        rows = await asyncio.to_thread(self._execute, query, params)
+        return int(rows[0][0]) if rows and rows[0][0] is not None else 0
+
+    async def get_inter_site_top_contributors(
+        self,
+        metric: str,
+        window_min: int,
+        site_a: Optional[str] = None,
+        site_b: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        col = {"bytes": "sum(bytes)", "packets": "sum(packets)", "flows": "count()"}.get(metric, "sum(bytes)")
+        conditions = ["timestamp >= now() - INTERVAL %(window_min)s MINUTE"]
+        params: dict = {"window_min": window_min, "limit": limit}
+        if site_a and site_b:
+            conditions.append("(site = %(site_a)s OR site = %(site_b)s)")
+            params["site_a"] = site_a
+            params["site_b"] = site_b
+        elif site_a:
+            conditions.append("site = %(site_a)s")
+            params["site_a"] = site_a
+        elif site_b:
+            conditions.append("site = %(site_b)s")
+            params["site_b"] = site_b
+        where = " AND ".join(conditions)
+        query = (
+            f"SELECT src_ip, dst_ip, site, {col} AS val "
+            f"FROM {settings.clickhouse_database}.flows "
+            f"WHERE {where} GROUP BY src_ip, dst_ip, site ORDER BY val DESC LIMIT %(limit)s"
+        )
+        rows = await asyncio.to_thread(self._execute, query, params)
+        return [{"src_ip": r[0], "dst_ip": r[1], "site": r[2], "value": float(r[3])} for r in rows]
+
+    async def get_elephant_flow_top(
+        self,
+        threshold_bytes: float,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        _PROTO_NAMES = {1: "ICMP", 6: "TCP", 17: "UDP", 47: "GRE", 50: "ESP"}
+        conditions = [
+            "timestamp >= now() - INTERVAL %(window_min)s MINUTE",
+            "bytes >= %(threshold)s",
+        ]
+        params: dict = {"window_min": window_min, "threshold": int(threshold_bytes), "limit": limit}
+        if sampler_ip:
+            conditions.append("sampler_ip = %(sampler_ip)s")
+            params["sampler_ip"] = sampler_ip
+        where = " AND ".join(conditions)
+        query = (
+            f"SELECT src_ip, dst_ip, bytes, protocol "
+            f"FROM {settings.clickhouse_database}.flows "
+            f"WHERE {where} ORDER BY bytes DESC LIMIT %(limit)s"
+        )
+        rows = await asyncio.to_thread(self._execute, query, params)
+        return [
+            {
+                "src_ip": r[0], "dst_ip": r[1],
+                "bytes": int(r[2]),
+                "protocol": _PROTO_NAMES.get(r[3], str(r[3])),
+            }
+            for r in rows
+        ]
+
+    async def get_threshold_top_ips(
+        self,
+        metric: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        col = {"bytes": "sum(bytes)", "packets": "sum(packets)", "flows": "count()"}.get(metric, "sum(bytes)")
+        where = "timestamp >= now() - INTERVAL %(window_min)s MINUTE"
+        params: dict = {"window_min": window_min, "limit": limit}
+        if sampler_ip:
+            where += " AND sampler_ip = %(sampler_ip)s"
+            params["sampler_ip"] = sampler_ip
+        query = (
+            f"SELECT src_ip, {col} AS val FROM {settings.clickhouse_database}.flows "
+            f"WHERE {where} GROUP BY src_ip ORDER BY val DESC LIMIT %(limit)s"
+        )
+        rows = await asyncio.to_thread(self._execute, query, params)
+        return [{"src_ip": r[0], "value": float(r[1])} for r in rows]
+
+    async def get_clickhouse_table_size_gb(self, table: str = "flows") -> float:
+        query = (
+            "SELECT total_bytes FROM system.tables "
+            "WHERE database = %(db)s AND name = %(table)s"
+        )
+        params = {"db": settings.clickhouse_database, "table": table}
+        try:
+            rows = await asyncio.to_thread(self._execute, query, params)
+            if rows and rows[0][0] is not None:
+                return float(rows[0][0]) / (1024 ** 3)
+        except Exception as e:
+            log.warning(f"get_clickhouse_table_size_gb error: {e}")
+        return 0.0

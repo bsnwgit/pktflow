@@ -666,3 +666,33 @@ class DuckDBBackend(StorageBackend):
 
     async def get_port_flow_count(self, port: int, protocol, direction: str, window_min: int, sampler_ip=None) -> int:
         raise NotImplementedError("get_port_flow_count not implemented for DuckDB")
+
+    async def get_top_talker_in_window(self, metric, window_min, sampler_ip=None) -> tuple[str, float]:
+        raise NotImplementedError("get_top_talker_in_window not implemented for DuckDB")
+
+    async def get_elephant_flow_stats(self, threshold_bytes, window_min, sampler_ip=None) -> tuple[int, float]:
+        raise NotImplementedError("get_elephant_flow_stats not implemented for DuckDB")
+
+    async def get_inter_site_metric(self, metric, window_min, site_a=None, site_b=None) -> float:
+        raise NotImplementedError("get_inter_site_metric not implemented for DuckDB")
+
+    async def get_top_connection_count(self, window_min, sampler_ip=None) -> tuple[str, int]:
+        raise NotImplementedError("get_top_connection_count not implemented for DuckDB")
+
+    async def get_top_unique_dst_ports(self, window_min, sampler_ip=None) -> tuple[str, int]:
+        raise NotImplementedError("get_top_unique_dst_ports not implemented for DuckDB")
+
+    async def get_top_unique_dst_ips(self, window_min, sampler_ip=None, src_subnet=None) -> tuple[str, int]:
+        raise NotImplementedError("get_top_unique_dst_ips not implemented for DuckDB")
+
+    async def get_unexpected_proto_count(self, port, expected_proto, direction, window_min, sampler_ip=None) -> int:
+        raise NotImplementedError("get_unexpected_proto_count not implemented for DuckDB")
+
+    async def get_inter_site_top_contributors(self, metric, window_min, site_a=None, site_b=None, limit=5) -> list:
+        raise NotImplementedError("get_inter_site_top_contributors not implemented for DuckDB")
+
+    async def get_elephant_flow_top(self, threshold_bytes, window_min, sampler_ip=None, limit=5) -> list:
+        raise NotImplementedError("get_elephant_flow_top not implemented for DuckDB")
+
+    async def get_threshold_top_ips(self, metric, window_min, sampler_ip=None, limit=5) -> list:
+        raise NotImplementedError("get_threshold_top_ips not implemented for DuckDB")
