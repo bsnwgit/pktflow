@@ -41,6 +41,15 @@ DEFAULTS: dict[str, Any] = {
     "okta_role_mapping": {},             # {"okta_group": "admin|analyst|viewer"}
     "session_timeout_minutes": 480,
 
+    # Okta SAML 2.0
+    "okta_saml_enabled": False,
+    "okta_saml_idp_entity_id": "",       # From Okta metadata: IdP Entity ID
+    "okta_saml_idp_sso_url": "",         # From Okta metadata: IdP SSO URL
+    "okta_saml_idp_cert": "",            # From Okta metadata: X.509 cert (no header/footer)
+    "okta_saml_sp_entity_id": "",        # Defaults to base_url/api/auth/saml/metadata
+    "okta_saml_sp_cert": "",             # Optional: SP cert for signed requests
+    "okta_saml_sp_key": "",              # Optional: SP private key for signed requests
+
     # Notifications
     "notify_email_enabled": False,
     "notify_email_smtp_host": "",
@@ -66,7 +75,7 @@ DEFAULTS: dict[str, Any] = {
 
     # General
     "app_name": "pktFlow",
-    "base_url": "http://localhost:8080",
+    "base_url": "http://10.20.30.5:8766",
     "timezone": "UTC",
 
     # AI assistant (Phase 5)
@@ -103,6 +112,7 @@ _MASK = "••••••••"
 _SECRET_KEYS = frozenset({
     "ingest_token", "okta_client_secret", "notify_email_password",
     "notify_pagerduty_integration_key", "anthropic_api_key", "lucid_api_token",
+    "okta_saml_sp_key",
 })
 
 
