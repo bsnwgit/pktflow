@@ -195,6 +195,35 @@ export const api = {
       { method: 'POST' }
     ),
 
+  getSslStatus: () => request<SslStatus>('/system/ssl/status'),
+  uploadSsl: async (cert: File, key: File): Promise<SslStatus> => {
+    const formData = new FormData()
+    formData.append('cert', cert)
+    formData.append('key', key)
+    const headers: Record<string, string> = {}
+    if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+    const res = await fetch('/api/system/ssl/upload', { method: 'POST', headers, body: formData })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(err.detail || res.statusText)
+    }
+    return res.json()
+  },
+  deleteSsl: () => request<SslStatus>('/system/ssl/cert', { method: 'DELETE' }),
+  uploadSslPfx: async (pfx: File, passphrase: string): Promise<SslStatus> => {
+    const formData = new FormData()
+    formData.append('pfx', pfx)
+    formData.append('passphrase', passphrase)
+    const headers: Record<string, string> = {}
+    if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+    const res = await fetch('/api/system/ssl/upload-pfx', { method: 'POST', headers, body: formData })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(err.detail || res.statusText)
+    }
+    return res.json()
+  },
+
   importDevicesCsv: async (file: File): Promise<{ created: number; updated: number; skipped: number; errors: Array<{ row: number; reason: string }> }> => {
     const formData = new FormData()
     formData.append('file', file)
@@ -307,6 +336,19 @@ export interface User {
   is_active: boolean
   created_at: string
   last_login: string | null
+  has_password: boolean
+  auth_provider: string
+}
+
+export interface SslStatus {
+  installed: boolean
+  expires?: string
+  expires_iso?: string
+  days_until_expiry?: number
+  subject?: string
+  issuer?: string
+  error?: string
+  status?: string
 }
 
 export interface ProtocolStat {
