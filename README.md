@@ -336,8 +336,8 @@ The ingest token is in **Settings → Ingest**.
   "src_port": 54321,           "dst_port": 443,
   "proto": "UDP",              "bytes": 1500,
   "packets": 10,               "in_if": 6,   "out_if": 7,
-  "sampler_address": "<ROUTER_IP_2>",
-  "site": "site-a",
+  "sampler_address": "192.0.2.1",
+  "site": "your-site-name",
   "time_flow_start_ns": 1750686000000000000,
   "time_flow_end_ns":   1750686005000000000
 }
@@ -515,5 +515,5 @@ After pktFlow restarts, Vector detects the connection reset and immediately retr
 - Change `secret_key` in `config.yaml` before production use (`openssl rand -hex 32`)
 - The ingest token is in **Settings → Ingest** and must match `auth.token` in each collector's `vector.toml`
 - `cors_origins` in config should be restricted to your dashboard origin
-- SSL cert covers `*.example.com`; connecting by IP requires `verify_certificate = false` in Vector's TLS section
-- SAML SP Entity ID must exactly match Okta's "Audience URI" — both derived from Base URL in Settings �
+- If using a self-signed cert or connecting by IP, set `verify_certificate = false` in Vector's TLS section
+- SAML SP Entity ID must exactly match Okta's "Audience URI" — both derived from Base URL in Settings�
