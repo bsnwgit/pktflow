@@ -1,94 +1,62 @@
-# Collector Migration — O2 → pktFlow
+# Migrating Collectors to pktFlow
 
-How to switch the GoFlow2 collectors from sending netflow to OpenObserve over to pktFlow.
+How to switch existing goflow2 + Vector collectors from a previous sink (e.g. OpenObserve, Elasticsearch, or another TSDB) to pktFlow.
 
 ---
 
 ## Phase 1 — Parallel (recommended — validate before cutover)
 
-Run both sinks simultaneously. pktFlow receives data while O2 continues unchanged. Zero risk.
+Run both sinks simultaneously. pktFlow receives data while your existing system continues unchanged. Zero risk during validation.
 
-### Medical Collector (172.23.80.11)
+### On each collector host
 
-Edit `/mnt/software/vector/vector.toml`:
+Edit `/opt/vector/vector.toml` and add a pktFlow sink alongside your existing one:
 
 ```toml
-# ── Existing O2 sink (leave in place during validation) ──────────────────────
-[sinks.openobserve]
+# ── Existing sink (leave in place during validation) ─────────────────────────
+[sinks.previous_system]
 type = "http"
 inputs = ["add_site"]
-uri = "http://172.23.80.5:5080/api/default/medical_netflow/_json"
+uri = "http://<PREVIOUS_SYSTEM_HOST>:<PORT>/api/<collection_path>"
 encoding.codec = "json"
-auth.strategy = "basic"
-auth.user = "itops@vynecorp.com"
-auth.password = "Mf7N5JzLiYGWKeB7xLuyPj3sf"
+# ... your existing auth config ...
 
 # ── NEW: pktFlow sink ─────────────────────────────────────────────────────────
 [sinks.pktflow]
 type = "http"
 inputs = ["add_site"]
-uri = "http://172.23.80.5:8080/api/ingest/flows"
+uri = "http://<APP_SERVER_IP>:<APP_PORT>/api/ingest/flows"
 encoding.codec = "json"
 auth.strategy = "bearer"
-auth.token = "<INGEST_TOKEN_FROM_INSTALL>"    # ← paste from install output
+auth.token = "<INGEST_TOKEN>"    # ← from pktFlow Settings → Ingest
 request.timeout_secs = 10
 healthcheck.enabled = false
 ```
 
-Restart the service:
+Restart the service on each collector:
 ```bash
 sudo systemctl restart goflow2-vector.service
 sudo systemctl status goflow2-vector.service
 ```
 
-### Dental Collector (10.56.57.181)
-
-Edit `/mnt/software/vector/vector.toml` — same pattern, change URI to `dental_netflow`:
-
-```toml
-[sinks.pktflow]
-type = "http"
-inputs = ["add_site"]
-uri = "http://172.23.80.5:8080/api/ingest/flows"
-encoding.codec = "json"
-auth.strategy = "bearer"
-auth.token = "<INGEST_TOKEN_FROM_INSTALL>"
-request.timeout_secs = 10
-healthcheck.enabled = false
-```
-
-Restart:
-```bash
-sudo systemctl restart goflow2-vector.service
-```
-
 ### Verify parallel mode is working
 
 1. Open pktFlow Dashboard → device cards should appear within 2 minutes
-2. Check ingest stats: `curl http://172.23.80.5:8080/api/ingest/stats`
-3. Run for 24–48 hours to confirm data quality
+2. Check ingest stats: `curl http://<APP_SERVER_IP>:<APP_PORT>/api/ingest/stats`
+3. Run for 24–48 hours to confirm data quality and flow counts match
 
 ---
 
-## Phase 2 — Cutover (remove O2 netflow sinks)
+## Phase 2 — Cutover (remove old sinks)
 
-Once pktFlow is validated, remove the O2 sink from both `vector.toml` files.
+Once pktFlow is validated, remove the previous system sink from each collector's `vector.toml`. Keep only `[sinks.pktflow]`.
 
-**Medical** — remove the `[sinks.openobserve]` block, keep only `[sinks.pktflow]`
-
-**Dental** — same
-
-Restart both collectors:
+Restart each collector:
 ```bash
-# On medical (172.23.80.11):
-sudo systemctl restart goflow2-vector.service
-
-# On dental (10.56.57.181):
 sudo systemctl restart goflow2-vector.service
 ```
 
-O2 will stop receiving new netflow records. Existing O2 netflow data is preserved
-until its 180-day retention expires.
+Your previous system stops receiving new records. Existing data is preserved until its own retention expires.
 
 ---
 
@@ -96,13 +64,13 @@ until its 180-day retention expires.
 
 ```bash
 # Confirm pktFlow is receiving flows
-curl -s http://172.23.80.5:8080/api/ingest/stats
+curl -s http://<APP_SERVER_IP>:<APP_PORT>/api/ingest/stats
 
 # Check pktFlow service health
-curl -s http://172.23.80.5:8080/api/health
+curl -s http://<APP_SERVER_IP>:<APP_PORT>/api/health
 
 # Watch pktFlow logs
-tail -f /mnt/software/logs/pktflow.log
+tail -f /var/log/pktflow/pktflow.log
 
 # Confirm ClickHouse is ingesting
 clickhouse-client --query "SELECT count() FROM pktflow.flows WHERE timestamp >= now() - INTERVAL 5 MINUTE"

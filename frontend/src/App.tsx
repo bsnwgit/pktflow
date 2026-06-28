@@ -11,6 +11,7 @@ const Topology     = lazy(() => import('./pages/Topology'))
 const Alerts       = lazy(() => import('./pages/Alerts'))
 const Settings     = lazy(() => import('./pages/Settings'))
 const Ports        = lazy(() => import('./pages/Ports'))
+const Logs         = lazy(() => import('./pages/Logs'))
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-48 text-white">Loading…</div>
@@ -64,6 +65,11 @@ export default function App() {
           <Route path="/ports" element={
             <ProtectedRoute>
               <Suspense fallback={<PageFallback />}><Ports /></Suspense>
+            </ProtectedRoute>
+          } />
+          <Route path="/logs" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageFallback />}><Logs /></Suspense>
             </ProtectedRoute>
           } />
           <Route path="*" element={<Navigate to="/" replace />} />
