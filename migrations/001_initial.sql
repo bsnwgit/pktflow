@@ -52,14 +52,9 @@ CREATE TABLE IF NOT EXISTS devices (
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Pre-populate with known samplers from audit
-INSERT OR IGNORE INTO devices (ip, name, site) VALUES
-    ('192.168.44.7',  'OneNeck-fw1',  'oneneck'),
-    ('192.168.44.8',  'OneNeck-fw2',  'oneneck'),
-    ('172.27.28.88',  'QTS-sw1',      'qts'),
-    ('172.27.28.89',  'QTS-fw1',      'qts'),
-    ('10.19.56.186',  'AWS-az2a',     'aws'),
-    ('10.19.81.236',  'AWS-az2b',     'aws');
+-- Add your samplers via the Settings → Devices UI, or seed them here:
+-- INSERT OR IGNORE INTO devices (ip, name, site) VALUES
+--     ('192.0.2.1', 'core-router', 'site-a');
 
 
 -- ─────────────────────────────────────────────────────────────────────────────
