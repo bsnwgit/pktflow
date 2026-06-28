@@ -152,6 +152,39 @@ function Section({
 interface SaveState { saving: boolean; saved: boolean; error: string }
 const INIT: SaveState = { saving: false, saved: false, error: '' }
 
+function SendTestButton({ channel }: { channel: string }) {
+  const [status, setStatus] = useState<'idle' | 'loading' | 'sent' | 'failed' | 'skipped'>('idle')
+  const [detail, setDetail] = useState('')
+
+  const run = async () => {
+    setStatus('loading')
+    setDetail('')
+    try {
+      const res = await api.testNotification(channel)
+      setStatus(res.status as 'sent' | 'failed' | 'skipped')
+      setDetail(res.detail || '')
+    } catch (e) {
+      setStatus('failed')
+      setDetail(String(e))
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3 mt-2 mb-1">
+      <button
+        onClick={run}
+        disabled={status === 'loading'}
+        className="px-3 py-1.5 text-xs rounded-lg border border-gray-600 bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      >
+        {status === 'loading' ? 'Sending…' : 'Send Test'}
+      </button>
+      {status === 'sent'    && <span className="text-xs text-green-400">✓ Sent{detail ? ` — ${detail}` : ''}</span>}
+      {status === 'skipped' && <span className="text-xs text-yellow-400">⚠ Skipped — {detail}</span>}
+      {status === 'failed'  && <span className="text-xs text-red-400">✗ Failed — {detail}</span>}
+    </div>
+  )
+}
+
 function useSave(keys: string[], settings: Settings, onSuccess: () => void) {
   const [state, setState] = useState<SaveState>(INIT)
 
@@ -173,10 +206,11 @@ function useSave(keys: string[], settings: Settings, onSuccess: () => void) {
 }
 
 // ── Drag-and-drop cert/key textarea ──────────────────────────────────────────
-function CertTextarea({ value, onChange, rows = 4, placeholder = 'MIIDp…' }: {
-  value: string; onChange: (v: string) => void; rows?: number; placeholder?: string
+function CertTextarea({ value, onChange, rows = 4, placeholder = 'MIIDp…', secret = false }: {
+  value: string; onChange: (v: string) => void; rows?: number; placeholder?: string; secret?: boolean
 }) {
   const [dragging, setDragging] = useState(false)
+  const [revealed, setRevealed] = useState(false)
 
   const stripPem = (raw: string) =>
     raw
@@ -193,8 +227,34 @@ function CertTextarea({ value, onChange, rows = 4, placeholder = 'MIIDp…' }: {
     reader.onload = () => {
       const text = reader.result as string
       onChange(stripPem(text))
+      setRevealed(false)
     }
     reader.readAsText(file)
+  }
+
+  // When secret=true and a value is stored, show only a status indicator — no reveal
+  if (secret && value && !revealed) {
+    return (
+      <div className="flex items-center gap-2">
+        <div className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-green-400 font-mono">
+          ✓ Certificate saved
+        </div>
+        <button
+          type="button"
+          onClick={() => setRevealed(true)}
+          className="text-xs text-blue-400 hover:text-blue-300 whitespace-nowrap px-2 py-1 border border-gray-700 rounded-lg bg-gray-800"
+        >
+          Replace
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          className="text-xs text-red-400 hover:text-red-300 whitespace-nowrap px-2 py-1 border border-gray-700 rounded-lg bg-gray-800"
+        >
+          Clear
+        </button>
+      </div>
+    )
   }
 
   return (
@@ -204,6 +264,11 @@ function CertTextarea({ value, onChange, rows = 4, placeholder = 'MIIDp…' }: {
       onDrop={handleDrop}
       className={`relative rounded-lg transition-colors ${dragging ? 'ring-2 ring-blue-400 bg-blue-950/30' : ''}`}
     >
+      {secret && revealed && (
+        <div className="flex justify-end mb-1">
+          <button type="button" onClick={() => setRevealed(false)} className="text-xs text-gray-500 hover:text-gray-300">Cancel</button>
+        </div>
+      )}
       <textarea
         value={value}
         onChange={e => onChange(e.target.value)}
@@ -468,8 +533,7 @@ export default function Settings() {
     'allowed_hosts', 'ws_stream_raw_flows', 'ws_max_raw_flows',
   ], settings, load)
   const authSave = useSave([
-    'auth_local_enabled', 'auth_okta_enabled', 'okta_issuer', 'okta_client_id',
-    'okta_client_secret', 'okta_redirect_uri', 'session_timeout_minutes',
+    'auth_local_enabled', 'session_timeout_minutes',
     'okta_saml_enabled', 'okta_saml_idp_entity_id', 'okta_saml_idp_sso_url',
     'okta_saml_idp_cert', 'okta_saml_sp_entity_id', 'okta_saml_sp_cert', 'okta_saml_sp_key',
   ], settings, load)
@@ -481,6 +545,7 @@ export default function Settings() {
     'notify_pagerduty_enabled', 'notify_pagerduty_integration_key',
     'notify_webhook_enabled', 'notify_webhook_url',
     'notify_webhook_method', 'notify_webhook_payload_template',
+    'notify_tracecat_enabled', 'notify_tracecat_webhook_url', 'notify_tracecat_api_token',
   ], settings, load)
   const integrationsSave = useSave(
     ['lucid_api_token', 'ssl_enabled', 'ssl_certfile', 'ssl_keyfile'],
@@ -524,7 +589,7 @@ export default function Settings() {
             <TextInput value={str('app_name', 'pktFlow')} onChange={v => set('app_name', v)} />
           </Field>
           <Field label="Base URL" hint="Used for redirect URIs and notification links">
-            <TextInput value={str('base_url')} onChange={v => set('base_url', v)} placeholder="http://10.20.30.5:8080" />
+            <TextInput value={str('base_url')} onChange={v => set('base_url', v)} placeholder="http://<APP_SERVER_IP>:8080" />
           </Field>
           <Field label="Timezone" hint="Affects display of timestamps in the UI">
             <SelectInput
@@ -641,7 +706,7 @@ export default function Settings() {
       {/* Backup */}
       {tab === 'backup' && (
         <Section title="Backup" onSave={backupSave.save} saving={backupSave.saving} saved={backupSave.saved} error={backupSave.error}>
-          <Field label="Auto backup" hint="Run a scheduled backup on the O2 server at the configured interval">
+          <Field label="Auto backup" hint="Run a scheduled backup on the app server server at the configured interval">
             <Toggle value={bool('backup_enabled')} onChange={v => set('backup_enabled', v)} />
           </Field>
           <Field label="Interval" hint="Hours between automatic backup runs">
@@ -653,8 +718,8 @@ export default function Settings() {
           <Field label="Rotation count" hint="Number of snapshots to keep — oldest deleted when exceeded">
             <NumberInput value={num('backup_rotation_count', 5)} onChange={v => set('backup_rotation_count', v)} min={1} max={100} />
           </Field>
-          <Field label="Backup path" hint="Directory on O2 where snapshots are stored">
-            <TextInput value={str('backup_path', '/mnt/software/pktflow_backups')} onChange={v => set('backup_path', v)} mono />
+          <Field label="Backup path" hint="Directory on app server where snapshots are stored">
+            <TextInput value={str('backup_path', '/opt/pktflow_backups')} onChange={v => set('backup_path', v)} mono />
           </Field>
           <Field label="Include ClickHouse flows" hint="Export full flow history into each snapshot (can be large)">
             <Toggle value={bool('backup_include_clickhouse', true)} onChange={v => set('backup_include_clickhouse', v)} />
@@ -788,7 +853,7 @@ export default function Settings() {
             <TextInput
               value={Array.isArray(settings['allowed_hosts']) ? (settings['allowed_hosts'] as string[]).join(', ') : ''}
               onChange={v => set('allowed_hosts', v.split(',').map(s => s.trim()).filter(Boolean))}
-              placeholder="10.20.30.11, 10.20.30.181"
+              placeholder="<COLLECTOR_IP_1>, <COLLECTOR_IP_2>"
               mono
             />
           </Field>
@@ -826,34 +891,6 @@ export default function Settings() {
           </Field>
 
           <div className="pt-4 pb-2">
-            <p className="text-xs font-semibold text-white uppercase tracking-wider">Okta OIDC SSO</p>
-          </div>
-          <Field label="Enable Okta SSO">
-            <Toggle value={bool('auth_okta_enabled')} onChange={v => set('auth_okta_enabled', v)} />
-          </Field>
-          {bool('auth_okta_enabled') && (
-            <>
-              <Field label="Issuer URL" hint="e.g. https://okta.example.com">
-                <TextInput value={str('okta_issuer')} onChange={v => set('okta_issuer', v)} placeholder="https://yourorg.okta.com" mono />
-              </Field>
-              <Field label="Client ID">
-                <TextInput value={str('okta_client_id')} onChange={v => set('okta_client_id', v)} mono />
-              </Field>
-              <Field label="Client Secret">
-                <TextInput value={str('okta_client_secret')} onChange={v => set('okta_client_secret', v)} secret mono />
-              </Field>
-              <Field label="Redirect URI" hint="Must match your Okta app configuration">
-                <TextInput
-                  value={str('okta_redirect_uri')}
-                  onChange={v => set('okta_redirect_uri', v)}
-                  placeholder={`${str('base_url')}/auth/okta/callback`}
-                  mono
-                />
-              </Field>
-            </>
-          )}
-
-          <div className="pt-4 pb-2">
             <p className="text-xs font-semibold text-white uppercase tracking-wider">Okta SAML 2.0 SSO</p>
           </div>
           <Field label="Enable SAML SSO">
@@ -877,7 +914,7 @@ export default function Settings() {
                 <TextInput value={str('okta_saml_idp_sso_url')} onChange={v => set('okta_saml_idp_sso_url', v)} placeholder="https://yourorg.okta.com/app/.../sso/saml" mono />
               </Field>
               <Field label="IdP X.509 Certificate" hint="PEM headers are stripped automatically">
-                <CertTextarea value={str('okta_saml_idp_cert')} onChange={v => set('okta_saml_idp_cert', v)} rows={4} />
+                <CertTextarea value={str('okta_saml_idp_cert')} onChange={v => set('okta_saml_idp_cert', v)} rows={4} secret />
               </Field>
               <Field label="SP Entity ID" hint="Leave blank to use the auto-generated metadata URL">
                 <TextInput value={str('okta_saml_sp_entity_id')} onChange={v => set('okta_saml_sp_entity_id', v)} placeholder={`${str('base_url')}/api/auth/saml/metadata`} mono />
@@ -900,10 +937,10 @@ export default function Settings() {
                 </div>
               </Field>
               <Field label="SP Certificate" hint="Optional: for signed authentication requests">
-                <CertTextarea value={str('okta_saml_sp_cert')} onChange={v => set('okta_saml_sp_cert', v)} rows={3} placeholder="Leave blank if not signing requests" />
+                <CertTextarea value={str('okta_saml_sp_cert')} onChange={v => set('okta_saml_sp_cert', v)} rows={3} placeholder="Leave blank if not signing requests" secret />
               </Field>
               <Field label="SP Private Key" hint="Optional: private key for signing requests (kept secret)">
-                <CertTextarea value={str('okta_saml_sp_key')} onChange={v => set('okta_saml_sp_key', v)} rows={3} placeholder="Leave blank if not signing requests" />
+                <CertTextarea value={str('okta_saml_sp_key')} onChange={v => set('okta_saml_sp_key', v)} rows={3} placeholder="Leave blank if not signing requests" secret />
               </Field>
             </>
           )}
@@ -928,6 +965,7 @@ export default function Settings() {
               <Field label="Channel" hint="Override channel (optional)">
                 <TextInput value={str('notify_slack_channel', '#alerts')} onChange={v => set('notify_slack_channel', v)} placeholder="#alerts" />
               </Field>
+              <SendTestButton channel="slack" />
             </>
           )}
 
@@ -965,6 +1003,7 @@ export default function Settings() {
                   placeholder="noc@yourorg.com, security@yourorg.com"
                 />
               </Field>
+              <SendTestButton channel="email" />
             </>
           )}
 
@@ -976,9 +1015,12 @@ export default function Settings() {
             <Toggle value={bool('notify_pagerduty_enabled')} onChange={v => set('notify_pagerduty_enabled', v)} />
           </Field>
           {bool('notify_pagerduty_enabled') && (
-            <Field label="Integration key" hint="Events API v2 integration key">
-              <TextInput value={str('notify_pagerduty_integration_key')} onChange={v => set('notify_pagerduty_integration_key', v)} secret mono />
-            </Field>
+            <>
+              <Field label="Integration key" hint="Events API v2 integration key">
+                <TextInput value={str('notify_pagerduty_integration_key')} onChange={v => set('notify_pagerduty_integration_key', v)} secret mono />
+              </Field>
+              <SendTestButton channel="pagerduty" />
+            </>
           )}
 
           {/* Webhook */}
@@ -1008,6 +1050,26 @@ export default function Settings() {
                   className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </Field>
+              <SendTestButton channel="webhook" />
+            </>
+          )}
+
+          {/* TraceCat */}
+          <div className="pt-2 pb-1">
+            <p className="text-sm font-medium text-white">TraceCat SOAR</p>
+          </div>
+          <Field label="Enable TraceCat">
+            <Toggle value={bool('notify_tracecat_enabled')} onChange={v => set('notify_tracecat_enabled', v)} />
+          </Field>
+          {bool('notify_tracecat_enabled') && (
+            <>
+              <Field label="Webhook URL" hint="Paste the workflow webhook URL from TraceCat → Workflow → Trigger">
+                <TextInput value={str('notify_tracecat_webhook_url')} onChange={v => set('notify_tracecat_webhook_url', v)} placeholder="https://tracecat.yourorg.com/api/v1/webhooks/…" mono />
+              </Field>
+              <Field label="API token" hint="Bearer token for TraceCat API authentication (optional if webhook is public)">
+                <TextInput value={str('notify_tracecat_api_token')} onChange={v => set('notify_tracecat_api_token', v)} secret />
+              </Field>
+              <SendTestButton channel="tracecat" />
             </>
           )}
         </Section>
@@ -1436,7 +1498,7 @@ function DevicesTab() {
   }
 
   const downloadTemplate = () => {
-    const csv = 'ip,name,site,notes,allowed\n192.168.1.1,Core Switch,medical,Main distribution switch,true\n10.0.0.1,Edge Router,dental,,true\n'
+    const csv = 'ip,name,site,notes,allowed\n192.168.1.1,Core Switch,site-a,Main distribution switch,true\n10.0.0.1,Edge Router,site-b,,true\n'
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -1456,7 +1518,7 @@ function DevicesTab() {
       <tr>
         <td colSpan={8} className="px-4 py-4 bg-gray-800/50">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-            {([['IP', 'ip', '192.168.1.1'], ['Name', 'name', 'Core Switch'], ['Site', 'site', 'medical']] as const).map(([label, key, ph]) => (
+            {([['IP', 'ip', '192.168.1.1'], ['Name', 'name', 'Core Switch'], ['Site', 'site', 'site-a']] as const).map(([label, key, ph]) => (
               <div key={key}>
                 <label className="block text-xs text-white mb-1">{label}</label>
                 <input
