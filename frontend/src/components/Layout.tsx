@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import AiAssistant from './AiAssistant'
 import { AutoRefreshProvider, useAutoRefresh } from '../store/autoRefresh'
 import clsx from 'clsx'
+import lockupLogo from '../assets/logos/lockup-64h.png'
 
 // ─── Change Password Modal ────────────────────────────────────────────────────
 function ChangePasswordModal({ onClose }: { onClose: () => void }) {
@@ -76,6 +77,7 @@ const NAV = [
   { to: '/explorer',  label: 'Flow Explorer', icon: '⊕', adminOnly: false },
   { to: '/topology',  label: 'Topology',      icon: '⟳', adminOnly: false },
   { to: '/alerts',    label: 'Alerts',        icon: '△', adminOnly: false },
+  { to: '/logs',      label: 'Logs',          icon: '≡', adminOnly: false },
   { to: '/settings',  label: 'Settings',      icon: '⚙', adminOnly: false },
 ]
 
@@ -152,11 +154,8 @@ export default function Layout({ children }: { children: ReactNode }) {
     <AutoRefreshProvider>
     <div className="flex h-screen bg-gray-950 text-white overflow-hidden">
       <aside className="w-52 flex-shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col">
-        <div className="flex items-center gap-2 px-4 py-5 border-b border-gray-800">
-          <svg className="w-5 h-5 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M3 12h4l3-9 4 18 3-9h4" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-          <span className="font-bold text-white tracking-tight">pktFlow</span>
+        <div className="flex items-center px-4 py-4 border-b border-gray-800">
+          <img src={lockupLogo} alt="pktFlow" className="h-16 w-auto" />
         </div>
 
         <nav className="flex-1 px-2 py-4 space-y-0.5">

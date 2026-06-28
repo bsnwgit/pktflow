@@ -204,7 +204,7 @@ class DuckDBBackend(StorageBackend):
         self._wconn: Optional[duckdb.DuckDBPyConnection] = None
         self._read_pool: Optional[_ReadPool] = None
         self._db_path: str = getattr(
-            settings, "duckdb_path", "/mnt/software/pktflow/flows.duckdb"
+            settings, "duckdb_path", "/opt/pktflow/flows.duckdb"
         )
 
     # ── Async dispatch helpers ─────────────────────────────────────────────────
@@ -696,3 +696,15 @@ class DuckDBBackend(StorageBackend):
 
     async def get_threshold_top_ips(self, metric, window_min, sampler_ip=None, limit=5) -> list:
         raise NotImplementedError("get_threshold_top_ips not implemented for DuckDB")
+
+    async def get_port_flow_top_ips(self, port, protocol, direction, window_min, sampler_ip=None, limit=5) -> list:
+        raise NotImplementedError("get_port_flow_top_ips not implemented for DuckDB")
+
+    async def get_unexpected_proto_top_ips(self, port, expected_proto, direction, window_min, sampler_ip=None, limit=5) -> list:
+        raise NotImplementedError("get_unexpected_proto_top_ips not implemented for DuckDB")
+
+    async def get_top_dsts_for_ip(self, src_ip, window_min, sampler_ip=None, limit=5) -> list:
+        raise NotImplementedError("get_top_dsts_for_ip not implemented for DuckDB")
+
+    async def get_top_ports_for_ip(self, src_ip, window_min, sampler_ip=None, limit=10) -> list:
+        raise NotImplementedError("get_top_ports_for_ip not implemented for DuckDB")
