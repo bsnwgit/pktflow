@@ -1,12 +1,12 @@
 #!/bin/bash
 # pktFlow install script
-# Run as ec2-user on the O2 server (172.23.80.5)
+# Run as deploy on the app server server (<APP_SERVER_IP>)
 # Usage: bash install.sh
 
 set -euo pipefail
 
-INSTALL_DIR="/mnt/software/pktflow"
-LOG_DIR="/mnt/software/logs"
+INSTALL_DIR="/opt/pktflow"
+LOG_DIR="/var/log/pktflow"
 VENV="$INSTALL_DIR/venv"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"

@@ -81,7 +81,7 @@ async def current_flow_rate(_: CurrentUser):
 async def flow_time_series(
     _: CurrentUser,
     sampler_ip: Optional[str] = Query(None, description="Filter to a single sampler"),
-    site: Optional[str] = Query(None, description="Filter to a site (oneneck, qts, etc.)"),
+    site: Optional[str] = Query(None, description="Filter to a site (site-a, site-b, etc.)"),
     dst_port: Optional[int] = Query(None, ge=0, le=65535, description="Filter to a destination port"),
     protocol: Optional[int] = Query(None, ge=0, le=255, description="Filter to IP protocol number"),
     window: str = Query("1h", description="Time window: 1h, 6h, 24h, 7d, 30d"),

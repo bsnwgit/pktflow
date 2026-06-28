@@ -1,18 +1,13 @@
 import { useState, useEffect, FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../store/auth'
+import lockupLogo from '../assets/logos/lockup-128h.png'
 
 const SSO_ERROR_MESSAGES: Record<string, string> = {
   missing_params:             'SSO login failed: missing code or state.',
   invalid_state:              'SSO login failed: invalid state (possible CSRF). Please try again.',
-  okta_disabled:              'Okta SSO is not currently enabled.',
-  discovery_failed:           'Could not reach Okta. Check the issuer URL in Settings.',
-  token_exchange_failed:      'Token exchange with Okta failed. Check your client credentials.',
-  no_access_token:            'Okta did not return an access token.',
-  userinfo_failed:            'Could not fetch user info from Okta.',
-  missing_claims:             'Okta did not return a required claim (sub or email).',
   user_inactive:              'Your account is inactive. Contact an administrator.',
-  saml_disabled:              'Okta SAML SSO is not currently enabled.',
+  saml_disabled:              'SAML SSO is not currently enabled.',
   saml_processing_failed:     'SAML response could not be processed. Check your IdP configuration.',
   saml_invalid_response:      'SAML response validation failed. Check IdP certificate and entity IDs.',
   not_authenticated:          'SAML authentication was not confirmed by the IdP.',
@@ -27,10 +22,8 @@ export default function Login() {
   const [password, setPassword]   = useState('')
   const [error, setError]         = useState('')
   const [loading, setLoading]     = useState(false)
-  const [oktaEnabled, setOktaEnabled]   = useState(false)
   const [samlEnabled, setSamlEnabled]   = useState(false)
-  const [localEnabled, setLocalEnabled] = useState(true)   // default true until config loads
-  const [oktaLoading, setOktaLoading]   = useState(false)
+  const [localEnabled, setLocalEnabled] = useState(true)
   const [samlLoading, setSamlLoading]   = useState(false)
 
   // Check SSO error from redirect and fetch auth config
@@ -44,7 +37,6 @@ export default function Login() {
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data) return
-        if (data.okta_enabled) setOktaEnabled(true)
         if (data.saml_enabled) setSamlEnabled(true)
         setLocalEnabled(data.local_enabled !== false)
       })
@@ -65,11 +57,6 @@ export default function Login() {
     }
   }
 
-  const handleOktaLogin = () => {
-    setOktaLoading(true)
-    window.location.href = '/api/auth/okta/login'
-  }
-
   const handleSamlLogin = () => {
     setSamlLoading(true)
     window.location.href = '/api/auth/saml/login'
@@ -78,51 +65,28 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">
       <div className="w-full max-w-sm">
-        {/* Logo / title */}
-        <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <svg className="w-8 h-8 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M3 12h4l3-9 4 18 3-9h4" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <span className="text-2xl font-bold text-white tracking-tight">pktFlow</span>
-          </div>
-          <p className="text-white text-sm">NetFlow Visualization Platform</p>
+        {/* Logo */}
+        <div className="flex justify-center mb-8">
+          <img src={lockupLogo} alt="pktFlow" />
         </div>
 
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 space-y-5">
 
-          {/* SSO buttons — shown when configured */}
-          {(oktaEnabled || samlEnabled) && (
+          {/* SAML SSO button — shown when configured */}
+          {samlEnabled && (
             <>
-              {oktaEnabled && (
-                <button
-                  type="button"
-                  onClick={handleOktaLogin}
-                  disabled={oktaLoading || samlLoading}
-                  className="w-full flex items-center justify-center gap-2.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg py-2.5 transition-colors"
-                >
-                  <svg viewBox="0 0 28 28" className="w-5 h-5 flex-shrink-0" fill="currentColor">
-                    <circle cx="14" cy="14" r="14" fill="white"/>
-                    <circle cx="14" cy="14" r="6" fill="#007DC1"/>
-                  </svg>
-                  {oktaLoading ? 'Redirecting…' : (samlEnabled ? 'Sign in with Okta (OIDC)' : 'Sign in with Okta')}
-                </button>
-              )}
-
-              {samlEnabled && (
-                <button
-                  type="button"
-                  onClick={handleSamlLogin}
-                  disabled={oktaLoading || samlLoading}
-                  className="w-full flex items-center justify-center gap-2.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg py-2.5 transition-colors"
-                >
-                  <svg viewBox="0 0 28 28" className="w-5 h-5 flex-shrink-0" fill="currentColor">
-                    <circle cx="14" cy="14" r="14" fill="white"/>
-                    <circle cx="14" cy="14" r="6" fill="#007DC1"/>
-                  </svg>
-                  {samlLoading ? 'Redirecting…' : (oktaEnabled ? 'Sign in with Okta (SAML)' : 'Sign in with Okta')}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleSamlLogin}
+                disabled={samlLoading}
+                className="w-full flex items-center justify-center gap-2.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg py-2.5 transition-colors"
+              >
+                <svg viewBox="0 0 28 28" className="w-5 h-5 flex-shrink-0" fill="currentColor">
+                  <circle cx="14" cy="14" r="14" fill="white"/>
+                  <circle cx="14" cy="14" r="6" fill="#007DC1"/>
+                </svg>
+                {samlLoading ? 'Redirecting…' : 'Sign in with Okta'}
+              </button>
 
               {localEnabled && (
                 <div className="flex items-center gap-3">
@@ -143,7 +107,7 @@ export default function Login() {
                 value={username}
                 onChange={e => setUsername(e.target.value)}
                 required
-                autoFocus={!oktaEnabled}
+                autoFocus
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="admin"
               />

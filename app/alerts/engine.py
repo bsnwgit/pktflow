@@ -183,12 +183,14 @@ class AlertEngine:
         if baseline > 0 and current >= baseline * multiplier:
             ratio = current / baseline
             sampler_str = f" from {sampler_ip}" if sampler_ip else ""
+            top_ips = await storage.get_threshold_top_ips(metric, window_min, sampler_ip)
             await self._fire(db, rule, (
                 f"Rate spike detected{sampler_str}: {metric} in last {window_min}m "
                 f"= {current:,.0f} ({ratio:.1f}× the {baseline_days}-day baseline of {baseline:,.0f})"
             ), {"metric": metric, "current": current, "baseline": baseline,
                 "ratio": round(ratio, 2), "multiplier": multiplier,
-                "sampler_ip": sampler_ip or "all"})
+                "sampler_ip": sampler_ip or "all",
+                "top_sources": top_ips})
         else:
             await self._auto_resolve(db, rule, f"{metric} rate back to normal (current: {current:,.0f}, baseline: {baseline:,.0f})")
 
@@ -207,16 +209,19 @@ class AlertEngine:
         _PROTO_INT = {"TCP": 6, "UDP": 17}
         protocol_int = _PROTO_INT.get(proto_str) if proto_str != "any" else None
 
-        count = await get_storage().get_port_flow_count(port, protocol_int, direction, window_min, sampler_ip)
+        storage = get_storage()
+        count = await storage.get_port_flow_count(port, protocol_int, direction, window_min, sampler_ip)
         if count > 0:
             dir_str = {"src": "src port", "dst": "dst port", "any": "port"}.get(direction, "port")
             proto_label = proto_str if proto_str != "any" else "any protocol"
             sampler_str = f" on {sampler_ip}" if sampler_ip else ""
+            top_ips = await storage.get_port_flow_top_ips(port, protocol_int, direction, window_min, sampler_ip)
             await self._fire(db, rule, (
                 f"Traffic on {dir_str} {port}/{proto_label}{sampler_str}: "
                 f"{count} flows in last {window_min}m"
             ), {"port": port, "protocol": proto_str, "direction": direction,
-                "flow_count": count, "sampler_ip": sampler_ip or "all"})
+                "flow_count": count, "sampler_ip": sampler_ip or "all",
+                "top_sources": top_ips})
         else:
             await self._auto_resolve(db, rule, f"No traffic on port {port}/{proto_str} in last {window_min}m")
 
@@ -274,6 +279,10 @@ class AlertEngine:
         site_b = conds.get("site_b") or None
         window_min = rule.get("time_window_min", 5)
 
+        if threshold <= 0:
+            log.warning(f"inter_site_traffic rule '{rule['name']}' has threshold <= 0; skipping to prevent constant firing")
+            return
+
         storage = get_storage()
         value = await storage.get_inter_site_metric(metric, window_min, site_a, site_b)
         if value >= threshold:
@@ -296,18 +305,21 @@ class AlertEngine:
         sampler_ip = conds.get("sampler_ip") or None
         window_min = rule.get("time_window_min", 5)
 
-        top_ip, count = await get_storage().get_top_connection_count(window_min, sampler_ip)
+        storage = get_storage()
+        top_ip, count = await storage.get_top_connection_count(window_min, sampler_ip)
         if not top_ip:
             await self._auto_resolve(db, rule, "No traffic in window")
             return
 
         if count >= threshold:
             sampler_str = f" on {sampler_ip}" if sampler_ip else ""
+            top_dsts = await storage.get_top_dsts_for_ip(top_ip, window_min, sampler_ip)
             await self._fire(db, rule, (
                 f"Connection burst{sampler_str}: {top_ip} made {count:,} connections "
                 f"in last {window_min}m (threshold: {threshold:,})"
             ), {"src_ip": top_ip, "connection_count": count, "threshold": threshold,
-                "sampler_ip": sampler_ip or "all"})
+                "sampler_ip": sampler_ip or "all",
+                "top_destinations": top_dsts})
         else:
             await self._auto_resolve(db, rule, f"Connection burst: {top_ip} made {count:,} — within threshold")
 
@@ -318,18 +330,21 @@ class AlertEngine:
         sampler_ip = conds.get("sampler_ip") or None
         window_min = rule.get("time_window_min", 5)
 
-        top_ip, distinct_ports = await get_storage().get_top_unique_dst_ports(window_min, sampler_ip)
+        storage = get_storage()
+        top_ip, distinct_ports = await storage.get_top_unique_dst_ports(window_min, sampler_ip)
         if not top_ip:
             await self._auto_resolve(db, rule, "No traffic in window")
             return
 
         if distinct_ports >= threshold_ports:
             sampler_str = f" on {sampler_ip}" if sampler_ip else ""
+            sample_ports = await storage.get_top_ports_for_ip(top_ip, window_min, sampler_ip)
             await self._fire(db, rule, (
                 f"Port scan detected{sampler_str}: {top_ip} hit {distinct_ports:,} distinct ports "
                 f"in last {window_min}m (threshold: {threshold_ports})"
             ), {"src_ip": top_ip, "distinct_ports": distinct_ports, "threshold": threshold_ports,
-                "sampler_ip": sampler_ip or "all"})
+                "sampler_ip": sampler_ip or "all",
+                "sample_ports": sample_ports})
         else:
             await self._auto_resolve(db, rule, f"Port scan: {top_ip} hit {distinct_ports} distinct dst ports — below threshold")
 
@@ -372,15 +387,18 @@ class AlertEngine:
         _PROTO_INT = {"TCP": 6, "UDP": 17, "ICMP": 1}
         expected_proto_int = _PROTO_INT.get(expected_proto_str, 6)
 
-        count = await get_storage().get_unexpected_proto_count(port, expected_proto_int, direction, window_min, sampler_ip)
+        storage = get_storage()
+        count = await storage.get_unexpected_proto_count(port, expected_proto_int, direction, window_min, sampler_ip)
         if count > 0:
             sampler_str = f" on {sampler_ip}" if sampler_ip else ""
             dir_str = {"src": "src port", "dst": "dst port", "any": "port"}.get(direction, "port")
+            top_ips = await storage.get_unexpected_proto_top_ips(port, expected_proto_int, direction, window_min, sampler_ip)
             await self._fire(db, rule, (
                 f"Protocol anomaly{sampler_str}: {count} flow{'s' if count != 1 else ''} on {dir_str} {port} "
                 f"using unexpected protocol (expected {expected_proto_str}) in last {window_min}m"
             ), {"port": port, "expected_proto": expected_proto_str, "direction": direction,
-                "flow_count": count, "sampler_ip": sampler_ip or "all"})
+                "flow_count": count, "sampler_ip": sampler_ip or "all",
+                "top_sources": top_ips})
         else:
             await self._auto_resolve(db, rule, f"No unexpected protocol on port {port} in last {window_min}m")
 
@@ -537,6 +555,8 @@ class AlertEngine:
                 status = await self._send_pagerduty(db, rule_name, message, severity)
             elif channel == "webhook":
                 status = await self._send_webhook(db, rule_name, message, severity)
+            elif channel == "tracecat":
+                status = await self._send_tracecat(db, event_id, rule_name, message, severity)
             else:
                 status = "skipped"
         except Exception as e:
@@ -689,6 +709,57 @@ class AlertEngine:
             return "sent" if resp.status_code < 300 else "failed"
         except Exception as e:
             log.error(f"Webhook send error: {e}")
+            return "failed"
+
+    async def _send_tracecat(
+        self, db, event_id: int, rule_name: str, message: str, severity: str
+    ) -> str:
+        async def _get(key):
+            async with db.execute("SELECT value FROM settings WHERE key=?", (key,)) as c:
+                row = await c.fetchone()
+            return json.loads(row[0]) if row else None
+
+        if not await _get("notify_tracecat_enabled"):
+            return "skipped"
+
+        webhook_url = await _get("notify_tracecat_webhook_url") or ""
+        api_token   = await _get("notify_tracecat_api_token")   or ""
+
+        if not webhook_url:
+            return "skipped"
+
+        # Fetch full event details so the workflow has rich context
+        async with db.execute(
+            "SELECT details, fired_at FROM alert_events WHERE id = ?", (event_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        details = json.loads(row[0]) if row else {}
+        fired_at = row[1] if row else datetime.now(tz=timezone.utc).isoformat()
+
+        payload = {
+            "source": "pktflow",
+            "event_id": event_id,
+            "alert_name": rule_name,
+            "severity": severity,
+            "message": message,
+            "fired_at": fired_at,
+            "details": details,
+        }
+
+        headers: dict = {"Content-Type": "application/json"}
+        if api_token:
+            headers["Authorization"] = f"Bearer {api_token}"
+
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(webhook_url, json=payload, headers=headers, timeout=10)
+            if resp.status_code < 300:
+                return "sent"
+            log.warning(f"TraceCat webhook returned {resp.status_code}: {resp.text[:200]}")
+            return "failed"
+        except Exception as e:
+            log.error(f"TraceCat send error: {e}")
             return "failed"
 
     async def _check_unknown_samplers(self, db: aiosqlite.Connection) -> None:

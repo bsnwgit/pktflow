@@ -129,6 +129,11 @@ export const api = {
     request(`/settings/${key}`, { method: 'PUT', body: JSON.stringify({ value }) }),
   bulkUpdateSettings: (updates: Record<string, unknown>) =>
     request('/settings/bulk', { method: 'POST', body: JSON.stringify(updates) }),
+  testNotification: (channel: string) =>
+    request<{ status: string; detail: string }>('/settings/test-notification', {
+      method: 'POST',
+      body: JSON.stringify({ channel }),
+    }),
 
   getUsers: () => request<User[]>('/users/'),
   getMe: () => request<User>('/users/me'),
@@ -236,6 +241,18 @@ export const api = {
     }
     return res.json()
   },
+
+  getLogs: (params: LogQueryParams) =>
+    request<LogResponse>(`/logs?${new URLSearchParams(params as any)}`),
+
+  getLogStats: () =>
+    request<LogStats>('/logs/stats'),
+
+  clearLogs: () =>
+    request<{ status: string }>('/logs', { method: 'DELETE' }),
+
+  setLogLevel: (level: string) =>
+    request<{ status: string; level: string }>(`/logs/level?level=${level}`, { method: 'POST' }),
 }
 
 export interface DeviceSummary {
@@ -403,6 +420,39 @@ export type SearchParams = {
   protocol?: string; sampler_ip?: string; window?: string; limit?: string
 }
 export type TopPortsParams = { window?: string; sampler_ip?: string; site?: string; limit?: string }
+
+export interface LogRecord {
+  id: number
+  ts: string
+  level: string
+  level_no: number
+  logger: string
+  message: string
+  exc_info: string | null
+}
+
+export interface LogResponse {
+  total: number
+  limit: number
+  offset: number
+  records: LogRecord[]
+}
+
+export interface LogStats {
+  total: number
+  by_level: Record<string, number>
+  loggers: string[]
+  latest_ts: string | null
+}
+
+export type LogQueryParams = {
+  level?: string
+  logger?: string
+  search?: string
+  since?: string
+  limit?: string
+  offset?: string
+}
 
 export async function downloadExport(
   path: string,
