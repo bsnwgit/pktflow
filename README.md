@@ -4,14 +4,12 @@
 
 A production NetFlow visualization and alerting platform. Receives live NetFlow v9 data from network samplers via [goflow2](https://github.com/netsampler/goflow2) + [Vector](https://vector.dev/), stores flows in ClickHouse, and serves a React dashboard for real-time traffic analysis.
 
-**Live deployment:** `https://pktflow.vynedental.com:8766` (also accessible at `https://172.23.80.5:8766`)
-
 ---
 
 ## Features
 
 ### Data Ingestion
-- **NetFlow v9 via goflow2 + Vector** — two collector pipelines (medical/dental), each transforming raw NetFlow to snake_case JSON and posting to pktFlow via HTTPS bearer token
+- **NetFlow v9 via goflow2 + Vector** — one or more collector pipelines, each transforming raw NetFlow to snake_case JSON and posting to pktFlow via HTTPS bearer token
 - **Direct UDP ingest** — optional built-in NetFlow v5/v9/IPFIX listener (no external collector required)
 - **Ingest buffer** — in-memory batch buffer with configurable flush interval; WebSocket broadcasts to connected browsers on every flush
 - **Invalid sampler filtering** — flows with `0.0.0.0` sampler address are rejected at ingest
@@ -124,7 +122,7 @@ React 18, TypeScript, Vite, Tailwind CSS, Recharts, D3.js
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/vynedental/pktflow.git
+git clone https://github.com/your-org/pktflow.git
 cd pktflow
 git checkout feature/initial-build
 ```
@@ -150,8 +148,8 @@ Creates `pktflow` database with `flows`, `flows_hourly`, `flows_daily` tables an
 #### Create Python virtualenv
 
 ```bash
-python3 -m venv /mnt/software/pktflow/venv
-/mnt/software/pktflow/venv/bin/pip install -r requirements.txt
+python3 -m venv /opt/pktflow/venv
+/opt/pktflow/venv/bin/pip install -r requirements.txt
 ```
 
 #### Configure
@@ -168,13 +166,13 @@ openssl rand -hex 32   # use this as secret_key
 |-----|---------|-------------|
 | `host` | `0.0.0.0` | Bind address |
 | `port` | `8766` | Listen port |
-| `db_path` | `/mnt/software/pktflow/pktflow.db` | SQLite database path |
+| `db_path` | `/opt/pktflow/pktflow.db` | SQLite database path |
 | `clickhouse_host` | `localhost` | ClickHouse host |
 | `clickhouse_port` | `9000` | ClickHouse native protocol port |
 | `clickhouse_database` | `pktflow` | ClickHouse database name |
 | `secret_key` | **CHANGE THIS** | JWT signing key (32+ random bytes) |
 | `access_token_expire_minutes` | `480` | JWT lifetime |
-| `log_file` | `/mnt/software/pktflow/pktflow.log` | Log path |
+| `log_file` | `/opt/pktflow/pktflow.log` | Log path |
 
 #### Initialize the app database and start the service
 
@@ -338,8 +336,8 @@ The ingest token is in **Settings → Ingest**.
   "src_port": 54321,           "dst_port": 443,
   "proto": "UDP",              "bytes": 1500,
   "packets": 10,               "in_if": 6,   "out_if": 7,
-  "sampler_address": "192.168.44.7",
-  "site": "oneneck",
+  "sampler_address": "<ROUTER_IP_2>",
+  "site": "site-a",
   "time_flow_start_ns": 1750686000000000000,
   "time_flow_end_ns":   1750686005000000000
 }
@@ -347,18 +345,9 @@ The ingest token is in **Settings → Ingest**.
 
 All fields are **snake_case**; `proto` is a **string** (`"UDP"`, `"TCP"`); `next_hop` is `""` when absent.
 
-### Medical collector (172.23.80.11)
+### Per-site collector
 
-- Service: `goflow2-vector.service`
-- Source type: `stdin` (goflow2 stdout piped to vector stdin)
-- Samplers: `192.168.44.7/8` (OneNeck), `172.27.28.89/88` (QTS)
-- ~148 flows/sec
-
-### Dental collector (10.56.57.181)
-
-- Service: `goflow2-vector.service`
-- Source type: `exec` (vector spawns goflow2 — required because systemd sets `stdin=/dev/null`)
-- Samplers: `10.19.56.186`, `10.19.81.236` (AWS)
+Each collector host runs the same `goflow2-vector.service` unit. The source type is `stdin` when the systemd unit allows stdin inheritance, or `exec` when `stdin=/dev/null` is set (Vector spawns goflow2 as a subprocess instead of reading from the pipe). See [DATAFLOW.md](DATAFLOW.md) for full configuration details.
 
 > **Orphan process note:** If the service is restarted multiple times rapidly, the old goflow2 process may survive and hold port 2055, preventing the new instance from receiving packets. If flows stop after a restart, check `pgrep -a goflow2` — there should be exactly one process per collector. Kill orphans with `sudo kill -9 <PID>`.
 
@@ -408,15 +397,11 @@ pktflow/
 │   ├── hooks/useWebSocket.ts  WebSocket hook
 │   └── utils/protocols.ts  Shared protocol name map
 ├── scripts/
-│   ├── install.sh          One-shot installer
-│   ├── deploy_frontend.py  Sync src → O2, build in /tmp, deploy dist
-│   ├── deploy_ssl.py       SSL upload + start.sh wrapper deploy
-│   └── backup.py           Local backup (2-revision rotation)
+│   └── install.sh          One-shot installer (Amazon Linux / RHEL)
 ├── config.example.yaml
 ├── pktflow.service
-├── start.sh                SSL-aware startup wrapper (on O2 only)
-├── requirements.txt
-└── CLAUDE.md               AI session context (do not delete)
+├── start.sh                SSL-aware startup wrapper
+└── requirements.txt
 ```
 
 ---
@@ -475,23 +460,23 @@ Message types: `device_update` (device summaries), `ingest_stats` (buffer counte
 
 ### Backend changes
 
-1. Edit files locally under `C:\Users\robert.barnett\My Drive\Documents\Claude\Projects\pktFlow\`
-2. SFTP changed file(s) to `/mnt/software/pktflow/` on O2 (same relative path)
-3. `sudo systemctl restart pktflow`
-
-Use Python + Paramiko for SSH/SFTP — SentinelOne EDR blocks system `ssh.exe` on Windows.
+1. Copy changed files to `/opt/pktflow/` on the server (same relative path as the repo)
+2. `sudo systemctl restart pktflow`
+3. Verify: `curl -sk https://localhost:8766/api/health`
 
 ### Frontend changes
 
-Use the permanent deploy script — **do not rewrite it each session:**
+The frontend must be built on Linux — build on the server itself or a Linux CI runner, not on a Windows machine (Windows `node_modules` lacks the Linux rollup native binary).
 
+```bash
+# On the server
+cp -r frontend /tmp/pktflow-fe
+cd /tmp/pktflow-fe
+npm install
+npm run build
+cp -r dist /opt/pktflow/frontend/dist
+sudo systemctl restart pktflow
 ```
-scripts/deploy_frontend.py
-```
-
-The script: syncs `frontend/src/` → O2, builds in Linux `/tmp` (not the Windows project folder), deploys `dist/`, restarts pktflow.
-
-If the build fails, run `scripts/check_build.py` to see TypeScript/Vite errors.
 
 ### After restart — Vector reconnection
 
@@ -504,7 +489,7 @@ After pktFlow restarts, Vector detects the connection reset and immediately retr
 1. **Workers = 1 required for WebSocket** — `start.sh` uses `--workers 1`. With multiple workers, each has its own in-memory `ws_manager`; broadcasts from the ingest worker don't reach WS connections on other workers.
 2. **Schema startup warnings** — `_ensure_schema` logs "Schema statement warning" on startup for SQL comments in multi-statement blocks. Cosmetic only.
 3. **goflow2 template errors after restart** — Normal. goflow2 loses cached NetFlow v9 templates on restart; "template error" log lines resolve within seconds when the router sends the next template packet.
-4. **Dental collector orphan process** — If `goflow2-vector` is restarted while flows are active, the old goflow2 process may survive and hold port 2055. Symptom: service is `active` but no flows arriving. Fix: `sudo kill -9 <old_goflow2_pid>`.
+4. **Site B collector orphan process** — If `goflow2-vector` is restarted while flows are active, the old goflow2 process may survive and hold port 2055. Symptom: service is `active` but no flows arriving. Fix: `sudo kill -9 <old_goflow2_pid>`.
 5. **ClickHouse threading** — `clickhouse-driver` is not thread-safe. All calls are serialized with `threading.Lock()` in `clickhouse.py`.
 6. **passlib/bcrypt on Python 3.12+** — Pin `passlib==1.7.4` and `bcrypt==4.0.1` to avoid attribute errors.
 
@@ -530,11 +515,5 @@ After pktFlow restarts, Vector detects the connection reset and immediately retr
 - Change `secret_key` in `config.yaml` before production use (`openssl rand -hex 32`)
 - The ingest token is in **Settings → Ingest** and must match `auth.token` in each collector's `vector.toml`
 - `cors_origins` in config should be restricted to your dashboard origin
-- SSL cert covers `*.vynedental.com`; connecting by IP requires `verify_certificate = false` in Vector's TLS section
-- SAML SP Entity ID must exactly match Okta's "Audience URI" — both derived from Base URL in Settings → General
-
----
-
-## License
-
-Internal — Vyne Dental. Not for public distribution.
+- SSL cert covers `*.example.com`; connecting by IP requires `verify_certificate = false` in Vector's TLS section
+- SAML SP Entity ID must exactly match Okta's "Audience URI" — both derived from Base URL in Settings �

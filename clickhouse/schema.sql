@@ -132,14 +132,14 @@ GROUP BY day, sampler_ip, sampler_name, site;
 -- Top talkers for a device, last hour:
 --   SELECT src_ip, dst_ip, dst_port, protocol, sum(bytes) AS total_bytes
 --   FROM pktflow.flows
---   WHERE sampler_ip = '192.168.44.7' AND timestamp >= now() - INTERVAL 1 HOUR
+--   WHERE sampler_ip = '<ROUTER_IP_2>' AND timestamp >= now() - INTERVAL 1 HOUR
 --   GROUP BY src_ip, dst_ip, dst_port, protocol
 --   ORDER BY total_bytes DESC LIMIT 50;
 --
 -- Bytes per minute for a device (time-series):
 --   SELECT toStartOfMinute(timestamp) AS minute, sum(bytes) AS bytes
 --   FROM pktflow.flows
---   WHERE sampler_ip = '192.168.44.7' AND timestamp >= now() - INTERVAL 6 HOUR
+--   WHERE sampler_ip = '<ROUTER_IP_2>' AND timestamp >= now() - INTERVAL 6 HOUR
 --   GROUP BY minute ORDER BY minute;
 --
 -- Flows/sec right now (last 60 seconds):

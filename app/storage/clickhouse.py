@@ -101,9 +101,14 @@ class ClickHouseBackend(StorageBackend):
                     log.warning(f"Schema statement warning: {e}")
 
     async def close(self) -> None:
-        if self._client:
-            self._client.disconnect()
-            self._client = None
+        client = self._client
+        self._client = None
+        if client is not None:
+            # clickhouse-driver's disconnect() calls self.socket.close() without a None-guard,
+            # so only call it when the socket is actually open (lazy connections may never open one).
+            conn = getattr(client, "connection", None)
+            if conn is not None and getattr(conn, "socket", None) is not None:
+                client.disconnect()
 
     async def insert_flows(self, flows: list[FlowRecord]) -> None:
         if not flows:
@@ -685,7 +690,7 @@ class ClickHouseBackend(StorageBackend):
         )
         rows = await asyncio.to_thread(self._execute, query, params)
         if rows:
-            return rows[0][0], float(rows[0][1])
+            return str(rows[0][0]), float(rows[0][1])
         return "", 0.0
 
     async def get_elephant_flow_stats(
@@ -746,7 +751,7 @@ class ClickHouseBackend(StorageBackend):
         )
         rows = await asyncio.to_thread(self._execute, query, params)
         if rows:
-            return rows[0][0], int(rows[0][1])
+            return str(rows[0][0]), int(rows[0][1])
         return "", 0
 
     async def get_top_unique_dst_ports(
@@ -765,7 +770,7 @@ class ClickHouseBackend(StorageBackend):
         )
         rows = await asyncio.to_thread(self._execute, query, params)
         if rows:
-            return rows[0][0], int(rows[0][1])
+            return str(rows[0][0]), int(rows[0][1])
         return "", 0
 
     async def get_top_unique_dst_ips(
@@ -788,7 +793,7 @@ class ClickHouseBackend(StorageBackend):
         )
         rows = await asyncio.to_thread(self._execute, query, params)
         if rows:
-            return rows[0][0], int(rows[0][1])
+            return str(rows[0][0]), int(rows[0][1])
         return "", 0
 
     async def get_unexpected_proto_count(
@@ -842,12 +847,12 @@ class ClickHouseBackend(StorageBackend):
             params["site_b"] = site_b
         where = " AND ".join(conditions)
         query = (
-            f"SELECT src_ip, dst_ip, site, {col} AS val "
+            f"SELECT src_ip, dst_ip, site, sampler_ip, {col} AS val "
             f"FROM {settings.clickhouse_database}.flows "
-            f"WHERE {where} GROUP BY src_ip, dst_ip, site ORDER BY val DESC LIMIT %(limit)s"
+            f"WHERE {where} GROUP BY src_ip, dst_ip, site, sampler_ip ORDER BY val DESC LIMIT %(limit)s"
         )
         rows = await asyncio.to_thread(self._execute, query, params)
-        return [{"src_ip": r[0], "dst_ip": r[1], "site": r[2], "value": float(r[3])} for r in rows]
+        return [{"src_ip": str(r[0]), "dst_ip": str(r[1]), "site": r[2], "sampler_ip": str(r[3]), "value": float(r[4])} for r in rows]
 
     async def get_elephant_flow_top(
         self,
@@ -874,7 +879,7 @@ class ClickHouseBackend(StorageBackend):
         rows = await asyncio.to_thread(self._execute, query, params)
         return [
             {
-                "src_ip": r[0], "dst_ip": r[1],
+                "src_ip": str(r[0]), "dst_ip": str(r[1]),
                 "bytes": int(r[2]),
                 "protocol": _PROTO_NAMES.get(r[3], str(r[3])),
             }
@@ -899,7 +904,138 @@ class ClickHouseBackend(StorageBackend):
             f"WHERE {where} GROUP BY src_ip ORDER BY val DESC LIMIT %(limit)s"
         )
         rows = await asyncio.to_thread(self._execute, query, params)
-        return [{"src_ip": r[0], "value": float(r[1])} for r in rows]
+        return [{"src_ip": str(r[0]), "value": float(r[1])} for r in rows]
+
+    async def get_port_flow_top_ips(
+        self,
+        port: int,
+        protocol: Optional[int],
+        direction: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        _PROTO_NAMES = {1: "ICMP", 6: "TCP", 17: "UDP", 47: "GRE", 50: "ESP"}
+        conditions = ["timestamp >= now() - INTERVAL %(window_min)s MINUTE"]
+        params: dict = {"window_min": window_min, "port": port, "limit": limit}
+        if direction == "src":
+            conditions.append("src_port = %(port)s")
+        elif direction == "dst":
+            conditions.append("dst_port = %(port)s")
+        else:
+            conditions.append("(src_port = %(port)s OR dst_port = %(port)s)")
+        if protocol is not None:
+            conditions.append("protocol = %(protocol)s")
+            params["protocol"] = protocol
+        if sampler_ip:
+            conditions.append("sampler_ip = %(sampler_ip)s")
+            params["sampler_ip"] = sampler_ip
+        where = " AND ".join(conditions)
+        query = (
+            f"SELECT src_ip, dst_ip, protocol, sampler_ip, count() AS c "
+            f"FROM {settings.clickhouse_database}.flows "
+            f"WHERE {where} GROUP BY src_ip, dst_ip, protocol, sampler_ip "
+            f"ORDER BY c DESC LIMIT %(limit)s"
+        )
+        rows = await asyncio.to_thread(self._execute, query, params)
+        return [
+            {
+                "src_ip": str(r[0]), "dst_ip": str(r[1]),
+                "protocol": _PROTO_NAMES.get(r[2], str(r[2])),
+                "sampler_ip": str(r[3]), "flow_count": int(r[4]),
+            }
+            for r in rows
+        ]
+
+    async def get_unexpected_proto_top_ips(
+        self,
+        port: int,
+        expected_proto: int,
+        direction: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        _PROTO_NAMES = {1: "ICMP", 6: "TCP", 17: "UDP", 47: "GRE", 50: "ESP"}
+        conditions = [
+            "timestamp >= now() - INTERVAL %(window_min)s MINUTE",
+            "protocol != %(expected_proto)s",
+        ]
+        params: dict = {"window_min": window_min, "port": port,
+                        "expected_proto": expected_proto, "limit": limit}
+        if direction == "src":
+            conditions.append("src_port = %(port)s")
+        elif direction == "dst":
+            conditions.append("dst_port = %(port)s")
+        else:
+            conditions.append("(src_port = %(port)s OR dst_port = %(port)s)")
+        if sampler_ip:
+            conditions.append("sampler_ip = %(sampler_ip)s")
+            params["sampler_ip"] = sampler_ip
+        where = " AND ".join(conditions)
+        query = (
+            f"SELECT src_ip, dst_ip, protocol, sampler_ip, count() AS c "
+            f"FROM {settings.clickhouse_database}.flows "
+            f"WHERE {where} GROUP BY src_ip, dst_ip, protocol, sampler_ip "
+            f"ORDER BY c DESC LIMIT %(limit)s"
+        )
+        rows = await asyncio.to_thread(self._execute, query, params)
+        return [
+            {
+                "src_ip": str(r[0]), "dst_ip": str(r[1]),
+                "protocol": _PROTO_NAMES.get(r[2], str(r[2])),
+                "sampler_ip": str(r[3]), "flow_count": int(r[4]),
+            }
+            for r in rows
+        ]
+
+    async def get_top_dsts_for_ip(
+        self,
+        src_ip: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        where = "timestamp >= now() - INTERVAL %(window_min)s MINUTE AND src_ip = %(src_ip)s"
+        params: dict = {"window_min": window_min, "src_ip": src_ip, "limit": limit}
+        if sampler_ip:
+            where += " AND sampler_ip = %(sampler_ip)s"
+            params["sampler_ip"] = sampler_ip
+        query = (
+            f"SELECT dst_ip, count() AS c, sum(bytes) AS b "
+            f"FROM {settings.clickhouse_database}.flows "
+            f"WHERE {where} GROUP BY dst_ip ORDER BY c DESC LIMIT %(limit)s"
+        )
+        rows = await asyncio.to_thread(self._execute, query, params)
+        return [{"dst_ip": str(r[0]), "flow_count": int(r[1]), "bytes": int(r[2])} for r in rows]
+
+    async def get_top_ports_for_ip(
+        self,
+        src_ip: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+        limit: int = 10,
+    ) -> list[dict]:
+        _PROTO_NAMES = {1: "ICMP", 6: "TCP", 17: "UDP", 47: "GRE", 50: "ESP"}
+        where = "timestamp >= now() - INTERVAL %(window_min)s MINUTE AND src_ip = %(src_ip)s"
+        params: dict = {"window_min": window_min, "src_ip": src_ip, "limit": limit}
+        if sampler_ip:
+            where += " AND sampler_ip = %(sampler_ip)s"
+            params["sampler_ip"] = sampler_ip
+        query = (
+            f"SELECT dst_port, protocol, count() AS c "
+            f"FROM {settings.clickhouse_database}.flows "
+            f"WHERE {where} GROUP BY dst_port, protocol ORDER BY dst_port ASC LIMIT %(limit)s"
+        )
+        rows = await asyncio.to_thread(self._execute, query, params)
+        return [
+            {
+                "dst_port": int(r[0]),
+                "protocol": _PROTO_NAMES.get(r[1], str(r[1])),
+                "flow_count": int(r[2]),
+            }
+            for r in rows
+        ]
 
     async def get_clickhouse_table_size_gb(self, table: str = "flows") -> float:
         query = (
