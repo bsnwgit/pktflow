@@ -266,3 +266,53 @@ class StorageBackend(ABC):
     ) -> list[dict]:
         """Return top {src_ip, value} dicts contributing to a threshold metric.
         Sorted by value descending. Returns [] when no data."""
+
+    @abstractmethod
+    async def get_port_flow_top_ips(
+        self,
+        port: int,
+        protocol: Optional[int],
+        direction: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        """Return top {src_ip, dst_ip, flow_count, sampler_ip} dicts for flows on the given port.
+        direction: 'src', 'dst', or 'any'. protocol=None means any protocol.
+        Sorted by flow_count descending. Returns [] when no data."""
+
+    @abstractmethod
+    async def get_unexpected_proto_top_ips(
+        self,
+        port: int,
+        expected_proto: int,
+        direction: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        """Return top {src_ip, dst_ip, protocol_name, flow_count, sampler_ip} dicts for flows
+        on the given port using a protocol other than expected_proto.
+        Sorted by flow_count descending. Returns [] when no data."""
+
+    @abstractmethod
+    async def get_top_dsts_for_ip(
+        self,
+        src_ip: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        """Return top {dst_ip, flow_count, bytes} dicts for destinations contacted by src_ip.
+        Sorted by flow_count descending. Returns [] when no data."""
+
+    @abstractmethod
+    async def get_top_ports_for_ip(
+        self,
+        src_ip: str,
+        window_min: int,
+        sampler_ip: Optional[str] = None,
+        limit: int = 10,
+    ) -> list[dict]:
+        """Return top {dst_port, protocol_name, flow_count} dicts for dst ports scanned by src_ip.
+        Sorted by dst_port ascending (scan enumeration order). Returns [] when no data."""

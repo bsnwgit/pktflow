@@ -5,18 +5,6 @@ Status of every planned feature that is not fully built and production-verified.
 
 ---
 
-## Okta OIDC Authentication — NOT BUILT
-
-**SAML 2.0 (Okta) is working.** OIDC is a separate implementation.
-
-**Settings UI:** Tab 4 (Authentication) has Okta OIDC config fields (Issuer URL, Client ID, Client Secret, Redirect URI, group → role mapping).  
-**Database:** `users.okta_sub` column exists.  
-**Backend:** `app/auth/okta.py` **does not exist**. `app/auth/` only contains `local.py`.
-
-**What needs building:** `app/auth/okta.py` with OIDC flow, callback handler registered in `app/api/auth.py`, and group → role resolution from the Okta token.
-
----
-
 ## Notification Channels — CODE WRITTEN, UNTESTED
 
 The dispatch methods exist in `app/alerts/engine.py` for Slack, Email, PagerDuty, and Webhook, but **none have been tested against real services**.
@@ -47,13 +35,13 @@ The dispatch methods exist in `app/alerts/engine.py` for Slack, Email, PagerDuty
 **Backend:** `app/api/ai.py` is complete — calls Anthropic claude-haiku-4-5 with flow context.  
 **Frontend:** `AiAssistant.tsx` component exists and renders a chat panel.
 
-**Blockers:** Requires `anthropic` Python package in the venv, and an Anthropic API key set in Settings → General. Neither has been verified on O2.
+**Blockers:** Requires `anthropic` Python package in the venv, and an Anthropic API key set in Settings → General. Neither has been verified on app server.
 
 ---
 
 ## Migration Mode — NOT BUILT
 
-**Settings UI:** Tab 3 (Ingest) has a "Migration mode" toggle + O2 forwarding URL field.  
+**Settings UI:** Tab 3 (Ingest) has a "Migration mode" toggle + app server forwarding URL field.  
 **Backend:** No logic to forward received flows on to a secondary destination. The field saves to the database but nothing reads it.
 
 ---
@@ -74,7 +62,7 @@ Clicking a node in the topology graph should open a flow list filtered to that n
 
 ## DuckDB Backend — BUILT, NOT PRODUCTION TESTED
 
-`app/storage/duckdb.py` is fully implemented. It has **never been run against real data** on O2. The ClickHouse backend is the only one proven in production.
+`app/storage/duckdb.py` is fully implemented. It has **never been run against real data** on app server. The ClickHouse backend is the only one proven in production.
 
 ---
 
@@ -94,7 +82,6 @@ Visualization planned: `src_ip → dst_port → dst_ip` alluvial/Sankey chart wi
 
 | Feature | Backend | Frontend | Tested |
 |---------|---------|----------|--------|
-| Okta OIDC auth | ❌ Not built | ✅ Settings UI | ❌ |
 | Slack notifications | ✅ Written | ✅ Settings UI | ❌ |
 | Email notifications | ✅ Written | ✅ Settings UI | ❌ |
 | PagerDuty notifications | ✅ Written | ✅ Settings UI | ❌ |

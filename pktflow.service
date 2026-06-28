@@ -7,16 +7,16 @@ Requires=clickhouse-server.service
 
 [Service]
 Type=simple
-User=ec2-user
-Group=ec2-user
-WorkingDirectory=/mnt/software/pktflow
+User=deploy
+Group=deploy
+WorkingDirectory=/opt/pktflow
 
 # Config
-Environment=PKTFLOW_CONFIG=/mnt/software/pktflow/config.yaml
+Environment=PKTFLOW_CONFIG=/opt/pktflow/config.yaml
 
 # Launch FastAPI via Uvicorn
 # --workers 2 is safe for a single EC2; increase if CPU allows
-ExecStart=/mnt/software/pktflow/venv/bin/uvicorn app.main:app \
+ExecStart=/opt/pktflow/venv/bin/uvicorn app.main:app \
     --host 0.0.0.0 \
     --port 8080 \
     --workers 2 \
@@ -30,8 +30,8 @@ StartLimitInterval=60
 StartLimitBurst=3
 
 # Logging
-StandardOutput=append:/mnt/software/logs/pktflow.log
-StandardError=append:/mnt/software/logs/pktflow.log
+StandardOutput=append:/var/log/pktflow/pktflow.log
+StandardError=append:/var/log/pktflow/pktflow.log
 
 # Security hardening
 NoNewPrivileges=yes
