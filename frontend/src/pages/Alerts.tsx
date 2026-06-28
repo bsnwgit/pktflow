@@ -23,7 +23,7 @@ const TOPIC_STYLES: Record<string, string> = {
   Infrastructure: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30',
 }
 
-const CHANNELS_AVAILABLE = ['inapp', 'slack', 'email', 'pagerduty', 'webhook']
+const CHANNELS_AVAILABLE = ['inapp', 'slack', 'email', 'pagerduty', 'webhook', 'tracecat']
 
 const RULE_TYPES: Array<{ value: string; label: string; group: string; hint: string }> = [
   // Traffic thresholds
@@ -172,7 +172,7 @@ function ConditionsBuilder({ ruleType, conds, onChange }: {
           <TextInput type="number" value={String(g('value', 0))} onChange={v => set('value', parseFloat(v) || 0)} />
         </Field>
         <Field label="Sampler IP (optional)" hint="Leave blank to check all samplers">
-          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. 10.20.30.11" />
+          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. <COLLECTOR_IP_1>" />
         </Field>
       </div>
     )
@@ -191,7 +191,7 @@ function ConditionsBuilder({ ruleType, conds, onChange }: {
           <TextInput type="number" value={String(g('baseline_days', 7))} onChange={v => set('baseline_days', parseInt(v) || 7)} />
         </Field>
         <Field label="Sampler IP (optional)">
-          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. 10.20.30.11" />
+          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. <COLLECTOR_IP_1>" />
         </Field>
       </div>
     )
@@ -210,7 +210,7 @@ function ConditionsBuilder({ ruleType, conds, onChange }: {
           <SelectInput value={String(g('direction', 'dst'))} onChange={v => set('direction', v)} options={DIR_OPTS} />
         </Field>
         <Field label="Sampler IP (optional)">
-          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. 10.20.30.11" />
+          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. <COLLECTOR_IP_1>" />
         </Field>
       </div>
     )
@@ -226,7 +226,7 @@ function ConditionsBuilder({ ruleType, conds, onChange }: {
           <TextInput type="number" value={String(g('threshold', 0))} onChange={v => set('threshold', parseFloat(v) || 0)} />
         </Field>
         <Field label="Sampler IP (optional)">
-          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. 10.20.30.11" />
+          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. <COLLECTOR_IP_1>" />
         </Field>
       </div>
     )
@@ -239,7 +239,7 @@ function ConditionsBuilder({ ruleType, conds, onChange }: {
           <TextInput type="number" value={String(g('threshold_mb', 100))} onChange={v => set('threshold_mb', parseFloat(v) || 100)} placeholder="e.g. 100" />
         </Field>
         <Field label="Sampler IP (optional)">
-          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. 10.20.30.11" />
+          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. <COLLECTOR_IP_1>" />
         </Field>
       </div>
     )
@@ -254,11 +254,11 @@ function ConditionsBuilder({ ruleType, conds, onChange }: {
         <Field label="Threshold" hint="Alert when inter-site traffic exceeds this in the eval window">
           <TextInput type="number" value={String(g('threshold', 0))} onChange={v => set('threshold', parseFloat(v) || 0)} />
         </Field>
-        <Field label="Site A (optional)" hint="e.g. medical — leave blank to match all sites">
-          <TextInput value={String(g('site_a', ''))} onChange={v => set('site_a', v)} placeholder="e.g. medical" />
+        <Field label="Site A (optional)" hint="e.g. site-a — leave blank to match all sites">
+          <TextInput value={String(g('site_a', ''))} onChange={v => set('site_a', v)} placeholder="e.g. site-a" />
         </Field>
-        <Field label="Site B (optional)" hint="e.g. dental — leave blank to match all sites">
-          <TextInput value={String(g('site_b', ''))} onChange={v => set('site_b', v)} placeholder="e.g. dental" />
+        <Field label="Site B (optional)" hint="e.g. site-b — leave blank to match all sites">
+          <TextInput value={String(g('site_b', ''))} onChange={v => set('site_b', v)} placeholder="e.g. site-b" />
         </Field>
       </div>
     )
@@ -271,7 +271,7 @@ function ConditionsBuilder({ ruleType, conds, onChange }: {
           <TextInput type="number" value={String(g('threshold_connections', 1000))} onChange={v => set('threshold_connections', parseInt(v) || 1000)} />
         </Field>
         <Field label="Sampler IP (optional)">
-          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. 10.20.30.11" />
+          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. <COLLECTOR_IP_1>" />
         </Field>
       </div>
     )
@@ -284,7 +284,7 @@ function ConditionsBuilder({ ruleType, conds, onChange }: {
           <TextInput type="number" value={String(g('threshold_ports', 50))} onChange={v => set('threshold_ports', parseInt(v) || 50)} />
         </Field>
         <Field label="Sampler IP (optional)">
-          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. 10.20.30.11" />
+          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. <COLLECTOR_IP_1>" />
         </Field>
       </div>
     )
@@ -300,7 +300,7 @@ function ConditionsBuilder({ ruleType, conds, onChange }: {
           <TextInput value={String(g('src_subnet', ''))} onChange={v => set('src_subnet', v)} placeholder="e.g. 10.0.0.0/8" />
         </Field>
         <Field label="Sampler IP (optional)">
-          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. 10.20.30.11" />
+          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. <COLLECTOR_IP_1>" />
         </Field>
       </div>
     )
@@ -320,7 +320,7 @@ function ConditionsBuilder({ ruleType, conds, onChange }: {
           <SelectInput value={String(g('direction', 'dst'))} onChange={v => set('direction', v)} options={DIR_OPTS} />
         </Field>
         <Field label="Sampler IP (optional)">
-          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. 10.20.30.11" />
+          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. <COLLECTOR_IP_1>" />
         </Field>
       </div>
     )
@@ -333,7 +333,7 @@ function ConditionsBuilder({ ruleType, conds, onChange }: {
           <TextInput type="number" value={String(g('min_flows_per_sec', 1))} onChange={v => set('min_flows_per_sec', parseFloat(v) || 1)} placeholder="e.g. 10" />
         </Field>
         <Field label="Sampler IP (optional)" hint="Leave blank to check total ingest across all samplers">
-          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. 10.20.30.11" />
+          <TextInput value={String(g('sampler_ip', ''))} onChange={v => set('sampler_ip', v)} placeholder="e.g. <COLLECTOR_IP_1>" />
         </Field>
       </div>
     )
@@ -363,27 +363,93 @@ function fmtVal(v: unknown): string {
   return String(v)
 }
 
-function DetailsPanel({ details }: { details: DetailMap }) {
-  const contributors = details.top_contributors as Array<{src_ip:string;dst_ip:string;site?:string;value:number}> | undefined
-  const topSources   = details.top_sources   as Array<{src_ip:string;value:number}> | undefined
-  const topFlows     = details.top_flows     as Array<{src_ip:string;dst_ip:string;bytes:number;protocol:string}> | undefined
+function fmtBytes(b: number): string {
+  if (b >= 1_000_000_000) return `${(b/1_000_000_000).toFixed(1)} GB`
+  if (b >= 1_000_000) return `${(b/1_000_000).toFixed(1)} MB`
+  if (b >= 1_000) return `${(b/1_000).toFixed(1)} KB`
+  return `${b} B`
+}
 
-  const SKIP = new Set(['top_contributors','top_sources','top_flows'])
-  const IP_KEYS   = ['src_ip','sampler_ip']
-  const SITE_KEYS = ['site_a','site_b']
-  const META_SKIP = new Set([...IP_KEYS, ...SITE_KEYS, ...SKIP])
+type Contributor  = { src_ip: string; dst_ip: string; site?: string; sampler_ip?: string; value: number }
+type TopSource    = { src_ip: string; dst_ip?: string; protocol?: string; sampler_ip?: string; flow_count?: number; value?: number }
+type TopFlow      = { src_ip: string; dst_ip: string; bytes: number; protocol: string }
+type TopDst       = { dst_ip: string; flow_count: number; bytes: number }
+type SamplePort   = { dst_port: number; protocol: string; flow_count: number }
+
+function MiniTable({ title, headers, rows }: {
+  title: string
+  headers: string[]
+  rows: (string | number)[][]
+}) {
+  if (!rows.length) return null
+  return (
+    <div>
+      <p className="text-xs text-gray-500 mb-1.5 uppercase tracking-wide">{title}</p>
+      <table className="w-full text-xs border-collapse">
+        <thead>
+          <tr className="text-gray-500">
+            {headers.map((h, i) => (
+              <th key={i} className={`pb-1 font-normal ${i === headers.length - 1 ? 'text-right' : 'text-left'}`}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, ri) => (
+            <tr key={ri} className="border-t border-gray-800/70">
+              {row.map((cell, ci) => (
+                <td key={ci} className={`py-1 ${ci === row.length - 1 ? 'text-right text-gray-200' : 'text-gray-200 font-mono'}`}>
+                  {typeof cell === 'string' ? cell : cell.toLocaleString()}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function DetailsPanel({ details }: { details: DetailMap }) {
+  const contributors   = details.top_contributors as Contributor[]  | undefined
+  const topSources     = details.top_sources      as TopSource[]    | undefined
+  const topFlows       = details.top_flows        as TopFlow[]      | undefined
+  const topDsts        = details.top_destinations as TopDst[]       | undefined
+  const samplePorts    = details.sample_ports     as SamplePort[]   | undefined
+
+  const TABLE_KEYS = new Set(['top_contributors','top_sources','top_flows','top_destinations','sample_ports'])
+  const CHIP_IP_KEYS  = ['src_ip','sampler_ip']
+  const CHIP_SITE_KEYS = ['site_a','site_b']
+  const META_SKIP = new Set([...CHIP_IP_KEYS, ...CHIP_SITE_KEYS, ...TABLE_KEYS])
 
   const chips: [string,string,string][] = []
-  IP_KEYS.forEach(k => {
+  CHIP_IP_KEYS.forEach(k => {
     const v = details[k] as string | undefined
     if (v && v !== 'all') chips.push([k, k === 'src_ip' ? 'Source IP' : 'Sampler', v])
   })
-  SITE_KEYS.forEach(k => {
+  CHIP_SITE_KEYS.forEach(k => {
     const v = details[k] as string | undefined
     if (v && v !== 'any') chips.push([k, k === 'site_a' ? 'Site A' : 'Site B', v])
   })
 
   const kvs = Object.entries(details).filter(([k]) => !META_SKIP.has(k))
+
+  // Build top_sources table rows — handles both {src_ip, value} and {src_ip, dst_ip, protocol, sampler_ip, flow_count}
+  const topSourceHasExtra = topSources && topSources[0] && ('dst_ip' in topSources[0] || 'protocol' in topSources[0])
+  const topSourceHeaders = topSourceHasExtra
+    ? ['Source', 'Destination', 'Proto', 'Sampler', 'Flows']
+    : ['Source IP', 'Volume']
+  const topSourceRows = (topSources || []).map(s =>
+    topSourceHasExtra
+      ? [s.src_ip, s.dst_ip ?? '—', s.protocol ?? '—', s.sampler_ip ?? '—', s.flow_count ?? 0]
+      : [s.src_ip, s.value ?? 0]
+  )
+
+  // Build contributors table rows (inter-site)
+  const contribHasSampler = contributors && contributors[0]?.sampler_ip !== undefined
+  const contribHeaders = ['Source', 'Destination', 'Site', ...(contribHasSampler ? ['Sampler'] : []), 'Volume']
+  const contribRows = (contributors || []).map(c => [
+    c.src_ip, c.dst_ip, c.site ?? '—', ...(contribHasSampler ? [c.sampler_ip ?? '—'] : []), c.value
+  ])
 
   return (
     <div className="mt-3 space-y-3">
@@ -411,81 +477,31 @@ function DetailsPanel({ details }: { details: DetailMap }) {
       )}
 
       {/* Top contributors (inter-site) */}
-      {contributors && contributors.length > 0 && (
-        <div>
-          <p className="text-xs text-gray-500 mb-1.5 uppercase tracking-wide">Top contributors</p>
-          <table className="w-full text-xs border-collapse">
-            <thead>
-              <tr className="text-gray-500">
-                <th className="text-left pb-1 font-normal">Source</th>
-                <th className="text-left pb-1 font-normal">Destination</th>
-                {contributors[0]?.site !== undefined && <th className="text-left pb-1 font-normal">Site</th>}
-                <th className="text-right pb-1 font-normal">Volume</th>
-              </tr>
-            </thead>
-            <tbody>
-              {contributors.map((c, i) => (
-                <tr key={i} className="border-t border-gray-800/70">
-                  <td className="py-1 text-gray-200 font-mono">{c.src_ip}</td>
-                  <td className="py-1 text-gray-200 font-mono">{c.dst_ip}</td>
-                  {c.site !== undefined && <td className="py-1 text-gray-400">{c.site}</td>}
-                  <td className="py-1 text-right text-gray-200">{c.value.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <MiniTable title="Top contributors" headers={contribHeaders} rows={contribRows} />
 
-      {/* Top sources (threshold) */}
-      {topSources && topSources.length > 0 && (
-        <div>
-          <p className="text-xs text-gray-500 mb-1.5 uppercase tracking-wide">Top sources</p>
-          <table className="w-full text-xs border-collapse">
-            <thead>
-              <tr className="text-gray-500">
-                <th className="text-left pb-1 font-normal">Source IP</th>
-                <th className="text-right pb-1 font-normal">Volume</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topSources.map((s, i) => (
-                <tr key={i} className="border-t border-gray-800/70">
-                  <td className="py-1 text-gray-200 font-mono">{s.src_ip}</td>
-                  <td className="py-1 text-right text-gray-200">{s.value.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {/* Top sources (threshold / rate_spike / port_protocol / protocol_anomaly) */}
+      <MiniTable title="Top sources" headers={topSourceHeaders} rows={topSourceRows} />
 
-      {/* Top flows (elephant) */}
-      {topFlows && topFlows.length > 0 && (
-        <div>
-          <p className="text-xs text-gray-500 mb-1.5 uppercase tracking-wide">Largest flows</p>
-          <table className="w-full text-xs border-collapse">
-            <thead>
-              <tr className="text-gray-500">
-                <th className="text-left pb-1 font-normal">Source</th>
-                <th className="text-left pb-1 font-normal">Destination</th>
-                <th className="text-left pb-1 font-normal">Proto</th>
-                <th className="text-right pb-1 font-normal">Bytes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topFlows.map((f, i) => (
-                <tr key={i} className="border-t border-gray-800/70">
-                  <td className="py-1 text-gray-200 font-mono">{f.src_ip}</td>
-                  <td className="py-1 text-gray-200 font-mono">{f.dst_ip}</td>
-                  <td className="py-1 text-gray-400">{f.protocol}</td>
-                  <td className="py-1 text-right text-gray-200">{f.bytes.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {/* Largest flows (elephant flow) */}
+      <MiniTable
+        title="Largest flows"
+        headers={['Source', 'Destination', 'Proto', 'Bytes']}
+        rows={(topFlows || []).map(f => [f.src_ip, f.dst_ip, f.protocol, fmtBytes(f.bytes)])}
+      />
+
+      {/* Top destinations (connection burst) */}
+      <MiniTable
+        title="Top destinations"
+        headers={['Destination IP', 'Flows', 'Bytes']}
+        rows={(topDsts || []).map(d => [d.dst_ip, d.flow_count, fmtBytes(d.bytes)])}
+      />
+
+      {/* Sample ports (port scan) */}
+      <MiniTable
+        title="Ports scanned (sample)"
+        headers={['Dst Port', 'Proto', 'Flows']}
+        rows={(samplePorts || []).map(p => [String(p.dst_port), p.protocol, p.flow_count])}
+      />
     </div>
   )
 }
@@ -803,6 +819,10 @@ export default function Alerts() {
   const [addingRule, setAddingRule] = useState(false)
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState('')
+  const [activeFilter, setActiveFilter]     = useState('')
+  const [activeSevFilter, setActiveSevFilter] = useState('')
+  const [historyFilter, setHistoryFilter]   = useState('')
+  const [historySevFilter, setHistorySevFilter] = useState('')
   const [rulesFilter, setRulesFilter]       = useState('')
   const [rulesTopicFilter, setRulesTopicFilter] = useState('')
   const [rulesSortKey, setRulesSortKey]     = useState<keyof AlertRule | 'topic' | null>(null)
@@ -1016,6 +1036,27 @@ export default function Alerts() {
       {/* Active events */}
       {tab === 'active' && (
         <div className="space-y-3">
+          {/* Filter bar */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <input
+              value={activeFilter}
+              onChange={e => setActiveFilter(e.target.value)}
+              placeholder="Filter by rule name or message…"
+              className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white placeholder-gray-600 w-56 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            {activeFilter && <button onClick={() => setActiveFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+            <select
+              value={activeSevFilter}
+              onChange={e => setActiveSevFilter(e.target.value)}
+              className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">All severities</option>
+              <option value="critical">Critical</option>
+              <option value="warning">Warning</option>
+              <option value="info">Info</option>
+            </select>
+            {activeSevFilter && <button onClick={() => setActiveSevFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+          </div>
           {loading && <p className="text-sm text-white">Loading…</p>}
           {!loading && events.length === 0 && (
             <div className="flex flex-col items-center justify-center h-32 text-white">
@@ -1023,19 +1064,54 @@ export default function Alerts() {
               <p className="text-sm">No unacknowledged alerts</p>
             </div>
           )}
-          {events.map(e => <EventCard key={e.id} event={e} onAck={handleAck} />)}
+          {events
+            .filter(e => {
+              if (activeSevFilter && e.severity !== activeSevFilter) return false
+              if (!activeFilter) return true
+              const q = activeFilter.toLowerCase()
+              return e.rule_name.toLowerCase().includes(q) || e.message.toLowerCase().includes(q)
+            })
+            .map(e => <EventCard key={e.id} event={e} onAck={handleAck} />)}
         </div>
       )}
 
       {/* History */}
       {tab === 'history' && (
         <div className="space-y-3">
+          {/* Filter bar */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <input
+              value={historyFilter}
+              onChange={e => setHistoryFilter(e.target.value)}
+              placeholder="Filter by rule name or message…"
+              className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white placeholder-gray-600 w-56 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            {historyFilter && <button onClick={() => setHistoryFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+            <select
+              value={historySevFilter}
+              onChange={e => setHistorySevFilter(e.target.value)}
+              className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">All severities</option>
+              <option value="critical">Critical</option>
+              <option value="warning">Warning</option>
+              <option value="info">Info</option>
+            </select>
+            {historySevFilter && <button onClick={() => setHistorySevFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+          </div>
           {history.length === 0 && !loading && (
             <div className="flex flex-col items-center justify-center h-32 text-white">
               <p className="text-sm">No alert history</p>
             </div>
           )}
-          {history.map(e => <EventCard key={e.id} event={e} onAck={handleAck} />)}
+          {history
+            .filter(e => {
+              if (historySevFilter && e.severity !== historySevFilter) return false
+              if (!historyFilter) return true
+              const q = historyFilter.toLowerCase()
+              return e.rule_name.toLowerCase().includes(q) || e.message.toLowerCase().includes(q)
+            })
+            .map(e => <EventCard key={e.id} event={e} onAck={handleAck} />)}
         </div>
       )}
 

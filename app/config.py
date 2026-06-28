@@ -3,7 +3,7 @@ pktFlow configuration.
 
 Priority order (highest → lowest):
   1. Environment variables  (PKTFLOW_*)
-  2. config.yaml in CWD or /mnt/software/pktflow/
+  2. config.yaml in CWD or /opt/pktflow/
   3. Defaults defined here
 
 Runtime settings (storage backend, retention days, ingest token, etc.) are
@@ -27,7 +27,7 @@ def _load_yaml() -> dict:
     """Try known config file locations and return parsed YAML, or {}."""
     candidates = [
         Path("config.yaml"),
-        Path("/mnt/software/pktflow/config.yaml"),
+        Path("/opt/pktflow/config.yaml"),
         Path.home() / ".pktflow" / "config.yaml",
     ]
     env_path = os.environ.get("PKTFLOW_CONFIG")
@@ -61,7 +61,7 @@ class Settings(BaseSettings):
 
     # ── App database (SQLite sidecar) ──────────────────────────────────────────
     db_path: str = Field(
-        default=_yaml_cfg.get("db_path", "/mnt/software/pktflow/pktflow.db")
+        default=_yaml_cfg.get("db_path", "/opt/pktflow/pktflow.db")
     )
 
     # ── ClickHouse (startup connection — overridable at runtime via settings) ──
@@ -73,7 +73,7 @@ class Settings(BaseSettings):
 
     # ── DuckDB (alternate backend) ─────────────────────────────────────────────
     duckdb_path: str = Field(
-        default=_yaml_cfg.get("duckdb_path", "/mnt/software/pktflow/flows.duckdb")
+        default=_yaml_cfg.get("duckdb_path", "/opt/pktflow/flows.duckdb")
     )
 
     # ── JWT ───────────────────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
 
     # ── CORS ──────────────────────────────────────────────────────────────────
-    # In production, set this to your actual origin (e.g. http://10.20.30.5:8080)
+    # In production, set this to your actual origin (e.g. http://<APP_SERVER_IP>:8080)
     cors_origins: list[str] = Field(
         default=_yaml_cfg.get("cors_origins", ["*"])
     )
@@ -93,7 +93,7 @@ class Settings(BaseSettings):
     # ── Logging ───────────────────────────────────────────────────────────────
     log_level: str = Field(default=_yaml_cfg.get("log_level", "info"))
     log_file: str = Field(
-        default=_yaml_cfg.get("log_file", "/mnt/software/logs/pktflow.log")
+        default=_yaml_cfg.get("log_file", "/var/log/pktflow/pktflow.log")
     )
 
     # ── Ingest buffer ─────────────────────────────────────────────────────────
