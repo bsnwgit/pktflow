@@ -1,4 +1,6 @@
-# pktFlow
+<p align="center">
+  <img src="assets/logos/lockup-256h.png" alt="pktFlow" height="80"/>
+</p>
 
 A production NetFlow visualization and alerting platform. Receives live NetFlow v9 data from network samplers via [goflow2](https://github.com/netsampler/goflow2) + [Vector](https://vector.dev/), stores flows in ClickHouse, and serves a React dashboard for real-time traffic analysis.
 
