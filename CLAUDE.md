@@ -100,6 +100,8 @@ npm run build > /dev/null 2>&1 && echo 'build ok' || echo 'BUILD FAILED'
 
 ## Data Flow — Exactly How Traffic Moves
 
+> **Full pipeline reference (sanitized, reusable):** See [`DATAFLOW.md`](DATAFLOW.md) for complete documentation of both ingest modes, annotated Vector config, field transformation details, goflow2 flags, systemd unit pattern, and troubleshooting. The section below is the project-specific summary.
+
 ```
 Routers (172.27.28.89/Site-A, 192.168.44.7/Site-B)
     │  NetFlow v9 UDP
