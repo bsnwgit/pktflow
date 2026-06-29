@@ -119,15 +119,7 @@ React 18, TypeScript, Vite, Tailwind CSS, Recharts, D3.js
 
 ## Installation
 
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/your-org/pktflow.git
-cd pktflow
-git checkout feature/initial-build
-```
-
-### 2. Run the install script (Amazon Linux / RHEL)
+### 1. Run the install script (Amazon Linux / RHEL)
 
 ```bash
 bash scripts/install.sh

@@ -14,7 +14,9 @@ Key difference: vector outputs proto as a string ("UDP", "TCP") not an integer.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
+import struct
 from datetime import datetime, timezone
 from typing import Any, Optional, Union
 
@@ -60,6 +62,35 @@ def _proto_to_int(val: Any) -> int:
     if s.isdigit():
         return int(s)
     return _PROTO_NAMES.get(s, 0)
+
+
+def _conversation_id(src_ip: str, dst_ip: str, src_port: int, dst_port: int, proto: int) -> int:
+    """
+    Stable UInt64 hash of the normalized 5-tuple.
+    Sorting ensures both legs of a conversation produce the same ID.
+    Uses MD5 (non-security) for a deterministic 64-bit integer.
+    """
+    if (src_ip, src_port) <= (dst_ip, dst_port):
+        key = f"{src_ip}:{src_port}-{dst_ip}:{dst_port}/{proto}"
+    else:
+        key = f"{dst_ip}:{dst_port}-{src_ip}:{src_port}/{proto}"
+    digest = hashlib.md5(key.encode(), usedforsecurity=False).digest()
+    return struct.unpack_from("<Q", digest)[0]  # first 8 bytes → UInt64
+
+
+def _flow_role(src_port: int, dst_port: int) -> int:
+    """
+    Classify whether this flow leg is the initiator or responder.
+    0=unknown, 1=initiator (ephemeral src → service dst), 2=responder (service src → ephemeral dst)
+    Well-known ports: < 1024.  Ephemeral ports: >= 1024.
+    """
+    src_service = src_port < 1024
+    dst_service = dst_port < 1024
+    if not src_service and dst_service:
+        return 1  # ephemeral → service port: this is the request
+    if src_service and not dst_service:
+        return 2  # service port → ephemeral: this is the response
+    return 0  # both ephemeral or both well-known — ambiguous
 
 
 def _ip_or_default(val: Any, default: str = "0.0.0.0") -> str:
@@ -119,16 +150,22 @@ def normalize_goflow2_record(raw: dict[str, Any]) -> Optional[FlowRecord]:
         else:
             duration_ms = 0
 
+        src_ip  = _ip_or_default(_get(raw, "SrcAddr", "src_addr"))
+        dst_ip  = _ip_or_default(_get(raw, "DstAddr", "dst_addr"))
+        src_port = int(_get(raw, "SrcPort", "src_port", default=0))
+        dst_port = int(_get(raw, "DstPort", "dst_port", default=0))
+        protocol = _proto_to_int(_get(raw, "Proto", "proto", default=0))
+
         return FlowRecord(
             timestamp=ts,
             sampler_ip=sampler_ip,
             sampler_name=name,
             site=site,
-            src_ip=_ip_or_default(_get(raw, "SrcAddr", "src_addr")),
-            dst_ip=_ip_or_default(_get(raw, "DstAddr", "dst_addr")),
-            src_port=int(_get(raw, "SrcPort", "src_port", default=0)),
-            dst_port=int(_get(raw, "DstPort", "dst_port", default=0)),
-            protocol=_proto_to_int(_get(raw, "Proto", "proto", default=0)),
+            src_ip=src_ip,
+            dst_ip=dst_ip,
+            src_port=src_port,
+            dst_port=dst_port,
+            protocol=protocol,
             bytes=int(_get(raw, "Bytes", "bytes", default=0)),
             packets=int(_get(raw, "Packets", "packets", default=0)),
             duration_ms=duration_ms,
@@ -140,6 +177,8 @@ def normalize_goflow2_record(raw: dict[str, Any]) -> Optional[FlowRecord]:
             src_as=int(_get(raw, "SrcAS", "src_as", default=0)),
             dst_as=int(_get(raw, "DstAS", "dst_as", default=0)),
             flow_dir=int(_get(raw, "FlowDirection", "flow_direction", default=2)),
+            conversation_id=_conversation_id(src_ip, dst_ip, src_port, dst_port, protocol),
+            flow_role=_flow_role(src_port, dst_port),
         )
     except Exception as e:
         log.debug(f"Skipping malformed flow record: {e} — {raw}")

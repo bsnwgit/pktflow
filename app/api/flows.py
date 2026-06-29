@@ -178,6 +178,18 @@ async def search_flows(
     )
 
 
+# ── Conversation lookup ───────────────────────────────────────────────────────
+
+@router.get("/conversation/{conversation_id}", response_model=list[FlowSearchResult])
+async def get_conversation(_: CurrentUser, conversation_id: int,
+                           window_min: int = Query(60, ge=1, le=10080)):
+    """Return all legs of a conversation by its conversation_id.
+    window_min controls how far back to search (default 60 min, max 7 days)."""
+    if conversation_id == 0:
+        raise HTTPException(status_code=400, detail="conversation_id 0 is not valid (pre-migration flows have no conversation tracking)")
+    return await get_storage().get_conversation_flows(conversation_id, window_min)
+
+
 # ── Sampler last-seen (for data-gap alerting and UI status dots) ───────────────
 
 @router.get("/last-seen")
