@@ -1180,4 +1180,5 @@ class ClickHouseBackend(StorageBackend):
             if rows and rows[0][0] is not None:
                 return float(rows[0][0]) / (1024 ** 3)
         except Exception as e:
-            log.warning(f"get_clickhouse_table_size_
+            log.warning(f"get_clickhouse_table_size_gb error: {e}")
+        return 0.0
