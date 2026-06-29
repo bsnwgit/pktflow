@@ -296,6 +296,25 @@ class StorageBackend(ABC):
         Sorted by flow_count descending. Returns [] when no data."""
 
     @abstractmethod
+    async def get_conversation_flows(self, conversation_id: int, window_min: int = 60) -> list:
+        """Return all flows (both legs) for a conversation within window_min minutes."""
+
+    @abstractmethod
+    async def get_response_rate_for_ip(self, src_ip: str, window_min: int) -> tuple[int, int]:
+        """Return (total_conversations, conversations_with_response) for a scanning IP."""
+
+    @abstractmethod
+    async def get_asymmetric_flows(
+        self,
+        window_min: int,
+        min_bytes: int = 1_000_000,
+        ratio_threshold: float = 10.0,
+        sampler_ip: Optional[str] = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Return conversations where one side sent significantly more than the other."""
+
+    @abstractmethod
     async def get_top_dsts_for_ip(
         self,
         src_ip: str,
