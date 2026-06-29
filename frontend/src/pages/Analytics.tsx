@@ -307,13 +307,15 @@ export default function Analytics() {
 
   useEffect(() => {
     setLoading(true)
-    Promise.all([
+    Promise.allSettled([
       api.getTimeSeries({ window }),
       api.getTopology({ window, limit: '60' }),
-    ]).then(([ts, topo]) => {
-      setTimeSeries(ts)
-      setTopology(topo)
-    }).catch(console.error).finally(() => setLoading(false))
+    ]).then(([tsResult, topoResult]) => {
+      if (tsResult.status === 'fulfilled') setTimeSeries(tsResult.value)
+      else console.error('timeseries failed:', tsResult.reason)
+      if (topoResult.status === 'fulfilled') setTopology(topoResult.value)
+      else console.error('topology failed:', topoResult.reason)
+    }).finally(() => setLoading(false))
   }, [window])
 
   useEffect(() => {
