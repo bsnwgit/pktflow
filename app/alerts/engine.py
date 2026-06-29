@@ -202,7 +202,7 @@ class AlertEngine:
         conds = rule["conditions"]
         port = int(conds.get("port", 0))
         if port <= 0:
-            log.warning(f"port_protocol rule '{rule['name']}' has no valid port configured")
+            log.debug(f"port_protocol rule '{rule['name']}' has no valid port configured; skipping")
             return
         proto_str = conds.get("protocol", "any")
         direction = conds.get("direction", "any")
@@ -283,7 +283,7 @@ class AlertEngine:
         window_min = rule.get("time_window_min", 5)
 
         if threshold <= 0:
-            log.warning(f"inter_site_traffic rule '{rule['name']}' has threshold <= 0; skipping to prevent constant firing")
+            log.debug(f"inter_site_traffic rule '{rule['name']}' has threshold <= 0; skipping")
             return
 
         storage = get_storage()
@@ -387,7 +387,7 @@ class AlertEngine:
         conds = rule["conditions"]
         port = int(conds.get("port", 0))
         if port <= 0:
-            log.warning(f"protocol_anomaly rule '{rule['name']}' has no valid port configured")
+            log.debug(f"protocol_anomaly rule '{rule['name']}' has no valid port configured; skipping")
             return
         expected_proto_str = (conds.get("expected_proto") or "TCP").upper()
         direction = conds.get("direction", "dst")
