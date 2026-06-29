@@ -189,11 +189,12 @@ function TopologyGraph({
     }
 
     // ── Links ─────────────────────────────────────────────────────────────────
+    // Asymmetric edges (one side sent >10× the other) render in amber as a visual flag
     const link = g.append('g').selectAll<SVGLineElement, D3Link>('line')
       .data(links).join('line')
-      .attr('stroke', '#374151')
+      .attr('stroke', d => (d as any).is_asymmetric ? '#f59e0b' : '#374151')
       .attr('stroke-width', d => wScale(d.bytes))
-      .attr('stroke-opacity', 0.7)
+      .attr('stroke-opacity', d => (d as any).is_asymmetric ? 0.85 : 0.7)
       .attr('marker-end', 'url(#arr)')
 
     const node = g.append('g').selectAll<SVGGElement, D3Node>('g')
@@ -259,10 +260,17 @@ function TopologyGraph({
       .on('mouseenter', (ev, d) => {
         const src = typeof d.source === 'string' ? d.source : (d.source as D3Node)._id
         const dst = typeof d.target === 'string' ? d.target : (d.target as D3Node)._id
+        const fwd = (d as any).bytes_fwd ?? 0
+        const rev = (d as any).bytes_rev ?? 0
+        const asymFlag = (d as any).is_asymmetric
+          ? `<br><span style="color:#f59e0b">⚠ Asymmetric — ${fwd > rev ? src : dst} sent ${fwd > rev ? (fwd/Math.max(rev,1)).toFixed(0) : (rev/Math.max(fwd,1)).toFixed(0)}× more</span>`
+          : ''
         showTip(ev, `
-          <b>${src} → ${dst}</b>
-          <br>${fmtBytes(d.bytes)} · ${d.flows.toLocaleString()} flows
+          <b>${src} ↔ ${dst}</b>
+          <br>Total: ${fmtBytes(d.bytes)} · ${d.flows.toLocaleString()} flows
+          ${fwd || rev ? `<br>→ ${fmtBytes(fwd)} &nbsp; ← ${fmtBytes(rev)}` : ''}
           <br><span style="color:#9ca3af">${protoShort(d.protocol)}${d.dst_port ? `:${d.dst_port}` : ''}</span>
+          ${asymFlag}
         `)
       })
       .on('mousemove', moveTip).on('mouseleave', hideTip)

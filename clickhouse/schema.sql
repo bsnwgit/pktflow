@@ -127,6 +127,13 @@ GROUP BY day, sampler_ip, sampler_name, site;
 
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- Conversation tracking columns (added non-destructively — old rows default to 0)
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE pktflow.flows ADD COLUMN IF NOT EXISTS conversation_id UInt64 DEFAULT 0;
+ALTER TABLE pktflow.flows ADD COLUMN IF NOT EXISTS flow_role UInt8 DEFAULT 0;
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Useful query hints (not executed — for reference)
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Top talkers for a device, last hour:
