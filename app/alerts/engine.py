@@ -141,6 +141,9 @@ class AlertEngine:
         elif rule_type == "clickhouse_size":
             await self._evaluate_clickhouse_size(db, rule)
 
+        elif rule_type == "asymmetric_flow":
+            await self._evaluate_asymmetric_flow(db, rule)
+
     async def _evaluate_threshold(self, db: aiosqlite.Connection, rule: dict) -> None:
         from app.storage.factory import get_storage
         conds = rule["conditions"]
@@ -339,12 +342,19 @@ class AlertEngine:
         if distinct_ports >= threshold_ports:
             sampler_str = f" on {sampler_ip}" if sampler_ip else ""
             sample_ports = await storage.get_top_ports_for_ip(top_ip, window_min, sampler_ip)
+            # Response rate: how many conversations got a reply (port actually open/reachable)?
+            total_convs, convs_with_response = await storage.get_response_rate_for_ip(top_ip, window_min)
+            response_pct = round(convs_with_response / total_convs * 100, 1) if total_convs > 0 else 0.0
             await self._fire(db, rule, (
                 f"Port scan detected{sampler_str}: {top_ip} hit {distinct_ports:,} distinct ports "
-                f"in last {window_min}m (threshold: {threshold_ports})"
+                f"in last {window_min}m — {convs_with_response}/{total_convs} connections got a response "
+                f"({response_pct}% open) (threshold: {threshold_ports})"
             ), {"src_ip": top_ip, "distinct_ports": distinct_ports, "threshold": threshold_ports,
                 "sampler_ip": sampler_ip or "all",
-                "sample_ports": sample_ports})
+                "sample_ports": sample_ports,
+                "total_connections": total_convs,
+                "connections_with_response": convs_with_response,
+                "response_pct": response_pct})
         else:
             await self._auto_resolve(db, rule, f"Port scan: {top_ip} hit {distinct_ports} distinct dst ports — below threshold")
 
@@ -440,6 +450,47 @@ class AlertEngine:
         else:
             await self._auto_resolve(db, rule, f"ClickHouse '{table}': {size_gb:.2f}GB — within limit")
 
+    async def _evaluate_asymmetric_flow(self, db: aiosqlite.Connection, rule: dict) -> None:
+        """
+        Detects conversations where one side sends significantly more than the other.
+        Useful for catching data exfiltration, lateral movement, and misconfigured services.
+        """
+        from app.storage.factory import get_storage
+        conds = rule["conditions"]
+        min_bytes = int(conds.get("min_bytes", 1_000_000))        # 1 MB default noise floor
+        ratio_threshold = float(conds.get("ratio_threshold", 10.0))  # 10:1 default
+        sampler_ip = conds.get("sampler_ip") or None
+        window_min = rule.get("time_window_min", 15)
+
+        results = await get_storage().get_asymmetric_flows(
+            window_min=window_min,
+            min_bytes=min_bytes,
+            ratio_threshold=ratio_threshold,
+            sampler_ip=sampler_ip,
+            limit=1,  # worst offender only
+        )
+        if not results:
+            await self._auto_resolve(db, rule, "No asymmetric flows above threshold")
+            return
+
+        top = results[0]
+        fwd_mb = round(top["bytes_fwd"] / 1_048_576, 2)
+        rev_mb = round(top["bytes_rev"] / 1_048_576, 2)
+        sampler_str = f" on {sampler_ip}" if sampler_ip else ""
+        await self._fire(db, rule, (
+            f"Asymmetric flow{sampler_str}: {top['ip_a']} ↔ {top['ip_b']} — "
+            f"ratio {top['ratio']}:1 ({fwd_mb}MB fwd / {rev_mb}MB rev) "
+            f"in last {window_min}m (threshold: {ratio_threshold}:1, min {min_bytes // 1_048_576}MB)"
+        ), {
+            "ip_a": top["ip_a"], "ip_b": top["ip_b"],
+            "port_a": top["port_a"], "port_b": top["port_b"],
+            "protocol": top["protocol"],
+            "bytes_fwd": top["bytes_fwd"], "bytes_rev": top["bytes_rev"],
+            "ratio": top["ratio"],
+            "conversation_id": top["conversation_id"],
+            "sampler_ip": sampler_ip or "all",
+        })
+
     async def _auto_resolve(self, db: aiosqlite.Connection, rule: dict, reason: str) -> None:
         """Mark open events for this rule as auto-resolved when the condition has cleared."""
         async with db.execute(
@@ -505,6 +556,14 @@ class AlertEngine:
                 last = last.replace(tzinfo=timezone.utc)
             if (datetime.now(tz=timezone.utc) - last) < timedelta(minutes=rule["cooldown_min"]):
                 return  # Still in cooldown
+
+        # Embed meta fields used by the FlowExplorer "Investigate" drill-down link.
+        # Prefixed with _ so the UI's DetailsPanel skips them in the display.
+        details = {
+            **details,
+            "_time_window_min": rule.get("time_window_min", 5),
+            "_rule_type": rule.get("rule_type", ""),
+        }
 
         # Record event
         async with db.execute(

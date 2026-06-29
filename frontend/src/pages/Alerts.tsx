@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api, AlertRule, AlertEvent, getToken } from '../api/client'
 import { useWebSocket, type WsMessage, type AlertFiredPayload } from '../hooks/useWebSocket'
 
@@ -431,7 +432,7 @@ function DetailsPanel({ details }: { details: DetailMap }) {
     if (v && v !== 'any') chips.push([k, k === 'site_a' ? 'Site A' : 'Site B', v])
   })
 
-  const kvs = Object.entries(details).filter(([k]) => !META_SKIP.has(k))
+  const kvs = Object.entries(details).filter(([k]) => !META_SKIP.has(k) && !k.startsWith('_'))
 
   // Build top_sources table rows — handles both {src_ip, value} and {src_ip, dst_ip, protocol, sampler_ip, flow_count}
   const topSourceHasExtra = topSources && topSources[0] && ('dst_ip' in topSources[0] || 'protocol' in topSources[0])
@@ -506,8 +507,54 @@ function DetailsPanel({ details }: { details: DetailMap }) {
   )
 }
 
+// ── Investigate URL builder ───────────────────────────────────────────────────
+const PROTO_INT: Record<string, string> = { TCP: '6', UDP: '17', ICMP: '1' }
+
+function buildInvestigateUrl(event: AlertEvent): string {
+  const d = event.details as Record<string, any>
+  const windowMin: number = typeof d._time_window_min === 'number' ? d._time_window_min : 15
+
+  // Time range: the window that was evaluated when the alert fired, plus a 15-minute tail
+  // SQLite datetime('now') returns UTC without timezone marker ("2026-06-29 11:53:54").
+  // Chrome treats strings with no timezone as LOCAL time, shifting the window by the UTC offset.
+  // Force UTC by normalising to ISO 8601 with Z.
+  const firedAtUtc = event.fired_at.replace(' ', 'T') +
+    (event.fired_at.endsWith('Z') || /[+\-]\d{2}:?\d{2}$/.test(event.fired_at) ? '' : 'Z')
+  const firedAt  = new Date(firedAtUtc)
+  const timeFrom = new Date(firedAt.getTime() - windowMin * 60 * 1000)
+  const timeTo   = new Date(firedAt.getTime() + 15 * 60 * 1000)
+
+  const p = new URLSearchParams()
+  p.set('time_from', timeFrom.toISOString())
+  p.set('time_to',   timeTo.toISOString())
+
+  // Sampler — skip when "all"
+  if (d.sampler_ip && d.sampler_ip !== 'all') p.set('sampler', String(d.sampler_ip))
+
+  // Source IP — present for top_talker, connection_burst, port_scan, internal_spread
+  if (d.src_ip) p.set('src_ip', String(d.src_ip))
+
+  // Destination port — present for port_protocol, protocol_anomaly
+  if (d.port) p.set('dst_port', String(d.port))
+
+  // Protocol — convert "TCP"/"UDP"/"ICMP" → numeric; skip "any"
+  if (d.protocol && d.protocol !== 'any' && PROTO_INT[d.protocol as string]) {
+    p.set('protocol', PROTO_INT[d.protocol as string])
+  }
+
+  // Elephant flow: pre-fill top flow src/dst if available
+  if (!d.src_ip && Array.isArray(d.top_flows) && d.top_flows.length > 0) {
+    const top = d.top_flows[0] as Record<string, string>
+    if (top.src_ip) p.set('src_ip', top.src_ip)
+    if (top.dst_ip) p.set('dst_ip', top.dst_ip)
+  }
+
+  return `/explorer?${p.toString()}`
+}
+
 // ── Alert event card ──────────────────────────────────────────────────────────
 function EventCard({ event, onAck }: { event: AlertEvent; onAck: (id: number) => void }) {
+  const navigate    = useNavigate()
   const [expanded, setExpanded] = useState(false)
   const isAcked     = Boolean(event.acked_at)
   const isResolved  = Boolean(event.resolved_at) && !isAcked
@@ -537,6 +584,13 @@ function EventCard({ event, onAck }: { event: AlertEvent; onAck: (id: number) =>
         </div>
         <div className="shrink-0 flex items-center gap-2">
           <span className="text-xs text-white">{fmtTime(event.fired_at)}</span>
+          <button
+            onClick={() => navigate(buildInvestigateUrl(event))}
+            className="text-xs bg-gray-800 hover:bg-gray-700 text-blue-400 hover:text-blue-300 border border-blue-500/40 rounded px-2.5 py-1 transition-colors"
+            title="Open flows for this alert's time window in Flow Explorer"
+          >
+            Investigate ↗
+          </button>
           {!isAcked && (
             <button
               onClick={() => onAck(event.id)}
