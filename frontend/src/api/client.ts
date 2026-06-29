@@ -95,6 +95,8 @@ export const api = {
     request<TopTalker[]>(`/flows/top-talkers?${new URLSearchParams(params as any)}`),
   searchFlows: (params: SearchParams) =>
     request<FlowRecord[]>(`/flows/search?${new URLSearchParams(params as any)}`),
+  getConversation: (conversationId: number, windowMin = 60) =>
+    request<FlowRecord[]>(`/flows/conversation/${conversationId}?window_min=${windowMin}`),
   getLastSeen: () => request<Record<string, string>>('/flows/last-seen'),
   getTopology: (params: TopologyParams) =>
     request<TopologyResponse>(`/flows/topology?${new URLSearchParams(params as any)}`),
@@ -295,6 +297,16 @@ export interface FlowRecord {
   bytes: number
   packets: number
   duration_ms: number
+  tcp_flags?: number
+  tos?: number
+  input_if?: number
+  output_if?: number
+  next_hop?: string
+  src_as?: number
+  dst_as?: number
+  flow_dir?: number
+  conversation_id?: number
+  flow_role?: number  // 0=unknown, 1=initiator, 2=responder
 }
 
 export interface Device {
@@ -405,6 +417,9 @@ export interface TopologyEdge {
   flows: number
   protocol: number
   dst_port: number
+  bytes_fwd: number      // source→target bytes
+  bytes_rev: number      // target→source bytes
+  is_asymmetric: boolean // one side sent >10× the other
 }
 
 export interface TopologyResponse {
