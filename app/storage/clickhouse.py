@@ -432,19 +432,19 @@ class ClickHouseBackend(StorageBackend):
             SELECT
                 if(src_ip < dst_ip, src_ip, dst_ip)  AS ip_a,
                 if(src_ip < dst_ip, dst_ip, src_ip)  AS ip_b,
-                sum(bytes)                            AS bytes,
-                sum(packets)                          AS packets,
-                count()                               AS flows,
-                any(protocol)                         AS protocol,
-                any(dst_port)                         AS dst_port,
-                any(site)                             AS site,
+                sum(bytes)                            AS total_bytes,
+                sum(packets)                          AS total_packets,
+                count()                               AS total_flows,
+                any(protocol)                         AS proto,
+                any(dst_port)                         AS top_dst_port,
+                any(site)                             AS top_site,
                 sumIf(bytes, src_ip < dst_ip)         AS bytes_fwd,
                 sumIf(bytes, src_ip >= dst_ip)        AS bytes_rev
             FROM {settings.clickhouse_database}.flows
             WHERE {where}
             GROUP BY ip_a, ip_b
-            HAVING bytes >= %(min_bytes)s
-            ORDER BY bytes DESC
+            HAVING total_bytes >= %(min_bytes)s
+            ORDER BY total_bytes DESC
             LIMIT %(limit)s
         """
         edge_rows = await asyncio.to_thread(self._execute, edge_query, params)
@@ -1180,5 +1180,4 @@ class ClickHouseBackend(StorageBackend):
             if rows and rows[0][0] is not None:
                 return float(rows[0][0]) / (1024 ** 3)
         except Exception as e:
-            log.warning(f"get_clickhouse_table_size_gb error: {e}")
-        return 0.0
+            log.warning(f"get_clickhouse_table_size_
