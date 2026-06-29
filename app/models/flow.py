@@ -47,6 +47,12 @@ class FlowRecord(BaseModel):
     # Direction (0=ingress, 1=egress, 2=unknown)
     flow_dir: int = Field(default=2, ge=0, le=2)
 
+    # Conversation tracking
+    # conversation_id: stable UInt64 hash of the normalized 5-tuple (same for both legs)
+    conversation_id: int = Field(default=0, ge=0)
+    # flow_role: 0=unknown, 1=initiator (ephemeral src→service dst), 2=responder (service src→ephemeral dst)
+    flow_role: int = Field(default=0, ge=0, le=2)
+
     @field_validator("src_ip", "dst_ip", "next_hop", mode="before")
     @classmethod
     def coerce_ip(cls, v):
@@ -77,6 +83,8 @@ class FlowRecord(BaseModel):
             self.src_as,
             self.dst_as,
             self.flow_dir,
+            self.conversation_id,
+            self.flow_role,
         )
 
 
@@ -132,6 +140,9 @@ class FlowSearchResult(BaseModel):
     src_as: int = 0
     dst_as: int = 0
     flow_dir: int = 2
+    # Conversation tracking
+    conversation_id: int = 0
+    flow_role: int = 0  # 0=unknown, 1=initiator, 2=responder
 
 
 class ProtocolStat(BaseModel):
@@ -153,13 +164,17 @@ class TopologyNode(BaseModel):
 
 
 class TopologyEdge(BaseModel):
-    source: str                    # src_ip
-    target: str                    # dst_ip
-    bytes: int = 0
+    source: str                    # lower IP of the pair (normalized)
+    target: str                    # higher IP of the pair (normalized)
+    bytes: int = 0                 # total bytes both directions
     packets: int = 0
     flows: int = 0
     protocol: int = 0
     dst_port: int = 0
+    # Bidirectional breakdown
+    bytes_fwd: int = 0             # bytes from source→target
+    bytes_rev: int = 0             # bytes from target→source
+    is_asymmetric: bool = False    # True when one side sent >10× the other
 
 
 class PortStat(BaseModel):

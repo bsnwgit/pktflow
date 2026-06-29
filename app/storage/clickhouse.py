@@ -26,7 +26,8 @@ _INSERT_COLS = """
     timestamp, sampler_ip, sampler_name, site,
     src_ip, dst_ip, src_port, dst_port, protocol,
     bytes, packets, duration_ms, tcp_flags, tos,
-    input_if, output_if, next_hop, src_as, dst_as, flow_dir
+    input_if, output_if, next_hop, src_as, dst_as, flow_dir,
+    conversation_id, flow_role
 """
 
 
@@ -256,7 +257,8 @@ class ClickHouseBackend(StorageBackend):
         query = f"""
             SELECT timestamp, sampler_ip, sampler_name, src_ip, dst_ip,
                    src_port, dst_port, protocol, bytes, packets, duration_ms,
-                   tcp_flags, tos, input_if, output_if, next_hop, src_as, dst_as, flow_dir
+                   tcp_flags, tos, input_if, output_if, next_hop, src_as, dst_as, flow_dir,
+                   conversation_id, flow_role
             FROM {settings.clickhouse_database}.flows
             {where}
             ORDER BY timestamp DESC
@@ -272,9 +274,124 @@ class ClickHouseBackend(StorageBackend):
                 tcp_flags=r[11], tos=r[12],
                 input_if=r[13], output_if=r[14],
                 next_hop=str(r[15]), src_as=r[16], dst_as=r[17], flow_dir=r[18],
+                conversation_id=int(r[19]), flow_role=int(r[20]),
             )
             for r in rows
         ]
+
+    async def get_conversation_flows(self, conversation_id: int, window_min: int = 60) -> list[FlowSearchResult]:
+        """Return all flows belonging to a conversation (both legs) within the last window_min minutes."""
+        query = f"""
+            SELECT timestamp, sampler_ip, sampler_name, src_ip, dst_ip,
+                   src_port, dst_port, protocol, bytes, packets, duration_ms,
+                   tcp_flags, tos, input_if, output_if, next_hop, src_as, dst_as, flow_dir,
+                   conversation_id, flow_role
+            FROM {settings.clickhouse_database}.flows
+            WHERE conversation_id = %(cid)s
+              AND conversation_id != 0
+              AND timestamp >= now() - INTERVAL %(window_min)s MINUTE
+            ORDER BY timestamp DESC
+            LIMIT 200
+        """
+        rows = await asyncio.to_thread(self._execute, query, {"cid": conversation_id, "window_min": window_min})
+        return [
+            FlowSearchResult(
+                timestamp=r[0], sampler_ip=str(r[1]), sampler_name=r[2],
+                src_ip=str(r[3]), dst_ip=str(r[4]),
+                src_port=r[5], dst_port=r[6], protocol=r[7],
+                bytes=r[8], packets=r[9], duration_ms=r[10],
+                tcp_flags=r[11], tos=r[12],
+                input_if=r[13], output_if=r[14],
+                next_hop=str(r[15]), src_as=r[16], dst_as=r[17], flow_dir=r[18],
+                conversation_id=int(r[19]), flow_role=int(r[20]),
+            )
+            for r in rows
+        ]
+
+    async def get_response_rate_for_ip(self, src_ip: str, window_min: int) -> tuple[int, int]:
+        """
+        For port scan enrichment: counts how many conversations initiated by src_ip
+        have at least one responder leg (meaning the port was actually open/reachable).
+        Returns (total_conversations, conversations_with_response).
+        """
+        query = f"""
+            SELECT
+                uniq(conversation_id) AS total,
+                uniqIf(conversation_id, conversation_id IN (
+                    SELECT conversation_id FROM {settings.clickhouse_database}.flows
+                    WHERE src_ip = %(src_ip)s
+                      AND timestamp >= now() - INTERVAL %(window_min)s MINUTE
+                      AND flow_role = 2
+                      AND conversation_id != 0
+                )) AS with_response
+            FROM {settings.clickhouse_database}.flows
+            WHERE src_ip = %(src_ip)s
+              AND timestamp >= now() - INTERVAL %(window_min)s MINUTE
+              AND flow_role = 1
+              AND conversation_id != 0
+        """
+        rows = await asyncio.to_thread(self._execute, query, {"src_ip": src_ip, "window_min": window_min})
+        if rows:
+            return int(rows[0][0]), int(rows[0][1])
+        return 0, 0
+
+    async def get_asymmetric_flows(
+        self,
+        window_min: int,
+        min_bytes: int = 1_000_000,
+        ratio_threshold: float = 10.0,
+        sampler_ip: Optional[str] = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """
+        Find conversations where one side sent significantly more than the other.
+        Returns list of dicts with conversation details sorted by asymmetry ratio.
+        Only conversations with total bytes >= min_bytes are returned to suppress noise.
+        """
+        where = "timestamp >= now() - INTERVAL %(window_min)s MINUTE AND conversation_id != 0"
+        params: dict = {"window_min": window_min, "min_bytes": min_bytes,
+                        "ratio": ratio_threshold, "limit": limit}
+        if sampler_ip:
+            where += " AND sampler_ip = %(sampler_ip)s"
+            params["sampler_ip"] = sampler_ip
+        query = f"""
+            SELECT
+                conversation_id,
+                any(src_ip)    AS ip_a,
+                any(dst_ip)    AS ip_b,
+                any(src_port)  AS port_a,
+                any(dst_port)  AS port_b,
+                any(protocol)  AS proto,
+                sumIf(bytes, flow_role = 1) AS bytes_fwd,
+                sumIf(bytes, flow_role = 2) AS bytes_rev,
+                sum(bytes)     AS total_bytes,
+                count()        AS flow_count
+            FROM {settings.clickhouse_database}.flows
+            WHERE {where}
+            GROUP BY conversation_id
+            HAVING total_bytes >= %(min_bytes)s
+               AND (bytes_fwd = 0 OR bytes_rev = 0
+                    OR greatest(bytes_fwd, bytes_rev) / greatest(least(bytes_fwd, bytes_rev), 1) >= %(ratio)s)
+            ORDER BY greatest(bytes_fwd, bytes_rev) / greatest(least(bytes_fwd, bytes_rev), 1) DESC
+            LIMIT %(limit)s
+        """
+        rows = await asyncio.to_thread(self._execute, query, params)
+        results = []
+        for r in rows:
+            bytes_fwd, bytes_rev = int(r[6]), int(r[7])
+            denom = max(min(bytes_fwd, bytes_rev), 1)
+            ratio = round(max(bytes_fwd, bytes_rev) / denom, 1)
+            results.append({
+                "conversation_id": int(r[0]),
+                "ip_a": str(r[1]), "ip_b": str(r[2]),
+                "port_a": int(r[3]), "port_b": int(r[4]),
+                "protocol": int(r[5]),
+                "bytes_fwd": bytes_fwd, "bytes_rev": bytes_rev,
+                "total_bytes": int(r[8]),
+                "flow_count": int(r[9]),
+                "ratio": ratio,
+            })
+        return results
 
     async def get_flows_per_sec(self) -> float:
         query = f"""
@@ -310,14 +427,22 @@ class ClickHouseBackend(StorageBackend):
             params["sampler_ip"] = sampler_ip
         where = " AND ".join(where_parts)
 
-        # Edges: top IP pairs by bytes (include site so non-sampler nodes get enriched)
+        # Edges: group by normalized IP pair (lower IP always = source) for bidirectional view
         edge_query = f"""
-            SELECT src_ip, dst_ip, sum(bytes) AS bytes, sum(packets) AS packets,
-                   count() AS flows, any(protocol) AS protocol, any(dst_port) AS dst_port,
-                   any(site) AS site
+            SELECT
+                if(src_ip < dst_ip, src_ip, dst_ip)  AS ip_a,
+                if(src_ip < dst_ip, dst_ip, src_ip)  AS ip_b,
+                sum(bytes)                            AS bytes,
+                sum(packets)                          AS packets,
+                count()                               AS flows,
+                any(protocol)                         AS protocol,
+                any(dst_port)                         AS dst_port,
+                any(site)                             AS site,
+                sumIf(bytes, src_ip < dst_ip)         AS bytes_fwd,
+                sumIf(bytes, src_ip >= dst_ip)        AS bytes_rev
             FROM {settings.clickhouse_database}.flows
             WHERE {where}
-            GROUP BY src_ip, dst_ip
+            GROUP BY ip_a, ip_b
             HAVING bytes >= %(min_bytes)s
             ORDER BY bytes DESC
             LIMIT %(limit)s
@@ -342,15 +467,21 @@ class ClickHouseBackend(StorageBackend):
         for r in edge_rows:
             src, dst = str(r[0]), str(r[1])
             edge_site = str(r[7]) if len(r) > 7 and r[7] else ""
+            bytes_fwd, bytes_rev = int(r[8]), int(r[9])
+            denom = max(min(bytes_fwd, bytes_rev), 1)
+            is_asym = (bytes_fwd == 0 or bytes_rev == 0 or
+                       max(bytes_fwd, bytes_rev) / denom >= 10.0)
             edges.append(TopologyEdge(
                 source=src, target=dst,
-                bytes=r[2], packets=r[3], flows=r[4],
-                protocol=r[5], dst_port=r[6],
+                bytes=int(r[2]), packets=int(r[3]), flows=int(r[4]),
+                protocol=int(r[5]), dst_port=int(r[6]),
+                bytes_fwd=bytes_fwd, bytes_rev=bytes_rev,
+                is_asymmetric=is_asym,
             ))
-            node_bytes[src] = node_bytes.get(src, 0) + r[2]
-            node_bytes[dst] = node_bytes.get(dst, 0) + r[2]
-            node_flows[src] = node_flows.get(src, 0) + r[4]
-            node_flows[dst] = node_flows.get(dst, 0) + r[4]
+            node_bytes[src] = node_bytes.get(src, 0) + int(r[2])
+            node_bytes[dst] = node_bytes.get(dst, 0) + int(r[2])
+            node_flows[src] = node_flows.get(src, 0) + int(r[4])
+            node_flows[dst] = node_flows.get(dst, 0) + int(r[4])
             if edge_site:
                 node_site.setdefault(src, edge_site)
                 node_site.setdefault(dst, edge_site)
@@ -766,7 +897,8 @@ class ClickHouseBackend(StorageBackend):
             params["sampler_ip"] = sampler_ip
         query = (
             f"SELECT src_ip, uniq(dst_port) AS u FROM {settings.clickhouse_database}.flows "
-            f"WHERE {where} GROUP BY src_ip ORDER BY u DESC LIMIT 1"
+            f"WHERE {where} AND src_port > 1024 "
+            f"GROUP BY src_ip ORDER BY u DESC LIMIT 1"
         )
         rows = await asyncio.to_thread(self._execute, query, params)
         if rows:
