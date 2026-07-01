@@ -335,3 +335,13 @@ class StorageBackend(ABC):
     ) -> list[dict]:
         """Return top {dst_port, protocol_name, flow_count} dicts for dst ports scanned by src_ip.
         Sorted by dst_port ascending (scan enumeration order). Returns [] when no data."""
+
+    async def get_top_ip_pairs(
+        self,
+        start: datetime,
+        end: datetime,
+        limit: int = 80,
+        sampler_ip: Optional[str] = None,
+    ) -> list[dict]:
+        """Top src→dst IP pairs by bytes for geo mapping. Returns [] by default."""
+        return []
