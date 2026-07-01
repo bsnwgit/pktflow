@@ -26,6 +26,8 @@ config.yaml          # contains secret_key and passwords — use config.example.
 
 # Frontend build output
 frontend/dist/
+frontend/dist_backup/
+frontend/dist_old/
 frontend/node_modules/
 
 # IDE

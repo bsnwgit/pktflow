@@ -2,49 +2,63 @@
 FastAPI dependency injection helpers.
 """
 from __future__ import annotations
-
 from typing import Annotated, Optional
-
 import aiosqlite
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-
 from app.database import get_db
 from app.auth.local import decode_access_token
-
-# ── Database ──────────────────────────────────────────────────────────────────
+from app.config import get_settings
 
 DbDep = Annotated[aiosqlite.Connection, Depends(get_db)]
 
-# ── Auth ─────────────────────────────────────────────────────────────────────
-
 _bearer = HTTPBearer(auto_error=False)
+
+_SUITE_ROLE_MAP = {
+    "admin":   "admin",
+    "analyst": "analyst",
+    "viewer":  "viewer",
+}
 
 
 async def get_current_user(
+    request: Request,
     db: DbDep,
     credentials: Annotated[Optional[HTTPAuthorizationCredentials], Security(_bearer)] = None,
 ) -> dict:
     """
-    Validates JWT from Authorization: Bearer header.
-    Returns the user row dict. Raises 401 if missing/invalid.
+    Auth path 1: X-Suite-Token from pktHub proxy — trust X-Suite-User/Role headers.
+    Auth path 2: Authorization: Bearer JWT — normal pktFlow local auth.
     """
+    settings = get_settings()
+    suite_token = request.headers.get("x-suite-token", "")
+    if suite_token and settings.suite_token and suite_token == settings.suite_token:
+        hub_user = request.headers.get("x-suite-user", "hub_user")
+        hub_role = request.headers.get("x-suite-role", "viewer")
+        local_role = _SUITE_ROLE_MAP.get(hub_role, "viewer")
+        return {
+            "id": 0,
+            "username": hub_user,
+            "email": f"{hub_user}@pkthub",
+            "role": local_role,
+            "is_active": True,
+            "created_at": "2020-01-01 00:00:00",
+            "last_login": None,
+            "_via_suite": True,
+        }
+
     if not credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-
     payload = decode_access_token(credentials.credentials)
     if not payload:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
-
     async with db.execute(
         "SELECT id, username, email, role, is_active, created_at, last_login FROM users WHERE id = ?",
         (payload["sub"],),
     ) as cur:
         user = await cur.fetchone()
-
     if not user or not user["is_active"]:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
-
     return dict(user)
 
 
@@ -60,7 +74,6 @@ async def require_analyst(user: Annotated[dict, Depends(get_current_user)]) -> d
     return user
 
 
-# Type aliases for route signatures
-CurrentUser = Annotated[dict, Depends(get_current_user)]
-AdminUser = Annotated[dict, Depends(require_admin)]
-AnalystUser = Annotated[dict, Depends(require_analyst)]
+CurrentUser  = Annotated[dict, Depends(get_current_user)]
+AdminUser    = Annotated[dict, Depends(require_admin)]
+AnalystUser  = Annotated[dict, Depends(require_analyst)]
