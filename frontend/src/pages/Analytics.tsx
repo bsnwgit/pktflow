@@ -295,7 +295,7 @@ export default function Analytics() {
   const [topology,   setTopology]   = useState<TopologyResponse>({ nodes: [], edges: [] })
   const [loading,    setLoading]    = useState(true)
   const [metric,     setMetric]     = useState<'bytes'|'packets'|'flow_count'>('bytes')
-  const [histDays,   setHistDays]   = useState(30)
+  const [histDays,   setHistDays]   = useState(7)
   const [dailyData,  setDailyData]  = useState<TimeSeriesPoint[]>([])
   const [wsStats,    setWsStats]    = useState<IngestStats | null>(null)
 
@@ -409,17 +409,34 @@ export default function Analytics() {
               ))}
             </div>
           </div>
-          {dailyData.length < 2 ? (
+          {dailyData.length < 1 ? (
             <div className="flex items-center justify-center h-[180px] text-xs text-gray-500">
-              Accumulating data… ({dailyData.length} day{dailyData.length === 1 ? '' : 's'} so far)
+              Accumulating data…
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={180}>
-              <AreaChart data={dailyData.map(p => ({
-                t: new Date(p.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' }),
-                bytes: p.bytes,
-                flows: p.flow_count,
-              }))} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
+              <AreaChart data={(() => {
+                // Zero-fill: build one entry per day in the selected range so the
+                // X-axis spans the full window even when early days have no data.
+                const byDay = new Map(dailyData.map(p => {
+                  const d = new Date(p.timestamp)
+                  const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`
+                  return [key, p]
+                }))
+                const filled = []
+                for (let i = histDays - 1; i >= 0; i--) {
+                  const d = new Date()
+                  d.setUTCDate(d.getUTCDate() - i)
+                  const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`
+                  const p = byDay.get(key)
+                  filled.push({
+                    t: d.toLocaleDateString([], { month: 'short', day: 'numeric' }),
+                    bytes: p ? p.bytes : 0,
+                    flows: p ? p.flow_count : 0,
+                  })
+                }
+                return filled
+              })()} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
                 <defs>
                   <linearGradient id="histGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%"  stopColor="#10b981" stopOpacity={0.3} />
