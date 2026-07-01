@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import io
+import ipaddress
 import json
 import socket
 import struct
@@ -272,6 +273,206 @@ async def get_topology(
         limit=limit,
     )
     return TopologyResponse(nodes=nodes, edges=edges)
+
+
+# ── Geo map ───────────────────────────────────────────────────────────────────
+
+def _is_private_ip(ip: str) -> bool:
+    """Return True for RFC-1918, loopback, link-local, multicast, and unroutable addresses."""
+    try:
+        addr = ipaddress.ip_address(ip)
+        return (
+            addr.is_private
+            or addr.is_loopback
+            or addr.is_link_local
+            or addr.is_multicast
+            or addr.is_reserved
+            or addr.is_unspecified
+        )
+    except ValueError:
+        return True
+
+
+@router.get("/geo")
+async def get_geo_data(
+    _: CurrentUser,
+    window: str = Query("1h"),
+    sampler_ip: Optional[str] = Query(None),
+):
+    """
+    Geolocate the top IP pairs from flow data and return locations + typed arcs
+    for the geo traffic map.
+
+    VPN-mapped private IPs (from vpn_mappings table) are substituted with their
+    firewall's public IP for geo lookup, so RFC-1918 traffic appears at the
+    correct physical site on the map.
+
+    Arc types:
+      gp  — GlobalProtect VPN traffic (green dash-dash-dot)
+      s2s — Site-to-site VPN traffic  (blue dashed)
+      wan — Regular public WAN traffic (solid red)
+
+    Uses ip-api.com batch (free, no key required).
+    """
+    import aiosqlite
+    from app.database import DB_PATH
+
+    s, e = _parse_window(window)
+    pairs = await get_storage().get_top_ip_pairs(start=s, end=e, limit=80, sampler_ip=sampler_ip)
+
+    # ── Load VPN mappings ──────────────────────────────────────────────────────
+    vpn_mappings_list: list[dict] = []
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM vpn_mappings") as cur:
+                vpn_mappings_list = [dict(r) for r in await cur.fetchall()]
+    except Exception:
+        pass  # table may not exist on older deploys — degrade gracefully
+
+    def _find_vpn_mapping(ip: str) -> Optional[dict]:
+        """Return the first vpn_mappings row whose cidr_or_ip covers ip."""
+        try:
+            addr = ipaddress.ip_address(ip)
+            for m in vpn_mappings_list:
+                try:
+                    network = ipaddress.ip_network(m["cidr_or_ip"], strict=False)
+                    if addr in network:
+                        return m
+                except ValueError:
+                    # cidr_or_ip is a single host IP, not a CIDR
+                    if ip == m["cidr_or_ip"]:
+                        return m
+        except ValueError:
+            pass
+        return None
+
+    # ── Build effective IP mapping ─────────────────────────────────────────────
+    # ip_to_effective : original_ip -> ip to actually send to ip-api.com
+    # ip_to_vpn_meta  : original_ip -> vpn_mappings row (if matched)
+    ip_to_effective: dict[str, str] = {}
+    ip_to_vpn_meta:  dict[str, dict] = {}
+
+    for p in pairs:
+        for field in ("src_ip", "dst_ip"):
+            ip = p[field]
+            if ip in ip_to_effective:
+                continue
+            if _is_private_ip(ip):
+                m = _find_vpn_mapping(ip)
+                if m:
+                    ip_to_effective[ip] = m["public_ip"]
+                    ip_to_vpn_meta[ip]  = m
+                # else: private, no mapping → skip
+            else:
+                ip_to_effective[ip] = ip  # public → query directly
+
+    if not ip_to_effective:
+        return {"locations": [], "arcs": []}
+
+    # ── Geolocate unique effective IPs via ip-api.com ──────────────────────────
+    unique_effective = list(set(ip_to_effective.values()))[:100]
+    geo_map: dict[str, dict] = {}  # effective_ip -> {lat, lng, city, country, ...}
+    try:
+        body = json.dumps([
+            {"query": ip, "fields": "status,query,lat,lon,city,country,countryCode"}
+            for ip in unique_effective
+        ]).encode()
+        req = urllib.request.Request(
+            "http://ip-api.com/batch",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            results = json.loads(resp.read())
+        for r in results:
+            if r.get("status") == "success":
+                geo_map[r["query"]] = {
+                    "lat":          r["lat"],
+                    "lng":          r["lon"],
+                    "city":         r.get("city", ""),
+                    "country":      r.get("country", ""),
+                    "country_code": r.get("countryCode", ""),
+                }
+    except Exception:
+        pass
+
+    if not geo_map:
+        return {"locations": [], "arcs": []}
+
+    # ── Aggregate bytes/flows per original IP ──────────────────────────────────
+    ip_bytes: dict[str, int] = {}
+    ip_flows: dict[str, int] = {}
+    for p in pairs:
+        for field in ("src_ip", "dst_ip"):
+            ip = p[field]
+            eff = ip_to_effective.get(ip)
+            if eff and eff in geo_map:
+                ip_bytes[ip] = ip_bytes.get(ip, 0) + p["bytes"]
+                ip_flows[ip] = ip_flows.get(ip, 0) + p["flows"]
+
+    # ── Build locations ────────────────────────────────────────────────────────
+    locations: list[dict] = []
+    for ip, eff in ip_to_effective.items():
+        g = geo_map.get(eff)
+        if not g:
+            continue
+        meta = ip_to_vpn_meta.get(ip, {})
+        locations.append({
+            "ip":           ip,
+            "lat":          g["lat"],
+            "lng":          g["lng"],
+            "city":         g["city"],
+            "country":      g["country"],
+            "country_code": g["country_code"],
+            "bytes":        ip_bytes.get(ip, 0),
+            "flows":        ip_flows.get(ip, 0),
+            "site_name":    meta.get("site_name", ""),
+            "group":        meta.get("group_name", ""),
+        })
+
+    # ── Build arcs ─────────────────────────────────────────────────────────────
+    arcs: list[dict] = []
+    seen: set[tuple] = set()
+    for p in pairs:
+        src_eff = ip_to_effective.get(p["src_ip"])
+        dst_eff = ip_to_effective.get(p["dst_ip"])
+        if not src_eff or not dst_eff:
+            continue
+        sg = geo_map.get(src_eff)
+        dg = geo_map.get(dst_eff)
+        if not sg or not dg:
+            continue
+        key = (p["src_ip"], p["dst_ip"])
+        if key in seen:
+            continue
+        seen.add(key)
+
+        # Determine arc type: GP > S2S > WAN
+        src_meta = ip_to_vpn_meta.get(p["src_ip"])
+        dst_meta = ip_to_vpn_meta.get(p["dst_ip"])
+        types = {m["entry_type"] for m in (src_meta, dst_meta) if m}
+        if "gp" in types:
+            arc_type = "gp"
+        elif "s2s" in types:
+            arc_type = "s2s"
+        else:
+            arc_type = "wan"
+
+        arcs.append({
+            "src_ip":  p["src_ip"],
+            "src_lat": sg["lat"],
+            "src_lng": sg["lng"],
+            "dst_ip":  p["dst_ip"],
+            "dst_lat": dg["lat"],
+            "dst_lng": dg["lng"],
+            "bytes":    p["bytes"],
+            "flows":    p["flows"],
+            "arc_type": arc_type,
+        })
+
+    return {"locations": locations, "arcs": arcs[:50]}
 
 
 # ── Lucidchart diagram export ─────────────────────────────────────────────────
