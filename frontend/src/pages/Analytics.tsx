@@ -8,6 +8,7 @@ import {
 } from 'recharts'
 import * as d3 from 'd3'
 import { api, TimeSeriesPoint, TopologyResponse } from '../api/client'
+import { GeoMapCard } from './GeoMap'
 import { useWebSocket, type WsMessage, type IngestStats } from '../hooks/useWebSocket'
 
 // ── Colour palette ─────────────────────────────────────────────────────────────
@@ -460,9 +461,7 @@ export default function Analytics() {
 
       {/* Network map + Traffic flow — expands to fill remaining height */}
       <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
-        <Card title="Network Map — scroll to zoom · drag to pan · blue = sampler" className="h-full">
-          <NetworkMap topology={topology} />
-        </Card>
+        <GeoMapCard timeWindow={window} />
         <Card title="Traffic Flow — Source → Destination" className="h-full">
           <SankeyChart topology={topology} />
         </Card>
