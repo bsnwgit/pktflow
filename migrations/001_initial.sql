@@ -52,9 +52,14 @@ CREATE TABLE IF NOT EXISTS devices (
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Add your samplers via the Settings → Devices UI, or seed them here:
--- INSERT OR IGNORE INTO devices (ip, name, site) VALUES
---     ('192.0.2.1', 'core-router', 'site-a');
+-- Pre-populate with known samplers from audit
+INSERT OR IGNORE INTO devices (ip, name, site) VALUES
+    ('192.168.44.7',  'OneNeck-fw1',  'oneneck'),
+    ('192.168.44.8',  'OneNeck-fw2',  'oneneck'),
+    ('172.27.28.88',  'QTS-sw1',      'qts'),
+    ('172.27.28.89',  'QTS-fw1',      'qts'),
+    ('10.19.56.186',  'AWS-az2a',     'aws'),
+    ('10.19.81.236',  'AWS-az2b',     'aws');
 
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -65,7 +70,8 @@ CREATE TABLE IF NOT EXISTS alert_rules (
     name            TEXT NOT NULL,
     description     TEXT NOT NULL DEFAULT '',
     enabled         INTEGER NOT NULL DEFAULT 1,
-    rule_type       TEXT NOT NULL,
+    rule_type       TEXT NOT NULL
+                        CHECK (rule_type IN ('threshold','rate_spike','port_protocol','new_host','data_gap')),
     conditions      TEXT NOT NULL DEFAULT '{}',  -- JSON: type-specific params
     time_window_min INTEGER NOT NULL DEFAULT 5,
     severity        TEXT NOT NULL DEFAULT 'warning'
