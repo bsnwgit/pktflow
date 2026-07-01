@@ -28,6 +28,9 @@ export function getToken(): string | null {
   return _accessToken
 }
 
+/** Role value — for passing to pop-out windows via sessionStorage. */
+export function getTokenRole(): string | null { return _tokenRole }
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -100,6 +103,8 @@ export const api = {
   getLastSeen: () => request<Record<string, string>>('/flows/last-seen'),
   getTopology: (params: TopologyParams) =>
     request<TopologyResponse>(`/flows/topology?${new URLSearchParams(params as any)}`),
+  getGeoData: (window: string, sampler_ip?: string) =>
+    request<GeoDataResponse>(`/flows/geo?window=${window}${sampler_ip ? `&sampler_ip=${sampler_ip}` : ''}`),
   getProtocolStats: (params: { window?: string; sampler_ip?: string }) =>
     request<ProtocolStat[]>(`/flows/protocols?${new URLSearchParams(params as any)}`),
   getTopPorts: (params: TopPortsParams) =>
@@ -246,6 +251,15 @@ export const api = {
     }
     return res.json()
   },
+
+  getVpnMappings: () =>
+    request<VpnMapping[]>('/vpn-mappings/'),
+  createVpnMapping: (body: VpnMappingIn) =>
+    request<VpnMapping>('/vpn-mappings/', { method: 'POST', body: JSON.stringify(body) }),
+  updateVpnMapping: (id: number, body: VpnMappingIn) =>
+    request<VpnMapping>(`/vpn-mappings/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteVpnMapping: (id: number) =>
+    request(`/vpn-mappings/${id}`, { method: 'DELETE' }),
 
   getLogs: (params: LogQueryParams) =>
     request<LogResponse>(`/logs?${new URLSearchParams(params as any)}`),
@@ -428,6 +442,41 @@ export interface TopologyEdge {
 export interface TopologyResponse {
   nodes: TopologyNode[]
   edges: TopologyEdge[]
+}
+
+export interface GeoLocation {
+  ip: string; lat: number; lng: number
+  city: string; country: string; country_code: string
+  bytes: number; flows: number
+  site_name?: string   // set when the IP is VPN-mapped (e.g. "QTS", "Vyne AWS")
+  group?: string       // "medical" | "dental" | "" when VPN-mapped
+}
+export interface GeoArc {
+  src_ip: string; src_lat: number; src_lng: number
+  dst_ip: string; dst_lat: number; dst_lng: number
+  bytes: number; flows: number
+  arc_type?: 'gp' | 's2s' | 'wan'  // set by backend; defaults to 'wan' if absent
+}
+export interface GeoDataResponse {
+  locations: GeoLocation[]
+  arcs: GeoArc[]
+}
+
+export interface VpnMapping {
+  id:         number
+  site_name:  string
+  group_name: string
+  public_ip:  string
+  cidr_or_ip: string
+  entry_type: string   // 'gp' | 's2s'
+  created_at: string
+}
+export interface VpnMappingIn {
+  site_name:  string
+  group_name: string
+  public_ip:  string
+  cidr_or_ip: string
+  entry_type: string
 }
 
 export type TopologyParams = { window?: string; sampler_ip?: string; min_bytes?: string; limit?: string }
