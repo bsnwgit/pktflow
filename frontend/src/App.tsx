@@ -5,6 +5,8 @@ import Login from './pages/Login'
 
 import { lazy, Suspense } from 'react'
 const Analytics    = lazy(() => import('./pages/Analytics'))
+const GeoPage      = lazy(() => import('./pages/GeoMap').then(m => ({ default: m.GeoPage })))
+const GeoMapPage   = lazy(() => import('./pages/GeoMap'))
 const DeviceView   = lazy(() => import('./pages/DeviceView'))
 const FlowExplorer = lazy(() => import('./pages/FlowExplorer'))
 const Topology     = lazy(() => import('./pages/Topology'))
@@ -46,6 +48,11 @@ export default function App() {
               <Suspense fallback={<PageFallback />}><FlowExplorer /></Suspense>
             </ProtectedRoute>
           } />
+          <Route path="/geo" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageFallback />}><GeoPage /></Suspense>
+            </ProtectedRoute>
+          } />
           <Route path="/topology" element={
             <ProtectedRoute>
               <Suspense fallback={<PageFallback />}><Topology /></Suspense>
@@ -71,6 +78,10 @@ export default function App() {
             <ProtectedRoute>
               <Suspense fallback={<PageFallback />}><Logs /></Suspense>
             </ProtectedRoute>
+          } />
+          {/* /geomap — fullscreen pop-out, no sidebar; manages its own auth via sessionStorage token */}
+          <Route path="/geomap" element={
+            <Suspense fallback={<PageFallback />}><GeoMapPage /></Suspense>
           } />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
