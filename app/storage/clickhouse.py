@@ -1169,6 +1169,41 @@ class ClickHouseBackend(StorageBackend):
             for r in rows
         ]
 
+    async def get_top_ip_pairs(
+        self,
+        start: datetime,
+        end: datetime,
+        limit: int = 80,
+        sampler_ip: Optional[str] = None,
+    ) -> list[dict]:
+        """Top src→dst IP pairs by bytes, for geo mapping."""
+        conditions = [
+            "timestamp >= %(start)s",
+            "timestamp < %(end)s",
+        ]
+        params: dict = {"start": start, "end": end, "limit": limit}
+        if sampler_ip:
+            conditions.append("sampler_ip = %(sampler_ip)s")
+            params["sampler_ip"] = sampler_ip
+        where = " AND ".join(conditions)
+        query = f"""
+            SELECT
+                IPv4NumToString(src_ip) AS src,
+                IPv4NumToString(dst_ip) AS dst,
+                sum(bytes) AS bytes,
+                count() AS flows
+            FROM {settings.clickhouse_database}.flows
+            WHERE {where}
+            GROUP BY src, dst
+            ORDER BY bytes DESC
+            LIMIT %(limit)s
+        """
+        rows = await asyncio.to_thread(self._execute, query, params)
+        return [
+            {"src_ip": r[0], "dst_ip": r[1], "bytes": int(r[2]), "flows": int(r[3])}
+            for r in rows
+        ]
+
     async def get_clickhouse_table_size_gb(self, table: str = "flows") -> float:
         query = (
             "SELECT total_bytes FROM system.tables "
