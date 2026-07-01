@@ -164,5 +164,7 @@ async def delete_user(user_id: int, caller: CurrentUser, db: aiosqlite.Connectio
         raise HTTPException(status_code=403, detail="Admin required")
     if caller["id"] == user_id:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    await db.execute("UPDATE alert_rules SET created_by = NULL WHERE created_by = ?", (user_id,))
+    await db.execute("UPDATE alert_events SET acked_by = NULL WHERE acked_by = ?", (user_id,))
     await db.execute("DELETE FROM users WHERE id = ?", (user_id,))
     await db.commit()
