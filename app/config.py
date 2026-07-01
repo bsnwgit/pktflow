@@ -3,7 +3,7 @@ pktFlow configuration.
 
 Priority order (highest → lowest):
   1. Environment variables  (PKTFLOW_*)
-  2. config.yaml in CWD or /opt/pktflow/
+  2. config.yaml in CWD or /mnt/software/pktflow/
   3. Defaults defined here
 
 Runtime settings (storage backend, retention days, ingest token, etc.) are
@@ -27,7 +27,7 @@ def _load_yaml() -> dict:
     """Try known config file locations and return parsed YAML, or {}."""
     candidates = [
         Path("config.yaml"),
-        Path("/opt/pktflow/config.yaml"),
+        Path("/mnt/software/pktflow/config.yaml"),
         Path.home() / ".pktflow" / "config.yaml",
     ]
     env_path = os.environ.get("PKTFLOW_CONFIG")
@@ -61,7 +61,7 @@ class Settings(BaseSettings):
 
     # ── App database (SQLite sidecar) ──────────────────────────────────────────
     db_path: str = Field(
-        default=_yaml_cfg.get("db_path", "/opt/pktflow/pktflow.db")
+        default=_yaml_cfg.get("db_path", "/mnt/software/pktflow/pktflow.db")
     )
 
     # ── ClickHouse (startup connection — overridable at runtime via settings) ──
@@ -73,7 +73,7 @@ class Settings(BaseSettings):
 
     # ── DuckDB (alternate backend) ─────────────────────────────────────────────
     duckdb_path: str = Field(
-        default=_yaml_cfg.get("duckdb_path", "/opt/pktflow/flows.duckdb")
+        default=_yaml_cfg.get("duckdb_path", "/mnt/software/pktflow/flows.duckdb")
     )
 
     # ── JWT ───────────────────────────────────────────────────────────────────
@@ -85,15 +85,18 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
 
     # ── CORS ──────────────────────────────────────────────────────────────────
-    # In production, set this to your actual origin (e.g. http://<APP_SERVER_IP>:8080)
+    # In production, set this to your actual origin (e.g. http://10.20.30.5:8080)
     cors_origins: list[str] = Field(
         default=_yaml_cfg.get("cors_origins", ["*"])
     )
 
+    # ── pktSuite integration ─────────────────────────────────────────────────
+    suite_token: str = Field(default=_yaml_cfg.get("suite_token", ""))
+
     # ── Logging ───────────────────────────────────────────────────────────────
     log_level: str = Field(default=_yaml_cfg.get("log_level", "info"))
     log_file: str = Field(
-        default=_yaml_cfg.get("log_file", "/var/log/pktflow/pktflow.log")
+        default=_yaml_cfg.get("log_file", "/mnt/software/logs/pktflow.log")
     )
 
     # ── Ingest buffer ─────────────────────────────────────────────────────────
@@ -105,3 +108,26 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+# suite_token_from_sqlite_patch — reads token from SQLite so /api/suite/register
+# takes effect immediately without service restart.
+_patched_get_settings = get_settings  # noqa: save original if it exists
+
+def get_settings() -> Settings:  # type: ignore[misc]
+    s = Settings()
+    try:
+        import sqlite3 as _sq, json as _j
+        from pathlib import Path as _P
+        _db_path = str(_P(__file__).parent.parent / 'pktflow.db')
+        _conn = _sq.connect(_db_path)
+        _row = _conn.execute("SELECT value FROM settings WHERE key='suite_token'").fetchone()
+        _conn.close()
+        if _row and _row[0]:
+            _val = _row[0]
+            _tok = _j.loads(_val) if _val.startswith('"') else _val
+            if _tok:
+                s = s.model_copy(update={'suite_token': _tok})
+    except Exception:
+        pass
+    return s
