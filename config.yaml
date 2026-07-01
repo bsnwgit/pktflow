@@ -1,0 +1,27 @@
+# pktFlow configuration — flat keys matching config.py
+# DO NOT COMMIT
+
+host: "0.0.0.0"
+port: 8766
+debug: false
+log_level: "info"
+log_file: "/var/log/pktflow.log"
+
+secret_key: "lHUPOAaeSZQjUcNb7PbkfyDYs5v3lMFVrqxX2Gm6WokwRnK08"
+access_token_expire_minutes: 60
+refresh_token_expire_days: 30
+
+db_path: "/mnt/software/pktflow/pktflow.db"
+
+
+clickhouse_host: "localhost"
+clickhouse_port: 9000
+clickhouse_database: "pktflow"
+clickhouse_user: "default"
+clickhouse_password: ""
+
+cors_origins: ["*"]
+duckdb_path: /mnt/software/pktflow/data/flows.duckdb
+
+# pktSuite integration
+suite_token: "tv7CSY6OX3O6FLLsvi93JWOQ27AsKcyDPGZ5BQ9Cgsc"
