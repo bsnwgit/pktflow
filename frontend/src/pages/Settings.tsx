@@ -1023,8 +1023,6 @@ export default function Settings() {
                   />
                   <a
                     href={`${str('base_url')}/api/auth/saml/metadata`}
-                    target="_blank"
-                    rel="noreferrer"
                     className="text-xs text-blue-400 hover:text-blue-300 whitespace-nowrap"
                   >
                     View SP metadata ↗
@@ -2576,11 +2574,11 @@ function GeoMapTab() {
     <div className="space-y-10">
       <SiteGroupsSection isAdmin={isAdmin} />
       <div className="border-t border-gray-800" />
-      <LineStylesSection isAdmin={isAdmin} />
+      <VpnMappingsTab />
       <div className="border-t border-gray-800" />
       <TrafficTypesSection isAdmin={isAdmin} />
       <div className="border-t border-gray-800" />
-      <VpnMappingsTab />
+      <LineStylesSection isAdmin={isAdmin} />
     </div>
   )
 }
