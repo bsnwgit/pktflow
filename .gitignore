@@ -68,4 +68,13 @@ scripts/deploy_frontend.py
 scripts/deploy_ssl.py
 scripts/deploy_*.py
 scripts/diag_*.py
-scripts/fix
+scripts/fix_*.py
+scripts/check_build.py
+
+# SSL certificates (never commit)
+ssl/
+*.pem
+*.pfx
+*.p12
+*.crt
+*.key
