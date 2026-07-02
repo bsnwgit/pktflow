@@ -178,7 +178,7 @@
   <text x="561" y="312" text-anchor="middle" fill="#a78bfa" font-size="8">Query API · Alert Engine · Auth</text>
 
   <rect x="328" y="326" width="148" height="24" rx="5" fill="#1e1040" stroke="#7c3aed" stroke-width="0.8"/>
-  <text x="402" y="342" text-anchor="middle" fill="#a78bfa" font-size="8">React Dashboard · Vite build</text>
+  <text x="402" y="342" text-anchor="middle" fill="#a78bfa" font-size="8">Dashboard · Geo Map · Topology</text>
 
   <rect x="482" y="326" width="158" height="24" rx="5" fill="#1e1040" stroke="#7c3aed" stroke-width="0.8"/>
   <text x="561" y="342" text-anchor="middle" fill="#a78bfa" font-size="8">JWT · bcrypt · RBAC</text>
@@ -203,7 +203,7 @@
   <!-- SQLite box -->
   <rect x="318" y="506" width="332" height="44" rx="8" fill="#0a1218" stroke="#64748b" stroke-width="1"/>
   <text x="484" y="522" text-anchor="middle" fill="#94a3b8" font-size="9" font-weight="600">SQLite · pktflow.db</text>
-  <text x="484" y="537" text-anchor="middle" fill="#64748b" font-size="7.5">users · settings · alert_rules · alert_events · notification_log</text>
+  <text x="484" y="537" text-anchor="middle" fill="#64748b" font-size="7.5">users · settings · alert_rules · alert_events · vpn_mappings · notification_log</text>
 
   <!-- Disk label -->
   <rect x="318" y="560" width="332" height="32" rx="8" fill="#0a1218" stroke="#374151" stroke-width="0.8"/>
