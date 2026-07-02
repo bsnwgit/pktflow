@@ -1,0 +1,54 @@
+services:
+  pktflow:
+    image: ghcr.io/bsnwgit/pktflow:latest
+    build: .
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - pktflow-data:/data
+    environment:
+      PKTFLOW_PORT: "80"
+      PKTFLOW_DB_PATH: /data/pktflow.db
+      PKTFLOW_DUCKDB_PATH: /data/flows.duckdb
+      PKTFLOW_LOG_FILE: /data/logs/pktflow.log
+      PKTFLOW_CLICKHOUSE_HOST: clickhouse
+      PKTFLOW_CLICKHOUSE_PORT: "9000"
+      PKTFLOW_CLICKHOUSE_DATABASE: pktflow
+      PKTFLOW_CLICKHOUSE_USER: default
+      PKTFLOW_CLICKHOUSE_PASSWORD: ""
+      PKTFLOW_SECRET_KEY: "${PKTFLOW_SECRET_KEY:-CHANGE_ME_generate_with_openssl_rand_hex_32}"
+      PKTFLOW_ADMIN_USER: "${PKTFLOW_ADMIN_USER:-admin}"
+      PKTFLOW_ADMIN_PASSWORD: "${PKTFLOW_ADMIN_PASSWORD:-changeme}"
+      PKTFLOW_CORS_ORIGINS: '["*"]'
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+    environment:
+      CLICKHOUSE_DB: pktflow
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  pktflow-data:
+    driver: local
+  clickhouse-data:
+    driver: local

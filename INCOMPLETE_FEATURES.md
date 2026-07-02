@@ -86,7 +86,7 @@ Deployed 2026-07-01.
 - **ip-api.com batch geo lookup** — 100 IPs/request, no API key required
 - **VPN site mapping** (`migrations/006_vpn_mappings.sql`, `app/api/vpn_mappings.py`) — RFC-1918 private CIDRs/IPs mapped to public firewall IPs so VPN traffic plots at the correct geographic location
 - **Arc type classification** — GP > S2S > WAN priority; arc colors: GlobalProtect (green dash-dot), Site-to-Site (blue dashed), WAN (solid red)
-- **Circle markers by group** — medical (purple), dental (green), external (red)
+- **Circle markers by group** — colored by configured site group (color and label defined in Settings → Geo Map → Site Groups)
 - **VPN Sites panel** — collapsible, admin CRUD for adding/deleting mappings
 - **Map legend** — Leaflet control overlay (bottom-left)
 - **API** — `/api/flows/geo` (locations + arcs with `arc_type`), `/api/vpn-mappings` CRUD

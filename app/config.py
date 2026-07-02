@@ -27,6 +27,8 @@ def _load_yaml() -> dict:
     """Try known config file locations and return parsed YAML, or {}."""
     candidates = [
         Path("config.yaml"),
+        Path("/data/config.yaml"),
+        Path("/opt/pktflow/config.yaml"),
         Path("/mnt/software/pktflow/config.yaml"),
         Path.home() / ".pktflow" / "config.yaml",
     ]
@@ -55,13 +57,13 @@ class Settings(BaseSettings):
 
     # ── Server ────────────────────────────────────────────────────────────────
     host: str = Field(default=_yaml_cfg.get("host", "0.0.0.0"))
-    port: int = Field(default=_yaml_cfg.get("port", 8080))
+    port: int = Field(default=_yaml_cfg.get("port", 80))
     workers: int = Field(default=_yaml_cfg.get("workers", 2))
     debug: bool = Field(default=_yaml_cfg.get("debug", False))
 
     # ── App database (SQLite sidecar) ──────────────────────────────────────────
     db_path: str = Field(
-        default=_yaml_cfg.get("db_path", "/mnt/software/pktflow/pktflow.db")
+        default=_yaml_cfg.get("db_path", "/data/pktflow.db")
     )
 
     # ── ClickHouse (startup connection — overridable at runtime via settings) ──
@@ -73,7 +75,7 @@ class Settings(BaseSettings):
 
     # ── DuckDB (alternate backend) ─────────────────────────────────────────────
     duckdb_path: str = Field(
-        default=_yaml_cfg.get("duckdb_path", "/mnt/software/pktflow/flows.duckdb")
+        default=_yaml_cfg.get("duckdb_path", "/data/flows.duckdb")
     )
 
     # ── JWT ───────────────────────────────────────────────────────────────────
@@ -84,8 +86,14 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
 
+    # ── First-run admin user seed (Docker / fresh install) ────────────────────
+    # If no users exist in the database, pktFlow creates an admin account using
+    # these credentials on startup. Leave blank to skip seeding.
+    admin_user: str = Field(default=_yaml_cfg.get("admin_user", ""))
+    admin_password: str = Field(default=_yaml_cfg.get("admin_password", ""))
+
     # ── CORS ──────────────────────────────────────────────────────────────────
-    # In production, set this to your actual origin (e.g. http://172.23.80.5:8080)
+    # In production, restrict this to your actual dashboard origin.
     cors_origins: list[str] = Field(
         default=_yaml_cfg.get("cors_origins", ["*"])
     )
@@ -96,7 +104,7 @@ class Settings(BaseSettings):
     # ── Logging ───────────────────────────────────────────────────────────────
     log_level: str = Field(default=_yaml_cfg.get("log_level", "info"))
     log_file: str = Field(
-        default=_yaml_cfg.get("log_file", "/mnt/software/logs/pktflow.log")
+        default=_yaml_cfg.get("log_file", "/data/logs/pktflow.log")
     )
 
     # ── Ingest buffer ─────────────────────────────────────────────────────────

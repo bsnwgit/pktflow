@@ -15,8 +15,10 @@ env/
 
 # Environment & secrets
 .env
-.env.*
+.env.local
+.env.production
 config.yaml          # contains secret_key and passwords — use config.example.yaml as template
+# Note: .env.example is intentionally NOT ignored — it's the public template
 
 # Runtime data (never commit databases or logs)
 *.db
@@ -66,13 +68,4 @@ scripts/deploy_frontend.py
 scripts/deploy_ssl.py
 scripts/deploy_*.py
 scripts/diag_*.py
-scripts/fix_*.py
-scripts/check_build.py
-
-# SSL certificates (never commit)
-ssl/
-*.pem
-*.pfx
-*.p12
-*.crt
-*.key
+scripts/fix
