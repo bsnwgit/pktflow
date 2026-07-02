@@ -463,8 +463,5 @@ Normal after restart. NetFlow v9/IPFIX require the router to send template packe
 **Vector not sending after pktFlow restarts:**  
 Vector uses exponential backoff. Multiple pktFlow restarts in quick succession can push the retry interval up to ~512 seconds. A pktFlow restart (TCP connection reset) triggers an immediate retry, so flows typically resume within seconds. If they don't, restart Vector.
 
-**`UnicodeEncodeError` in Paramiko scripts on Windows:**  
-Add `sys.stdout.reconfigure(encoding='utf-8')` at the top of any Python script that SSHs to the collector or app server. Windows defaults to `cp1252`, which crashes on Unicode characters in remote command output (box-drawing chars, checkmarks, etc.).
-
-**npm build fails on the app server:**  
-Vite's build output contains Unicode box-drawing characters. Never capture it directly. Always redirect: `npm run build > /dev/null 2>&1 && echo 'build ok' || echo 'BUILD FAILED'`.
+**npm build output contains Unicode characters:**  
+Vite's build output contains Unicode box-drawing characters. When scripting a build, redirect stdout to avoid encoding errors: `npm run build > /dev/null 2>&1 && echo 'build ok' || echo 'BUILD FAILED'`.

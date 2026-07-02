@@ -218,7 +218,7 @@ if __name__ == "__main__":
 
     _uvicorn_kwargs: dict = dict(
         host="0.0.0.0",
-        port=8766,
+        port=settings.port,
         workers=1,
         log_level="info",
     )
