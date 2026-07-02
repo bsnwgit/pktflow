@@ -6,6 +6,62 @@ A production NetFlow visualization and alerting platform. Receives live NetFlow 
 
 ---
 
+## Quick Start — Docker Compose
+
+The fastest way to run pktFlow. Requires Docker and Docker Compose.
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/bsnwgit/pktflow.git
+cd pktflow
+
+# 2. Configure environment
+cp .env.example .env
+# Edit .env:
+#   - Set PKTFLOW_SECRET_KEY to a random value: openssl rand -hex 32
+#   - Set PKTFLOW_ADMIN_USER and PKTFLOW_ADMIN_PASSWORD (created on first run)
+
+# 3. Start the stack
+docker compose up -d
+
+# 4. Open the dashboard
+# http://your-server-ip
+```
+
+pktFlow listens on **port 80** (HTTP) and **port 443** (HTTPS) by default. Log in with the admin credentials from your `.env`.
+
+### Data persistence
+
+All application data is stored in named Docker volumes that survive container updates and reboots:
+
+| Volume | Contents |
+|--------|----------|
+| `pktflow-data` | SQLite app database, SSL certs, application logs |
+| `clickhouse-data` | All flow data (ClickHouse) |
+
+To update pktFlow without losing data:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PKTFLOW_SECRET_KEY` | (required) | JWT signing key — `openssl rand -hex 32` |
+| `PKTFLOW_ADMIN_USER` | `admin` | Initial admin username (first-run only) |
+| `PKTFLOW_ADMIN_PASSWORD` | `changeme` | Initial admin password (first-run only) |
+| `PKTFLOW_PORT` | `80` | App listen port (inside the container) |
+| `PKTFLOW_CLICKHOUSE_HOST` | `clickhouse` | ClickHouse hostname |
+| `PKTFLOW_CLICKHOUSE_PASSWORD` | `` | ClickHouse password (blank = no auth) |
+| `PKTFLOW_CORS_ORIGINS` | `["*"]` | Restrict to your dashboard origin in production |
+
+All settings in `config.example.yaml` can also be passed as `PKTFLOW_*` environment variables (e.g., `PKTFLOW_DB_PATH`, `PKTFLOW_LOG_LEVEL`).
+
+---
+
 ## Features
 
 ### Data Ingestion
@@ -20,7 +76,7 @@ A production NetFlow visualization and alerting platform. Receives live NetFlow 
 - **Device View** — per-sampler traffic history, top talkers table, protocol distribution
 - **Flow Explorer** — search and filter flows by IP, port, protocol, time range; paginated results; CSV/JSON export
 - **Network Topology** — D3 force-directed graph with site cluster labeling; export to PNG, SVG, JSON, DOT, Draw.io, or Lucidchart
-- **Geo Map** — Leaflet dark map with D3 SVG arc overlays; ip-api.com geo lookup; arc classification by type (GlobalProtect VPN = green dash-dot, Site-to-Site VPN = blue dashed, WAN = solid red); circle markers colored by site group (medical = purple, dental = green, external = red); collapsible VPN Sites panel (admin CRUD); map legend overlay; VPN site mapping resolves RFC-1918 private IPs to their firewall public IPs for accurate geo placement
+- **Geo Map** — Leaflet dark map with D3 SVG arc overlays; ip-api.com geo lookup; arc classification by type (GlobalProtect VPN = green dash-dot, Site-to-Site VPN = blue dashed, WAN = solid red); circle markers colored by configurable site groups; collapsible VPN Sites panel (admin CRUD); map legend overlay; VPN site mapping resolves RFC-1918 private IPs to their firewall public IPs for accurate geo placement
 
 ### Alerting
 - **data_gap** — fires when a known sampler goes silent for a configurable period; dismissed samplers are excluded
@@ -65,7 +121,7 @@ Collector host (goflow2 → Vector)
     │  Vector transforms: snake_case, adds .site label
     │  HTTPS POST JSON array → pktFlow ingest endpoint
     ▼
-pktFlow (FastAPI, port 8766, HTTPS)
+pktFlow (FastAPI, port 80, HTTP/HTTPS)
     │  Normalizer: Vector JSON → FlowRecord (rejects 0.0.0.0)
     │  IngestBuffer: batched write + WebSocket broadcast
     ▼
@@ -84,15 +140,21 @@ React Dashboard (served by FastAPI, same port)
 
 ## Requirements
 
-### Server
+### Docker (recommended)
+
+- Docker Engine 24+
+- Docker Compose v2
+
+### Bare-metal
 
 | Component | Version | Notes |
 |-----------|---------|-------|
 | Python | 3.9+ | 3.11+ recommended |
-| ClickHouse | 24.x+ | Tested on 26.5.3.52 |
+| ClickHouse | 24.x+ | |
 | Node.js | 18+ | Frontend build only |
 | npm | 9+ | Frontend build only |
-| OS | Amazon Linux 2023 / RHEL 8+ / Ubuntu 22+ | systemd required |
+| OS | Debian/Ubuntu 22+, RHEL/Amazon Linux 2023+ | systemd required |
+| libxmlsec1-dev | system | Required by python3-saml |
 
 ### Collector hosts (one per site)
 
@@ -118,19 +180,11 @@ React 18, TypeScript, Vite, Tailwind CSS, Recharts, D3.js
 
 ---
 
-## Installation
+## Installation — Bare Metal
 
-### 1. Run the install script (Amazon Linux / RHEL)
+> Docker Compose (above) is the recommended install path. These instructions are for bare-metal deployments.
 
-```bash
-bash scripts/install.sh
-```
-
-The script installs ClickHouse, creates the Python venv, applies the schema, and registers the systemd service. It prints the admin password and ingest token on completion — **save these immediately.**
-
-### 3. Manual installation (other Linux distros)
-
-#### Apply ClickHouse schema
+### 1. Apply ClickHouse schema
 
 ```bash
 clickhouse-client --multiquery < clickhouse/schema.sql
@@ -138,18 +192,22 @@ clickhouse-client --multiquery < clickhouse/schema.sql
 
 Creates `pktflow` database with `flows`, `flows_hourly`, `flows_daily` tables and two materialized views.
 
-#### Create Python virtualenv
+### 2. Install Python dependencies
 
 ```bash
+# Install system dependency for python3-saml
+sudo apt-get install -y libxmlsec1-dev libxml2-dev pkg-config  # Debian/Ubuntu
+# sudo dnf install -y xmlsec1-devel                             # RHEL/Amazon Linux
+
 python3 -m venv /opt/pktflow/venv
 /opt/pktflow/venv/bin/pip install -r requirements.txt
 ```
 
-#### Configure
+### 3. Configure
 
 ```bash
-cp config.example.yaml config.yaml
-# Edit config.yaml — set secret_key, cors_origins, paths
+cp config.example.yaml /opt/pktflow/config.yaml
+# Edit config.yaml — set secret_key, db_path, cors_origins
 openssl rand -hex 32   # use this as secret_key
 ```
 
@@ -158,36 +216,50 @@ openssl rand -hex 32   # use this as secret_key
 | Key | Default | Description |
 |-----|---------|-------------|
 | `host` | `0.0.0.0` | Bind address |
-| `port` | `8766` | Listen port |
+| `port` | `80` | Listen port |
 | `db_path` | `/opt/pktflow/pktflow.db` | SQLite database path |
 | `clickhouse_host` | `localhost` | ClickHouse host |
 | `clickhouse_port` | `9000` | ClickHouse native protocol port |
 | `clickhouse_database` | `pktflow` | ClickHouse database name |
 | `secret_key` | **CHANGE THIS** | JWT signing key (32+ random bytes) |
-| `access_token_expire_minutes` | `480` | JWT lifetime |
+| `admin_user` | (blank) | Initial admin username — created on first run |
+| `admin_password` | (blank) | Initial admin password — created on first run |
 | `log_file` | `/opt/pktflow/pktflow.log` | Log path |
 
-#### Initialize the app database and start the service
+### 4. Build the frontend
+
+The frontend must be built on Linux — not on Windows (Windows `node_modules` lacks the Linux rollup native binary).
 
 ```bash
-sudo cp pktflow.service /etc/systemd/system/pktflow.service
+cp -r frontend /tmp/pktflow-fe
+cd /tmp/pktflow-fe
+npm install
+npm run build > /dev/null 2>&1 && echo "build ok" || echo "BUILD FAILED"
+cp -r dist /opt/pktflow/frontend/dist
+```
+
+### 5. Start the service
+
+```bash
+# Copy and install systemd unit (update paths in pktflow.service first)
+sudo cp pktflow.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now pktflow
 sudo systemctl status pktflow
 ```
 
-#### Verify
+### 6. Verify
 
 ```bash
-curl -sk https://localhost:8766/api/health
-curl -sk https://localhost:8766/api/ingest/stats
+curl -s http://localhost/api/health
+curl -s http://localhost/api/ingest/stats
 ```
 
 ---
 
 ## SSL / HTTPS
 
-pktFlow auto-detects SSL on startup. If `ssl/server.crt` and `ssl/server.key` exist under the app directory, it starts in HTTPS mode; otherwise HTTP.
+pktFlow auto-detects SSL on startup. If `ssl/server.crt` and `ssl/server.key` exist under the data directory, it starts in HTTPS mode; otherwise HTTP.
 
 **To enable HTTPS:** go to **Settings → Integrations → SSL / TLS**, drag-and-drop a PFX/P12 bundle (with passphrase) or separate PEM cert + key files, then restart the service. The restart button is in **Settings → System**.
 
@@ -255,7 +327,7 @@ Notification channels are configured per-alert-rule. Available channels:
 | PagerDuty | Code written; requires integration key |
 | Webhook | Code written; requires endpoint URL |
 
-> **Note:** Notification channels have not been end-to-end tested against live services. Verify `httpx`, `aiosmtplib`, and `jinja2` are installed in the venv before enabling.
+> **Note:** Notification channels have not been end-to-end tested against live services. Verify `httpx`, `aiosmtplib`, and `jinja2` are installed before enabling.
 
 ### Storage
 
@@ -274,7 +346,7 @@ Notification channels are configured per-alert-rule. Available channels:
 
 ### System
 
-- **Restart Service** — triggers `systemctl restart pktflow`; wait ~5 seconds for the service to come back
+- **Restart Service** — triggers a service restart; wait ~5 seconds for the service to come back
 - **Backup** — runs the local backup script; keeps 2 rotating snapshots
 
 ### Okta SAML
@@ -308,18 +380,21 @@ pktFlow receives data from **goflow2 + Vector** pipelines. Vector transforms gof
 [sinks.pktflow]
 type = "http"
 inputs = ["add_site"]
-uri = "https://<PKTFLOW_HOST>:8766/api/ingest/flows"
+uri = "http://<PKTFLOW_HOST>/api/ingest/flows"
 encoding.codec = "json"
 auth.strategy = "bearer"
 auth.token = "<INGEST_TOKEN>"
 request.timeout_secs = 10
 healthcheck.enabled = false
 
-[sinks.pktflow.tls]
-verify_certificate = false    # required when connecting by IP or internal hostname
+# If connecting over HTTPS with a self-signed cert:
+# [sinks.pktflow.tls]
+# verify_certificate = false
 ```
 
 The ingest token is in **Settings → Ingest**.
+
+See [DATAFLOW.md](DATAFLOW.md) for the full Vector configuration including the `add_site` transform and field mapping reference.
 
 ### Vector output format (what pktFlow receives)
 
@@ -360,6 +435,7 @@ pktflow/
 │   │   ├── settings.py     App settings CRUD
 │   │   ├── users.py        User management
 │   │   ├── vpn_mappings.py VPN site mapping CRUD (/api/vpn-mappings)
+│   │   ├── geo_config.py   Geo map config CRUD (/api/geo-config/*)
 │   │   ├── system.py       Health, restart, SSL upload, cleanup, backup
 │   │   ├── ws.py           WebSocket endpoint + broadcast helpers
 │   │   └── ai.py           AI assistant (Claude)
@@ -380,7 +456,7 @@ pktflow/
 │   │   ├── duckdb.py       DuckDB backend (experimental)
 │   │   └── factory.py      Backend selector
 │   ├── config.py           Settings loader (YAML + env)
-│   ├── database.py         SQLite init + migrations
+│   ├── database.py         SQLite init + migrations + first-run admin seed
 │   └── main.py             App factory, lifespan, router registration
 ├── clickhouse/schema.sql   flows + rollup tables + materialized views
 ├── frontend/src/
@@ -390,10 +466,13 @@ pktflow/
 │   ├── api/client.ts       Typed API client + getToken() for WebSocket
 │   ├── hooks/useWebSocket.ts  WebSocket hook
 │   └── utils/protocols.ts  Shared protocol name map
-├── scripts/
-│   └── install.sh          One-shot installer (Amazon Linux / RHEL)
-├── config.example.yaml
-├── pktflow.service
+├── migrations/             SQLite migration scripts (auto-applied on startup)
+├── Dockerfile              Multi-stage build (Node frontend → Python app)
+├── docker-compose.yml      pktFlow + ClickHouse stack
+├── .env.example            Environment variable template
+├── docker-entrypoint.sh    Container startup script
+├── config.example.yaml     Config file template (bare-metal installs)
+├── pktflow.service         systemd unit (bare-metal installs)
 ├── start.sh                SSL-aware startup wrapper
 └── requirements.txt
 ```
@@ -437,13 +516,21 @@ Common query parameters: `sampler_ip`, `src_ip`, `dst_ip`, `src_port`, `dst_port
 | `PUT` | `/api/vpn-mappings/{id}` | Admin JWT | Update a VPN mapping |
 | `DELETE` | `/api/vpn-mappings/{id}` | Admin JWT | Delete a VPN mapping |
 
-VPN mappings map private RFC-1918 CIDRs or single IPs to a public firewall IP and a site group. The `/api/flows/geo` endpoint uses these to resolve private addresses to their public IPs before geo lookup, so VPN traffic shows the correct real-world location on the map. `entry_type` is `gp` (GlobalProtect) or `s2s` (Site-to-Site), which determines arc color/style on the map.
+VPN mappings resolve private RFC-1918 CIDRs or single IPs to a public firewall IP and a site group. The `/api/flows/geo` endpoint uses these to show VPN traffic at the correct real-world location. `entry_type` is `gp` (GlobalProtect) or `s2s` (Site-to-Site), which determines arc color/style on the map.
+
+### Geo Map Config
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET/POST/PUT/DELETE` | `/api/geo-config/site-groups` | Admin JWT | Site group definitions (color per group) |
+| `GET/POST/PUT/DELETE` | `/api/geo-config/line-styles` | Admin JWT | Arc line style catalog |
+| `GET/POST/PUT/DELETE` | `/api/geo-config/traffic-types` | Admin JWT | Traffic type → line style mappings |
 
 ### WebSocket
 
 | Endpoint | Auth | Description |
 |----------|------|-------------|
-| `wss://<host>/api/ws/dashboard?token=<jwt>` | JWT query param | Push updates after each ingest flush |
+| `ws://<host>/api/ws/dashboard?token=<jwt>` | JWT query param | Push updates after each ingest flush |
 
 Message types: `device_update` (device summaries), `ingest_stats` (buffer counters), `flow_update` (raw batch, if enabled), `alert_fired`, `ping` (keepalive).
 
@@ -462,20 +549,20 @@ Message types: `device_update` (device summaries), `ingest_stats` (buffer counte
 
 ---
 
-## Deployment
+## Deployment — Bare Metal
 
 ### Backend changes
 
 1. Copy changed files to `/opt/pktflow/` on the server (same relative path as the repo)
 2. `sudo systemctl restart pktflow`
-3. Verify: `curl -sk https://localhost:8766/api/health`
+3. Verify: `curl -s http://localhost/api/health`
 
 ### Frontend changes
 
 The frontend must be built on Linux — build on the server itself or a Linux CI runner, not on a Windows machine (Windows `node_modules` lacks the Linux rollup native binary).
 
 ```bash
-# On the server
+# On the server (or a Linux build machine)
 cp -r frontend /tmp/pktflow-fe
 cd /tmp/pktflow-fe
 npm install
@@ -495,7 +582,7 @@ After pktFlow restarts, Vector detects the connection reset and immediately retr
 1. **Workers = 1 required for WebSocket** — `start.sh` uses `--workers 1`. With multiple workers, each has its own in-memory `ws_manager`; broadcasts from the ingest worker don't reach WS connections on other workers.
 2. **Schema startup warnings** — `_ensure_schema` logs "Schema statement warning" on startup for SQL comments in multi-statement blocks. Cosmetic only.
 3. **goflow2 template errors after restart** — Normal. goflow2 loses cached NetFlow v9 templates on restart; "template error" log lines resolve within seconds when the router sends the next template packet.
-4. **Site B collector orphan process** — If `goflow2-vector` is restarted while flows are active, the old goflow2 process may survive and hold port 2055. Symptom: service is `active` but no flows arriving. Fix: `sudo kill -9 <old_goflow2_pid>`.
+4. **Collector orphan process** — If `goflow2-vector` is restarted while flows are active, the old goflow2 process may survive and hold port 2055. Symptom: service is `active` but no flows arriving. Fix: `sudo kill -9 <old_goflow2_pid>`.
 5. **ClickHouse threading** — `clickhouse-driver` is not thread-safe. All calls are serialized with `threading.Lock()` in `clickhouse.py`.
 6. **passlib/bcrypt on Python 3.12+** — Pin `passlib==1.7.4` and `bcrypt==4.0.1` to avoid attribute errors.
 
@@ -513,15 +600,16 @@ After pktFlow restarts, Vector detects the connection reset and immediately retr
 | Sankey flow diagram | Not yet built — planned: D3-sankey `src_ip → dst_port → dst_ip` arc chart |
 | Pie charts on Device View | Not built |
 | Storage "Test Connection" button | UI exists, no backend endpoint |
-| Production-test DuckDB backend | Implemented but never run against real data |
+| Production-test DuckDB backend | Implemented but not validated at scale |
 | Migration mode / flow forwarding | UI toggle exists, no backend logic |
 
 ---
 
 ## Security Notes
 
-- Change `secret_key` in `config.yaml` before production use (`openssl rand -hex 32`)
+- Change `secret_key` in `config.yaml` (or `PKTFLOW_SECRET_KEY` env var) before production use — `openssl rand -hex 32`
+- Change the default admin password immediately after first login
 - The ingest token is in **Settings → Ingest** and must match `auth.token` in each collector's `vector.toml`
-- `cors_origins` in config should be restricted to your dashboard origin
+- `cors_origins` should be restricted to your dashboard origin in production
 - If using a self-signed cert or connecting by IP, set `verify_certificate = false` in Vector's TLS section
-- SAML SP Entity ID must exactly match Okta's "Audience URI" — both derived from Base URL in Settings�
+- SAML SP Entity ID must exactly match Okta's "Audience URI" — both derived from Base URL in Settings
