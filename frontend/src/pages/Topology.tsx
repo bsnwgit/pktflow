@@ -549,7 +549,7 @@ export default function Topology() {
       })
       if (res.ok) {
         const { url } = await res.json()
-        window.open(url, '_blank')
+        window.location.href = url
         setExportMsg('')
       } else {
         setExportMsg('Lucidchart export requires an API token in Settings → Integrations.')

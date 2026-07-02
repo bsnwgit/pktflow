@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, DeviceSummary, User, UserIn, SslStatus } from '../api/client'
+import { api, DeviceSummary, User, UserIn, SslStatus, VpnMapping, VpnMappingIn, SiteGroup, SiteGroupIn, LineStyle, LineStyleIn, TrafficType, TrafficTypeIn } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import { useAuth } from '../store/auth'
 
@@ -324,11 +324,12 @@ function MetadataPasteBox({ onParsed }: {
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
-type TabId = 'general' | 'storage' | 'backup' | 'ingest' | 'auth' | 'notifications' | 'devices' | 'integrations' | 'users'
+type TabId = 'general' | 'storage' | 'backup' | 'ingest' | 'auth' | 'notifications' | 'devices' | 'integrations' | 'users' | 'vpnmappings'
 
 const TABS: Array<{ id: TabId; label: string; adminOnly?: boolean }> = [
   { id: 'general',       label: 'General' },
   { id: 'devices',       label: 'Collectors' },
+  { id: 'vpnmappings',   label: 'Geo Map',       adminOnly: true },
   { id: 'storage',       label: 'Storage' },
   { id: 'backup',        label: 'Backup' },
   { id: 'ingest',        label: 'Ingest' },
@@ -1022,8 +1023,6 @@ export default function Settings() {
                   />
                   <a
                     href={`${str('base_url')}/api/auth/saml/metadata`}
-                    target="_blank"
-                    rel="noreferrer"
                     className="text-xs text-blue-400 hover:text-blue-300 whitespace-nowrap"
                   >
                     View SP metadata ↗
@@ -1171,6 +1170,9 @@ export default function Settings() {
 
       {/* Devices tab */}
       {tab === 'devices' && <DevicesTab />}
+
+      {/* Geo Map tab — admin only */}
+      {tab === 'vpnmappings' && isAdmin && <GeoMapTab />}
 
       {/* Users tab — admin only */}
       {tab === 'users' && isAdmin && <UsersTab />}
@@ -2000,6 +2002,842 @@ function ResetPasswordModal({ user, onClose }: ResetPwProps) {
           </div>
         </form>
       </div>
+    </div>
+  )
+}
+
+// ── Shared Geo Map helpers ────────────────────────────────────────────────────
+function LineSvg({ color, dash }: { color: string; dash: string }) {
+  return (
+    <svg width="36" height="10" className="flex-shrink-0">
+      <line x1="2" y1="5" x2="34" y2="5" stroke={color} strokeWidth="2"
+        strokeDasharray={dash || undefined} />
+    </svg>
+  )
+}
+
+// ── Site Groups Section ───────────────────────────────────────────────────────
+function SiteGroupsSection({ isAdmin }: { isAdmin: boolean }) {
+  const [groups,   setGroups]   = useState<SiteGroup[]>([])
+  const [loading,  setLoading]  = useState(true)
+  const [showAdd,  setShowAdd]  = useState(false)
+  const [editId,   setEditId]   = useState<number | null>(null)
+  const blank: SiteGroupIn = { name: '', display_name: '', fill_color: '#60a5fa', stroke_color: '#93c5fd', badge_bg: 'bg-gray-700', badge_text: 'text-gray-300' }
+  const [form,     setForm]     = useState<SiteGroupIn>(blank)
+  const [editForm, setEditForm] = useState<SiteGroupIn>(blank)
+  const [saving,   setSaving]   = useState(false)
+  const [error,    setError]    = useState('')
+
+  useEffect(() => {
+    api.getSiteGroups().then(setGroups).catch(() => {}).finally(() => setLoading(false))
+  }, [])
+
+  async function handleAdd() {
+    if (!form.name.trim() || !form.display_name.trim()) { setError('Name and Display Name are required'); return }
+    setSaving(true); setError('')
+    try {
+      const g = await api.createSiteGroup(form)
+      setGroups(prev => [...prev, g])
+      setForm(blank); setShowAdd(false)
+    } catch (e: any) { setError(e.message ?? 'Failed') } finally { setSaving(false) }
+  }
+  async function handleUpdate() {
+    if (!editForm.name.trim() || !editForm.display_name.trim()) { setError('Name and Display Name are required'); return }
+    setSaving(true); setError('')
+    try {
+      const updated = await api.updateSiteGroup(editId!, editForm)
+      setGroups(prev => prev.map(g => g.id === editId ? updated : g))
+      setEditId(null)
+    } catch (e: any) { setError(e.message ?? 'Failed') } finally { setSaving(false) }
+  }
+  async function handleDelete(id: number) {
+    try {
+      await api.deleteSiteGroup(id)
+      setGroups(prev => prev.filter(g => g.id !== id))
+    } catch {}
+  }
+
+  const inp = 'bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500'
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold text-white">Site Groups</p>
+          <p className="text-xs text-gray-400 mt-0.5">Define the group names and colours for Geo Map circle markers and Settings badges.</p>
+        </div>
+        {isAdmin && !showAdd && !editId && (
+          <button onClick={() => setShowAdd(true)}
+            className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
+            + Add Group
+          </button>
+        )}
+      </div>
+
+      {loading ? <p className="text-xs text-gray-500 py-4 text-center">Loading…</p> : (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-800">
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Key</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Display Name</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Map Color</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Badge</th>
+                {isAdmin && <th className="pl-2 pr-6 py-2.5 w-20" />}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800">
+              {groups.map(g => editId === g.id ? (
+                <tr key={g.id} className="bg-gray-800/60">
+                  <td className="px-2 py-2"><input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} className={`${inp} w-24`} /></td>
+                  <td className="px-2 py-2"><input value={editForm.display_name} onChange={e => setEditForm(f => ({ ...f, display_name: e.target.value }))} className={`${inp} w-28`} /></td>
+                  <td className="px-2 py-2">
+                    <div className="flex items-center gap-2">
+                      <input type="color" value={editForm.fill_color} onChange={e => setEditForm(f => ({ ...f, fill_color: e.target.value }))}
+                        className="w-8 h-8 rounded cursor-pointer bg-transparent border-0 p-0" title="Fill" />
+                      <input type="color" value={editForm.stroke_color} onChange={e => setEditForm(f => ({ ...f, stroke_color: e.target.value }))}
+                        className="w-8 h-8 rounded cursor-pointer bg-transparent border-0 p-0" title="Stroke" />
+                      <div className="w-6 h-6 rounded-full border-2 flex-shrink-0"
+                        style={{ background: editForm.fill_color, borderColor: editForm.stroke_color }} />
+                    </div>
+                  </td>
+                  <td className="px-2 py-2">
+                    <div className="flex gap-1.5">
+                      <input value={editForm.badge_bg} onChange={e => setEditForm(f => ({ ...f, badge_bg: e.target.value }))}
+                        placeholder="bg-gray-700" className={`${inp} w-32 text-xs font-mono`} />
+                      <input value={editForm.badge_text} onChange={e => setEditForm(f => ({ ...f, badge_text: e.target.value }))}
+                        placeholder="text-gray-300" className={`${inp} w-32 text-xs font-mono`} />
+                    </div>
+                  </td>
+                  <td className="pl-2 pr-6 py-2">
+                    {error && <p className="text-xs text-red-400 mb-1">{error}</p>}
+                    <div className="flex gap-2 justify-end">
+                      <button onClick={handleUpdate} disabled={saving}
+                        className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50">
+                        {saving ? '…' : 'Save'}
+                      </button>
+                      <button onClick={() => { setEditId(null); setError('') }}
+                        className="px-2 py-1 text-xs text-gray-400 hover:text-white">Cancel</button>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={g.id} className="group hover:bg-gray-800/50 transition-colors">
+                  <td className="px-4 py-2.5 font-mono text-xs text-gray-300">{g.name}</td>
+                  <td className="px-4 py-2.5 text-white">{g.display_name}</td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="w-5 h-5 rounded-full border-2 flex-shrink-0"
+                        style={{ background: g.fill_color, borderColor: g.stroke_color }} />
+                      <span className="text-xs text-gray-400 font-mono">{g.fill_color}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${g.badge_bg} ${g.badge_text}`}>
+                      {g.display_name}
+                    </span>
+                  </td>
+                  {isAdmin && (
+                    <td className="pl-2 pr-6 py-2.5">
+                      <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => { setEditId(g.id); setEditForm({ name: g.name, display_name: g.display_name, fill_color: g.fill_color, stroke_color: g.stroke_color, badge_bg: g.badge_bg, badge_text: g.badge_text }); setError('') }}
+                          className="text-gray-500 hover:text-blue-400 transition-colors">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                        </button>
+                        <button onClick={() => handleDelete(g.id)} className="text-gray-500 hover:text-red-400 transition-colors">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showAdd && isAdmin && (
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+          <p className="text-sm font-medium text-white">New Site Group</p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Key (stored)</label>
+              <input placeholder="e.g. corporate" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Display Name</label>
+              <input placeholder="e.g. Corporate" value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Fill Color</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={form.fill_color} onChange={e => setForm(f => ({ ...f, fill_color: e.target.value }))}
+                  className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
+                <span className="text-xs text-gray-400 font-mono">{form.fill_color}</span>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Stroke Color</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={form.stroke_color} onChange={e => setForm(f => ({ ...f, stroke_color: e.target.value }))}
+                  className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
+                <span className="text-xs text-gray-400 font-mono">{form.stroke_color}</span>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Badge BG (Tailwind class)</label>
+              <input placeholder="bg-gray-700" value={form.badge_bg} onChange={e => setForm(f => ({ ...f, badge_bg: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Badge Text (Tailwind class)</label>
+              <input placeholder="text-gray-300" value={form.badge_text} onChange={e => setForm(f => ({ ...f, badge_text: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          <div className="flex gap-3">
+            <button onClick={handleAdd} disabled={saving}
+              className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg disabled:opacity-50">
+              {saving ? 'Saving…' : 'Add Group'}
+            </button>
+            <button onClick={() => { setShowAdd(false); setError('') }}
+              className="px-4 py-2 text-sm text-gray-400 hover:text-white">Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Line Styles Section ───────────────────────────────────────────────────────
+function LineStylesSection({ isAdmin }: { isAdmin: boolean }) {
+  const [styles,   setStyles]   = useState<LineStyle[]>([])
+  const [loading,  setLoading]  = useState(true)
+  const [showAdd,  setShowAdd]  = useState(false)
+  const [editId,   setEditId]   = useState<number | null>(null)
+  const blank: LineStyleIn = { name: '', label: '', color_hex: '#6b7280', dash_pattern: '' }
+  const [form,     setForm]     = useState<LineStyleIn>(blank)
+  const [editForm, setEditForm] = useState<LineStyleIn>(blank)
+  const [saving,   setSaving]   = useState(false)
+  const [error,    setError]    = useState('')
+
+  useEffect(() => {
+    api.getLineStyles().then(setStyles).catch(() => {}).finally(() => setLoading(false))
+  }, [])
+
+  async function handleAdd() {
+    if (!form.name.trim() || !form.label.trim()) { setError('Name and Label are required'); return }
+    setSaving(true); setError('')
+    try {
+      const s = await api.createLineStyle(form)
+      setStyles(prev => [...prev, s])
+      setForm(blank); setShowAdd(false)
+    } catch (e: any) { setError(e.message ?? 'Failed') } finally { setSaving(false) }
+  }
+  async function handleUpdate() {
+    setSaving(true); setError('')
+    try {
+      const updated = await api.updateLineStyle(editId!, editForm)
+      setStyles(prev => prev.map(s => s.id === editId ? updated : s))
+      setEditId(null)
+    } catch (e: any) { setError(e.message ?? 'Failed') } finally { setSaving(false) }
+  }
+  async function handleDelete(id: number) {
+    try {
+      await api.deleteLineStyle(id)
+      setStyles(prev => prev.filter(s => s.id !== id))
+    } catch {}
+  }
+
+  const inp = 'bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500'
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold text-white">Line Style Catalog</p>
+          <p className="text-xs text-gray-400 mt-0.5">Define arc line styles (color + dash pattern) that can be assigned to traffic types.</p>
+        </div>
+        {isAdmin && !showAdd && !editId && (
+          <button onClick={() => setShowAdd(true)}
+            className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
+            + Add Style
+          </button>
+        )}
+      </div>
+
+      {loading ? <p className="text-xs text-gray-500 py-4 text-center">Loading…</p> : (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-800">
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Key</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Label</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Preview</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Dash Pattern</th>
+                {isAdmin && <th className="pl-2 pr-6 py-2.5 w-20" />}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800">
+              {styles.map(s => editId === s.id ? (
+                <tr key={s.id} className="bg-gray-800/60">
+                  <td className="px-2 py-2"><input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} className={`${inp} w-24 font-mono text-xs`} /></td>
+                  <td className="px-2 py-2"><input value={editForm.label} onChange={e => setEditForm(f => ({ ...f, label: e.target.value }))} className={`${inp} w-32`} /></td>
+                  <td className="px-2 py-2">
+                    <div className="flex items-center gap-2">
+                      <input type="color" value={editForm.color_hex} onChange={e => setEditForm(f => ({ ...f, color_hex: e.target.value }))}
+                        className="w-8 h-8 rounded cursor-pointer bg-transparent border-0 p-0" />
+                      <LineSvg color={editForm.color_hex} dash={editForm.dash_pattern} />
+                    </div>
+                  </td>
+                  <td className="px-2 py-2"><input value={editForm.dash_pattern} onChange={e => setEditForm(f => ({ ...f, dash_pattern: e.target.value }))} placeholder="e.g. 10,5 (blank=solid)" className={`${inp} w-40 font-mono text-xs`} /></td>
+                  <td className="pl-2 pr-6 py-2">
+                    {error && <p className="text-xs text-red-400 mb-1">{error}</p>}
+                    <div className="flex gap-2 justify-end">
+                      <button onClick={handleUpdate} disabled={saving}
+                        className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50">
+                        {saving ? '…' : 'Save'}
+                      </button>
+                      <button onClick={() => { setEditId(null); setError('') }}
+                        className="px-2 py-1 text-xs text-gray-400 hover:text-white">Cancel</button>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={s.id} className="group hover:bg-gray-800/50 transition-colors">
+                  <td className="px-4 py-2.5 font-mono text-xs text-gray-300">{s.name}</td>
+                  <td className="px-4 py-2.5 text-white">{s.label}</td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-sm flex-shrink-0" style={{ background: s.color_hex }} />
+                      <LineSvg color={s.color_hex} dash={s.dash_pattern} />
+                      <span className="text-xs text-gray-400 font-mono">{s.color_hex}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-gray-400">{s.dash_pattern || 'solid'}</td>
+                  {isAdmin && (
+                    <td className="pl-2 pr-6 py-2.5">
+                      <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => { setEditId(s.id); setEditForm({ name: s.name, label: s.label, color_hex: s.color_hex, dash_pattern: s.dash_pattern }); setError('') }}
+                          className="text-gray-500 hover:text-blue-400 transition-colors">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                        </button>
+                        <button onClick={() => handleDelete(s.id)} className="text-gray-500 hover:text-red-400 transition-colors">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showAdd && isAdmin && (
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+          <p className="text-sm font-medium text-white">New Line Style</p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Key (stored)</label>
+              <input placeholder="e.g. ipsec_line" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Label</label>
+              <input placeholder="e.g. Dotted (Purple)" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Color</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={form.color_hex} onChange={e => setForm(f => ({ ...f, color_hex: e.target.value }))}
+                  className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
+                <LineSvg color={form.color_hex} dash={form.dash_pattern} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Dash Pattern (SVG)</label>
+              <input placeholder="10,5 (blank = solid)" value={form.dash_pattern} onChange={e => setForm(f => ({ ...f, dash_pattern: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          <div className="flex gap-3">
+            <button onClick={handleAdd} disabled={saving}
+              className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg disabled:opacity-50">
+              {saving ? 'Saving…' : 'Add Style'}
+            </button>
+            <button onClick={() => { setShowAdd(false); setError('') }}
+              className="px-4 py-2 text-sm text-gray-400 hover:text-white">Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Traffic Types Section ─────────────────────────────────────────────────────
+function TrafficTypesSection({ isAdmin }: { isAdmin: boolean }) {
+  const [types,      setTypes]      = useState<TrafficType[]>([])
+  const [lineStyles, setLineStyles] = useState<LineStyle[]>([])
+  const [loading,    setLoading]    = useState(true)
+  const [showAdd,    setShowAdd]    = useState(false)
+  const [editId,     setEditId]     = useState<number | null>(null)
+  const blank: TrafficTypeIn = { name: '', label: '', line_style_id: null, is_default: false }
+  const [form,       setForm]       = useState<TrafficTypeIn>(blank)
+  const [editForm,   setEditForm]   = useState<TrafficTypeIn>(blank)
+  const [saving,     setSaving]     = useState(false)
+  const [error,      setError]      = useState('')
+
+  useEffect(() => {
+    Promise.all([api.getTrafficTypes(), api.getLineStyles()])
+      .then(([t, ls]) => { setTypes(t); setLineStyles(ls) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function handleAdd() {
+    if (!form.name.trim() || !form.label.trim()) { setError('Name and Label are required'); return }
+    setSaving(true); setError('')
+    try {
+      const t = await api.createTrafficType(form)
+      setTypes(prev => [...prev, t])
+      setForm(blank); setShowAdd(false)
+    } catch (e: any) { setError(e.message ?? 'Failed') } finally { setSaving(false) }
+  }
+  async function handleUpdate() {
+    setSaving(true); setError('')
+    try {
+      const updated = await api.updateTrafficType(editId!, editForm)
+      setTypes(prev => prev.map(t => t.id === editId ? updated : t))
+      setEditId(null)
+    } catch (e: any) { setError(e.message ?? 'Failed') } finally { setSaving(false) }
+  }
+  async function handleDelete(id: number) {
+    try {
+      await api.deleteTrafficType(id)
+      setTypes(prev => prev.filter(t => t.id !== id))
+    } catch {}
+  }
+
+  const inp = 'bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500'
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold text-white">Traffic Types</p>
+          <p className="text-xs text-gray-400 mt-0.5">Define traffic classifications. Each type maps to a line style and is assigned to VPN mappings.</p>
+        </div>
+        {isAdmin && !showAdd && !editId && (
+          <button onClick={() => setShowAdd(true)}
+            className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
+            + Add Type
+          </button>
+        )}
+      </div>
+
+      {loading ? <p className="text-xs text-gray-500 py-4 text-center">Loading…</p> : (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-800">
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Key</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Label</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Line Style</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Default</th>
+                {isAdmin && <th className="pl-2 pr-6 py-2.5 w-20" />}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800">
+              {types.map(t => editId === t.id ? (
+                <tr key={t.id} className="bg-gray-800/60">
+                  <td className="px-2 py-2"><input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} className={`${inp} w-24 font-mono text-xs`} /></td>
+                  <td className="px-2 py-2"><input value={editForm.label} onChange={e => setEditForm(f => ({ ...f, label: e.target.value }))} className={`${inp} w-36`} /></td>
+                  <td className="px-2 py-2">
+                    <select value={editForm.line_style_id ?? ''} onChange={e => setEditForm(f => ({ ...f, line_style_id: e.target.value ? Number(e.target.value) : null }))} className={`${inp} w-44`}>
+                      <option value="">— none —</option>
+                      {lineStyles.map(ls => <option key={ls.id} value={ls.id}>{ls.label}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-2 py-2">
+                    <input type="checkbox" checked={editForm.is_default} onChange={e => setEditForm(f => ({ ...f, is_default: e.target.checked }))}
+                      className="w-4 h-4 rounded border-gray-600" />
+                  </td>
+                  <td className="pl-2 pr-6 py-2">
+                    {error && <p className="text-xs text-red-400 mb-1">{error}</p>}
+                    <div className="flex gap-2 justify-end">
+                      <button onClick={handleUpdate} disabled={saving}
+                        className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50">
+                        {saving ? '…' : 'Save'}
+                      </button>
+                      <button onClick={() => { setEditId(null); setError('') }}
+                        className="px-2 py-1 text-xs text-gray-400 hover:text-white">Cancel</button>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={t.id} className="group hover:bg-gray-800/50 transition-colors">
+                  <td className="px-4 py-2.5 font-mono text-xs text-gray-300">{t.name}</td>
+                  <td className="px-4 py-2.5 text-white">{t.label}</td>
+                  <td className="px-4 py-2.5">
+                    {t.line_color ? (
+                      <div className="flex items-center gap-2">
+                        <LineSvg color={t.line_color} dash={t.line_dash ?? ''} />
+                        <span className="text-xs text-gray-400">{lineStyles.find(ls => ls.id === t.line_style_id)?.label ?? '—'}</span>
+                      </div>
+                    ) : <span className="text-xs text-gray-500">—</span>}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {t.is_default ? (
+                      <span className="px-1.5 py-0.5 rounded text-xs bg-amber-800 text-amber-200 font-medium">WAN fallback</span>
+                    ) : (
+                      <span className="text-xs text-gray-600">—</span>
+                    )}
+                  </td>
+                  {isAdmin && (
+                    <td className="pl-2 pr-6 py-2.5">
+                      <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => { setEditId(t.id); setEditForm({ name: t.name, label: t.label, line_style_id: t.line_style_id, is_default: !!t.is_default }); setError('') }}
+                          className="text-gray-500 hover:text-blue-400 transition-colors">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                        </button>
+                        <button onClick={() => handleDelete(t.id)} className="text-gray-500 hover:text-red-400 transition-colors">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showAdd && isAdmin && (
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+          <p className="text-sm font-medium text-white">New Traffic Type</p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Key (stored)</label>
+              <input placeholder="e.g. ipsec" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Label</label>
+              <input placeholder="e.g. IPSec VPN" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Line Style</label>
+              <select value={form.line_style_id ?? ''} onChange={e => setForm(f => ({ ...f, line_style_id: e.target.value ? Number(e.target.value) : null }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">— none —</option>
+                {lineStyles.map(ls => <option key={ls.id} value={ls.id}>{ls.label}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-2 pt-5">
+              <input type="checkbox" id="tt_default" checked={form.is_default} onChange={e => setForm(f => ({ ...f, is_default: e.target.checked }))}
+                className="w-4 h-4 rounded border-gray-600" />
+              <label htmlFor="tt_default" className="text-sm text-gray-300">WAN fallback (default)</label>
+            </div>
+          </div>
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          <div className="flex gap-3">
+            <button onClick={handleAdd} disabled={saving}
+              className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg disabled:opacity-50">
+              {saving ? 'Saving…' : 'Add Type'}
+            </button>
+            <button onClick={() => { setShowAdd(false); setError('') }}
+              className="px-4 py-2 text-sm text-gray-400 hover:text-white">Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Geo Map Tab (wrapper) ─────────────────────────────────────────────────────
+function GeoMapTab() {
+  const { user: _me } = useAuth()
+  const isAdmin = _me?.role === 'admin'
+  return (
+    <div className="space-y-10">
+      <SiteGroupsSection isAdmin={isAdmin} />
+      <div className="border-t border-gray-800" />
+      <VpnMappingsTab />
+      <div className="border-t border-gray-800" />
+      <TrafficTypesSection isAdmin={isAdmin} />
+      <div className="border-t border-gray-800" />
+      <LineStylesSection isAdmin={isAdmin} />
+    </div>
+  )
+}
+
+// ── VPN Mappings Tab ──────────────────────────────────────────────────────────
+const VPN_GROUP_BADGE: Record<string, string> = {
+  medical: 'bg-violet-800 text-violet-200',
+  dental:  'bg-emerald-800 text-emerald-200',
+  other:   'bg-gray-700 text-gray-300',
+}
+const VPN_TYPE_BADGE: Record<string, string> = {
+  gp:  'bg-emerald-700 text-emerald-100',
+  s2s: 'bg-blue-700 text-blue-100',
+}
+
+function VpnMappingsTab() {
+  const { user: _me2 } = useAuth()
+  const isAdmin = _me2?.role === 'admin'
+  const [mappings,   setMappings]   = useState<VpnMapping[]>([])
+  const [loading,    setLoading]    = useState(true)
+  const [showAdd,    setShowAdd]    = useState(false)
+  const [editingId,  setEditingId]  = useState<number | null>(null)
+  const [editForm,   setEditForm]   = useState<VpnMappingIn>({ site_name: '', group_name: 'medical', public_ip: '', cidr_or_ip: '', entry_type: 's2s' })
+  const [form,       setForm]       = useState<VpnMappingIn>({ site_name: '', group_name: 'medical', public_ip: '', cidr_or_ip: '', entry_type: 's2s' })
+  const [saving,       setSaving]       = useState(false)
+  const [editSaving,   setEditSaving]   = useState(false)
+  const [error,        setError]        = useState('')
+  const [editError,    setEditError]    = useState('')
+  const [trafficTypes, setTrafficTypes] = useState<TrafficType[]>([])
+  const [siteGroups,   setSiteGroups]   = useState<SiteGroup[]>([])
+  const trafficTypeOptions = trafficTypes.length
+    ? trafficTypes.map(t => ({ value: t.name, label: t.label }))
+    : [{ value: 's2s', label: 'S2S — Site-to-Site VPN' }, { value: 'gp', label: 'GP — GlobalProtect' }]
+  const siteGroupOptions = siteGroups.length
+    ? siteGroups.map(g => ({ value: g.name, label: g.display_name }))
+    : [{ value: 'medical', label: 'Medical' }, { value: 'dental', label: 'Dental' }, { value: 'other', label: 'Other' }]
+
+  function load() {
+    setLoading(true)
+    Promise.all([
+      api.getVpnMappings(),
+      api.getTrafficTypes(),
+      api.getSiteGroups(),
+    ]).then(([m, t, g]) => { setMappings(m); setTrafficTypes(t); setSiteGroups(g) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { load() }, [])
+
+  async function handleAdd() {
+    if (!form.site_name.trim() || !form.public_ip.trim() || !form.cidr_or_ip.trim()) {
+      setError('All fields are required'); return
+    }
+    setSaving(true); setError('')
+    try {
+      const m = await api.createVpnMapping(form)
+      setMappings(prev => [...prev, m])
+      setForm({ site_name: '', group_name: 'medical', public_ip: '', cidr_or_ip: '', entry_type: 's2s' })
+      setShowAdd(false)
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to save')
+    } finally { setSaving(false) }
+  }
+
+  function startEdit(m: VpnMapping) {
+    setEditingId(m.id)
+    setEditForm({ site_name: m.site_name, group_name: m.group_name, public_ip: m.public_ip, cidr_or_ip: m.cidr_or_ip, entry_type: m.entry_type })
+    setEditError('')
+  }
+  function cancelEdit() { setEditingId(null); setEditError('') }
+
+  async function handleUpdate() {
+    if (!editForm.site_name.trim() || !editForm.public_ip.trim() || !editForm.cidr_or_ip.trim()) {
+      setEditError('All fields are required'); return
+    }
+    setEditSaving(true); setEditError('')
+    try {
+      const updated = await api.updateVpnMapping(editingId!, editForm)
+      setMappings(prev => prev.map(m => m.id === editingId ? updated : m))
+      setEditingId(null)
+    } catch (e: any) {
+      setEditError(e.message ?? 'Failed to update')
+    } finally { setEditSaving(false) }
+  }
+
+  async function handleDelete(id: number) {
+    try {
+      await api.deleteVpnMapping(id)
+      setMappings(prev => prev.filter(m => m.id !== id))
+    } catch {}
+  }
+
+  // Shared input/select class
+  const inp = 'w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500'
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-white">VPN Site Mappings</h2>
+          <p className="text-sm text-gray-400 mt-0.5">
+            Map RFC-1918 CIDRs or IPs to a public firewall IP so the Geo Map plots VPN traffic at the correct location.
+          </p>
+        </div>
+        {isAdmin && !showAdd && (
+          <button
+            onClick={() => setShowAdd(true)}
+            className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors"
+          >
+            + Add Mapping
+          </button>
+        )}
+      </div>
+
+      {/* Add form */}
+      {showAdd && isAdmin && (
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+          <h3 className="text-sm font-medium text-white">New VPN Mapping</h3>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Site Name</label>
+              <input placeholder="e.g. Site-B" value={form.site_name}
+                onChange={e => setForm(f => ({ ...f, site_name: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Group</label>
+              <select value={form.group_name} onChange={e => setForm(f => ({ ...f, group_name: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {siteGroupOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Type</label>
+              <select value={form.entry_type} onChange={e => setForm(f => ({ ...f, entry_type: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {trafficTypeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Public Firewall IP</label>
+              <input placeholder="e.g. 23.92.28.254" value={form.public_ip}
+                onChange={e => setForm(f => ({ ...f, public_ip: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Private CIDR or IP</label>
+              <input placeholder="e.g. 10.42.0.0/16" value={form.cidr_or_ip}
+                onChange={e => setForm(f => ({ ...f, cidr_or_ip: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          <div className="flex gap-3 pt-1">
+            <button onClick={handleAdd} disabled={saving}
+              className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors disabled:opacity-50">
+              {saving ? 'Saving…' : 'Add Mapping'}
+            </button>
+            <button onClick={() => { setShowAdd(false); setError('') }}
+              className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Mappings table */}
+      {loading ? (
+        <p className="text-sm text-gray-500 text-center py-8">Loading…</p>
+      ) : mappings.length === 0 ? (
+        <div className="text-center py-12 text-gray-500">
+          <p className="text-sm">No VPN mappings configured.</p>
+          <p className="text-xs mt-1">Add a mapping to plot VPN traffic at the correct location on the Geo Map.</p>
+        </div>
+      ) : (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-800">
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Site</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Group</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Public IP</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Private CIDR / IP</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Type</th>
+                {isAdmin && <th className="pl-2 pr-6 py-3 w-20 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Actions</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800">
+              {mappings.map(m => editingId === m.id ? (
+                /* ── Edit row ── */
+                <tr key={m.id} className="bg-gray-800/60">
+                  <td className="px-2 py-2"><input value={editForm.site_name} onChange={e => setEditForm(f => ({ ...f, site_name: e.target.value }))} className={inp} /></td>
+                  <td className="px-2 py-2">
+                    <select value={editForm.group_name} onChange={e => setEditForm(f => ({ ...f, group_name: e.target.value }))} className={inp}>
+                      {siteGroupOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-2 py-2"><input value={editForm.public_ip} onChange={e => setEditForm(f => ({ ...f, public_ip: e.target.value }))} className={`${inp} font-mono`} /></td>
+                  <td className="px-2 py-2"><input value={editForm.cidr_or_ip} onChange={e => setEditForm(f => ({ ...f, cidr_or_ip: e.target.value }))} className={`${inp} font-mono`} /></td>
+                  <td className="px-2 py-2">
+                    <select value={editForm.entry_type} onChange={e => setEditForm(f => ({ ...f, entry_type: e.target.value }))} className={inp}>
+                      {trafficTypeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </td>
+                  <td className="pl-2 pr-6 py-2">
+                    {editError && <p className="text-xs text-red-400 mb-1">{editError}</p>}
+                    <div className="flex items-center gap-2 justify-end">
+                      <button onClick={handleUpdate} disabled={editSaving}
+                        className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors disabled:opacity-50">
+                        {editSaving ? '…' : 'Save'}
+                      </button>
+                      <button onClick={cancelEdit} className="px-3 py-1 text-xs text-gray-400 hover:text-white transition-colors">
+                        Cancel
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                /* ── Display row ── */
+                <tr key={m.id} className="group hover:bg-gray-800/50 transition-colors">
+                  <td className="px-4 py-3 text-white font-medium">{m.site_name}</td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${VPN_GROUP_BADGE[m.group_name] ?? VPN_GROUP_BADGE.other}`}>
+                      {m.group_name.charAt(0).toUpperCase() + m.group_name.slice(1)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-gray-300">{m.public_ip}</td>
+                  <td className="px-4 py-3 font-mono text-gray-300">{m.cidr_or_ip}</td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${VPN_TYPE_BADGE[m.entry_type] ?? 'bg-gray-700 text-gray-300'}`}>
+                      {m.entry_type.toUpperCase()}
+                    </span>
+                  </td>
+                  {isAdmin && (
+                    <td className="pl-2 pr-6 py-3">
+                      <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                        {/* Edit */}
+                        <button onClick={() => startEdit(m)} title="Edit mapping"
+                          className="text-gray-500 hover:text-blue-400 transition-colors">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                          </svg>
+                        </button>
+                        {/* Delete */}
+                        <button onClick={() => handleDelete(m.id)} title="Delete mapping"
+                          className="text-gray-500 hover:text-red-400 transition-colors">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
