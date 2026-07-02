@@ -27,7 +27,7 @@ class VpnMappingIn(BaseModel):
     group_name: str
     public_ip:  str
     cidr_or_ip: str
-    entry_type: str  # 'gp' or 's2s'
+    entry_type: str  # must match a traffic_types.name value
 
 
 class VpnMapping(VpnMappingIn):
@@ -52,9 +52,6 @@ async def list_vpn_mappings(_: CurrentUser):
 @router.post("/", response_model=VpnMapping, status_code=201)
 async def create_vpn_mapping(_: AdminUser, body: VpnMappingIn):
     """Add a new VPN mapping entry (admin only)."""
-    if body.entry_type not in ("gp", "s2s"):
-        raise HTTPException(status_code=422, detail="entry_type must be 'gp' or 's2s'")
-
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         try:
@@ -78,9 +75,6 @@ async def create_vpn_mapping(_: AdminUser, body: VpnMappingIn):
 @router.put("/{mapping_id}", response_model=VpnMapping)
 async def update_vpn_mapping(_: AdminUser, mapping_id: int, body: VpnMappingIn):
     """Update an existing VPN mapping (admin only)."""
-    if body.entry_type not in ("gp", "s2s"):
-        raise HTTPException(status_code=422, detail="entry_type must be 'gp' or 's2s'")
-
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(

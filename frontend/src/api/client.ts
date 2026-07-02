@@ -261,6 +261,34 @@ export const api = {
   deleteVpnMapping: (id: number) =>
     request(`/vpn-mappings/${id}`, { method: 'DELETE' }),
 
+  // ── Geo Map config ─────────────────────────────────────────────────────────
+  getSiteGroups: () =>
+    request<SiteGroup[]>('/geo-config/site-groups'),
+  createSiteGroup: (body: SiteGroupIn) =>
+    request<SiteGroup>('/geo-config/site-groups', { method: 'POST', body: JSON.stringify(body) }),
+  updateSiteGroup: (id: number, body: SiteGroupIn) =>
+    request<SiteGroup>(`/geo-config/site-groups/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteSiteGroup: (id: number) =>
+    request(`/geo-config/site-groups/${id}`, { method: 'DELETE' }),
+
+  getLineStyles: () =>
+    request<LineStyle[]>('/geo-config/line-styles'),
+  createLineStyle: (body: LineStyleIn) =>
+    request<LineStyle>('/geo-config/line-styles', { method: 'POST', body: JSON.stringify(body) }),
+  updateLineStyle: (id: number, body: LineStyleIn) =>
+    request<LineStyle>(`/geo-config/line-styles/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteLineStyle: (id: number) =>
+    request(`/geo-config/line-styles/${id}`, { method: 'DELETE' }),
+
+  getTrafficTypes: () =>
+    request<TrafficType[]>('/geo-config/traffic-types'),
+  createTrafficType: (body: TrafficTypeIn) =>
+    request<TrafficType>('/geo-config/traffic-types', { method: 'POST', body: JSON.stringify(body) }),
+  updateTrafficType: (id: number, body: TrafficTypeIn) =>
+    request<TrafficType>(`/geo-config/traffic-types/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteTrafficType: (id: number) =>
+    request(`/geo-config/traffic-types/${id}`, { method: 'DELETE' }),
+
   getLogs: (params: LogQueryParams) =>
     request<LogResponse>(`/logs?${new URLSearchParams(params as any)}`),
 
@@ -468,7 +496,7 @@ export interface VpnMapping {
   group_name: string
   public_ip:  string
   cidr_or_ip: string
-  entry_type: string   // 'gp' | 's2s'
+  entry_type: string   // references traffic_types.name
   created_at: string
 }
 export interface VpnMappingIn {
@@ -477,6 +505,57 @@ export interface VpnMappingIn {
   public_ip:  string
   cidr_or_ip: string
   entry_type: string
+}
+
+export interface SiteGroup {
+  id:           number
+  name:         string
+  display_name: string
+  fill_color:   string
+  stroke_color: string
+  badge_bg:     string
+  badge_text:   string
+  created_at:   string
+}
+export interface SiteGroupIn {
+  name:         string
+  display_name: string
+  fill_color:   string
+  stroke_color: string
+  badge_bg:     string
+  badge_text:   string
+}
+
+export interface LineStyle {
+  id:           number
+  name:         string
+  label:        string
+  color_hex:    string
+  dash_pattern: string
+  created_at:   string
+}
+export interface LineStyleIn {
+  name:         string
+  label:        string
+  color_hex:    string
+  dash_pattern: string
+}
+
+export interface TrafficType {
+  id:            number
+  name:          string
+  label:         string
+  line_style_id: number | null
+  is_default:    number           // 0 or 1
+  created_at:    string
+  line_color:    string | null    // joined from line_styles
+  line_dash:     string | null    // joined from line_styles
+}
+export interface TrafficTypeIn {
+  name:          string
+  label:         string
+  line_style_id: number | null
+  is_default:    boolean
 }
 
 export type TopologyParams = { window?: string; sampler_ip?: string; min_bytes?: string; limit?: string }
