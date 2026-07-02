@@ -2,7 +2,7 @@
  * GeoMap — IP geolocation traffic map
  *
  * Exports:
- *   GeoPage      → full nav page at /geo (includes VPN mappings panel)
+ *   GeoPage      → full nav page at /geo
  *   GeoMapCard   → inline card for the Analytics page
  *   default      → full-screen standalone pop-out at /geomap
  *
@@ -20,28 +20,94 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import * as d3 from 'd3'
-import { Maximize2, RefreshCw, X, MapPin, Network, Trash2, Plus } from 'lucide-react'
+import { Maximize2, RefreshCw, X, MapPin } from 'lucide-react'
 import { api, setToken, getToken, getTokenRole } from '../api/client'
-import type { GeoDataResponse, VpnMapping, VpnMappingIn } from '../api/client'
+import type { GeoDataResponse, SiteGroup, TrafficType } from '../api/client'
 
-// ── Arc type styles ────────────────────────────────────────────────────────
-const ARC_STYLE: Record<string, { color: string; dash: string; label: string }> = {
-  gp:  { color: '#10b981', dash: '8,3,8,3,2,3', label: 'GlobalProtect VPN' },
-  s2s: { color: '#3b82f6', dash: '10,5',         label: 'Site-to-Site VPN'  },
-  wan: { color: '#ef4444', dash: '',             label: 'WAN Traffic'       },
+// ── Geo config (dynamic — fetched from API, falls back to hardcoded defaults) ──
+interface GeoConfig {
+  arcStyles:    Record<string, { color: string; dash: string; label: string }>
+  groupColors:  Record<string, string>
+  groupStrokes: Record<string, string>
+  defaultFill:  string
+  defaultStroke: string
+  siteGroups:   SiteGroup[]
+  trafficTypes: TrafficType[]
 }
 
-// ── Circle marker colours by group ────────────────────────────────────────
-const GROUP_COLOR: Record<string, string> = {
-  medical: '#a78bfa',
-  dental:  '#34d399',
+const FALLBACK_CONFIG: GeoConfig = {
+  arcStyles: {
+    gp:  { color: '#10b981', dash: '8,3,8,3,2,3', label: 'GlobalProtect VPN' },
+    s2s: { color: '#3b82f6', dash: '10,5',         label: 'Site-to-Site VPN'  },
+    wan: { color: '#ef4444', dash: '',             label: 'WAN Traffic'       },
+  },
+  groupColors:  { medical: '#a78bfa', dental: '#34d399' },
+  groupStrokes: { medical: '#c4b5fd', dental: '#6ee7b7' },
+  defaultFill:  '#ef4444',
+  defaultStroke: '#fca5a5',
+  siteGroups:   [],
+  trafficTypes: [],
 }
-const GROUP_STROKE: Record<string, string> = {
-  medical: '#c4b5fd',
-  dental:  '#6ee7b7',
+
+function buildConfig(trafficTypes: TrafficType[], siteGroups: SiteGroup[]): GeoConfig {
+  const arcStyles: Record<string, { color: string; dash: string; label: string }> = {}
+  let   defaultFill   = '#60a5fa'
+  let   defaultStroke = '#93c5fd'
+
+  for (const t of trafficTypes) {
+    arcStyles[t.name] = {
+      color: t.line_color ?? '#6b7280',
+      dash:  t.line_dash  ?? '',
+      label: t.label,
+    }
+  }
+  // Ensure there is always a 'wan' key (used as fallback for unmatched arcs)
+  if (!arcStyles['wan']) {
+    const def = trafficTypes.find(t => t.is_default)
+    arcStyles['wan'] = def
+      ? { color: def.line_color ?? '#ef4444', dash: def.line_dash ?? '', label: def.label }
+      : FALLBACK_CONFIG.arcStyles['wan']
+  }
+
+  const groupColors:  Record<string, string> = {}
+  const groupStrokes: Record<string, string> = {}
+  for (const g of siteGroups) {
+    groupColors[g.name]  = g.fill_color
+    groupStrokes[g.name] = g.stroke_color
+  }
+
+  // External (non-VPN) marker colour: use the 'wan' arc colour as a hint,
+  // or fall back to red if no wan arc style is configured
+  const extGroup = siteGroups.find(g => g.name === 'external') ?? null
+  if (extGroup) {
+    defaultFill   = extGroup.fill_color
+    defaultStroke = extGroup.stroke_color
+  }
+
+  return { arcStyles, groupColors, groupStrokes, defaultFill, defaultStroke, siteGroups, trafficTypes }
 }
-const DEFAULT_FILL   = '#ef4444'
-const DEFAULT_STROKE = '#fca5a5'
+
+// Module-level cache so config is fetched once per page load
+let _configCache: GeoConfig | null = null
+let _configPromise: Promise<GeoConfig> | null = null
+
+function fetchGeoConfig(): Promise<GeoConfig> {
+  if (_configCache) return Promise.resolve(_configCache)
+  if (!_configPromise) {
+    _configPromise = Promise.all([api.getTrafficTypes(), api.getSiteGroups()])
+      .then(([tt, sg]) => { _configCache = buildConfig(tt, sg); return _configCache })
+      .catch(() => { _configCache = FALLBACK_CONFIG; return _configCache })
+  }
+  return _configPromise
+}
+
+function useGeoConfig(): GeoConfig | null {
+  const [config, setConfig] = useState<GeoConfig | null>(_configCache)
+  useEffect(() => {
+    if (!_configCache) { fetchGeoConfig().then(setConfig) }
+  }, [])
+  return config
+}
 
 // ── Formatters ─────────────────────────────────────────────────────────────
 function fmt(n: number) {
@@ -55,14 +121,17 @@ function fmtNum(n: number) {
 }
 
 // ── LeafletGeoMap — core map component ────────────────────────────────────
-function LeafletGeoMap({ geoData }: { geoData: GeoDataResponse }) {
-  const divRef    = useRef<HTMLDivElement>(null)
-  const mapRef    = useRef<L.Map | null>(null)
+function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: GeoConfig }) {
+  const divRef     = useRef<HTMLDivElement>(null)
+  const mapRef     = useRef<L.Map | null>(null)
   const markersRef = useRef<L.CircleMarker[]>([])
+  const configRef  = useRef(config)
+  useEffect(() => { configRef.current = config }, [config])
 
   // Initialise Leaflet once
   useEffect(() => {
     if (!divRef.current || mapRef.current) return
+    const cfg = configRef.current
 
     const map = L.map(divRef.current, {
       center: [20, 0], zoom: 2,
@@ -73,14 +142,10 @@ function LeafletGeoMap({ geoData }: { geoData: GeoDataResponse }) {
       subdomains: 'abcd', maxZoom: 19,
     }).addTo(map)
 
-    L.control.attribution({ position: 'bottomright', prefix: '' })
-      .addAttribution('© <a href="https://osm.org" target="_blank">OSM</a> © <a href="https://carto.com" target="_blank">CARTO</a>')
-      .addTo(map)
-
     // D3 arc overlay pane
     L.svg({ pane: 'overlayPane' }).addTo(map)
 
-    // ── Static legend (Leaflet control) ──────────────────────────────────
+    // ── Dynamic legend (Leaflet control) ──────────────────────────────────
     const legend = new L.Control({ position: 'bottomleft' })
     legend.onAdd = () => {
       const div = L.DomUtil.create('div')
@@ -89,37 +154,58 @@ function LeafletGeoMap({ geoData }: { geoData: GeoDataResponse }) {
         padding:8px 11px;font-size:11px;line-height:1.7;color:#d1d5db;
         pointer-events:none;user-select:none;
       `
-      div.innerHTML = `
-        <div style="color:#9ca3af;font-weight:600;margin-bottom:3px;font-size:10px;text-transform:uppercase;letter-spacing:.05em">Traffic Type</div>
-        <div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
-          <svg width="26" height="7"><line x1="0" y1="3.5" x2="26" y2="3.5" stroke="#10b981" stroke-width="2" stroke-dasharray="6,2,6,2,2,2"/></svg>
-          GlobalProtect VPN
-        </div>
-        <div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
-          <svg width="26" height="7"><line x1="0" y1="3.5" x2="26" y2="3.5" stroke="#3b82f6" stroke-width="2" stroke-dasharray="8,4"/></svg>
-          Site-to-Site VPN
-        </div>
-        <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">
-          <svg width="26" height="7"><line x1="0" y1="3.5" x2="26" y2="3.5" stroke="#ef4444" stroke-width="2"/></svg>
-          WAN Traffic
-        </div>
-        <div style="color:#9ca3af;font-weight:600;margin-bottom:3px;font-size:10px;text-transform:uppercase;letter-spacing:.05em">Sites</div>
-        <div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
-          <div style="width:10px;height:10px;border-radius:50%;background:#a78bfa;flex-shrink:0"></div>Medical
-        </div>
-        <div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
-          <div style="width:10px;height:10px;border-radius:50%;background:#34d399;flex-shrink:0"></div>Dental
-        </div>
-        <div style="display:flex;align-items:center;gap:7px">
-          <div style="width:10px;height:10px;border-radius:50%;background:#ef4444;flex-shrink:0"></div>External
-        </div>
-      `
+      const c = configRef.current
+      const heading = (t: string) =>
+        `<div style="color:#9ca3af;font-weight:600;margin-bottom:3px;font-size:10px;text-transform:uppercase;letter-spacing:.05em">${t}</div>`
+
+      // Traffic types section
+      const arcEntries = c.trafficTypes.length
+        ? c.trafficTypes.map(t => {
+            const da = t.line_dash ? ` stroke-dasharray="${t.line_dash}"` : ''
+            return `<div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
+              <svg width="26" height="7"><line x1="0" y1="3.5" x2="26" y2="3.5" stroke="${t.line_color ?? '#6b7280'}" stroke-width="2"${da}/></svg>
+              ${t.label}
+            </div>`
+          }).join('')
+        : Object.entries(c.arcStyles).map(([, s]) => {
+            const da = s.dash ? ` stroke-dasharray="${s.dash}"` : ''
+            return `<div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
+              <svg width="26" height="7"><line x1="0" y1="3.5" x2="26" y2="3.5" stroke="${s.color}" stroke-width="2"${da}/></svg>
+              ${s.label}
+            </div>`
+          }).join('')
+
+      // Site groups section
+      const siteEntries = c.siteGroups.length
+        ? c.siteGroups.map((g, i) =>
+            `<div style="display:flex;align-items:center;gap:7px;${i < c.siteGroups.length - 1 ? 'margin-bottom:2px' : ''}">
+              <div style="width:10px;height:10px;border-radius:50%;background:${g.fill_color};border:1.5px solid ${g.stroke_color};flex-shrink:0"></div>
+              ${g.display_name}
+            </div>`
+          ).join('')
+        : `<div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
+            <div style="width:10px;height:10px;border-radius:50%;background:#a78bfa;flex-shrink:0"></div>Medical
+          </div>
+          <div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
+            <div style="width:10px;height:10px;border-radius:50%;background:#34d399;flex-shrink:0"></div>Dental
+          </div>
+          <div style="display:flex;align-items:center;gap:7px">
+            <div style="width:10px;height:10px;border-radius:50%;background:#ef4444;flex-shrink:0"></div>External
+          </div>`
+
+      div.innerHTML =
+        heading('Traffic Type') +
+        `<div style="margin-bottom:6px">${arcEntries}</div>` +
+        heading('Sites') +
+        siteEntries
+
       return div
     }
     legend.addTo(map)
 
     mapRef.current = map
     return () => { map.remove(); mapRef.current = null }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Draw / update whenever geoData changes
@@ -151,8 +237,9 @@ function LeafletGeoMap({ geoData }: { geoData: GeoDataResponse }) {
     // Draw location circles, coloured by group
     geoData.locations.forEach(loc => {
       const r      = rScale(loc.bytes)
-      const fill   = GROUP_COLOR[loc.group ?? '']   ?? DEFAULT_FILL
-      const stroke = GROUP_STROKE[loc.group ?? ''] ?? DEFAULT_STROKE
+      const cfg    = configRef.current
+      const fill   = cfg.groupColors[loc.group ?? '']  ?? cfg.defaultFill
+      const stroke = cfg.groupStrokes[loc.group ?? ''] ?? cfg.defaultStroke
 
       const displayLabel = loc.site_name
         ? `${loc.site_name} <span style="color:#9ca3af;font-size:10px">(${loc.group})</span>`
@@ -212,7 +299,8 @@ function LeafletGeoMap({ geoData }: { geoData: GeoDataResponse }) {
       // 1st pass — visible styled arcs (pointer-events off; hit area handles them)
       const visibleNodes = pathDs.map((d, i) => {
         const arc   = geoData.arcs[i]
-        const style = ARC_STYLE[arc.arc_type ?? 'wan'] ?? ARC_STYLE.wan
+        const cfg   = configRef.current
+        const style = cfg.arcStyles[arc.arc_type ?? 'wan'] ?? cfg.arcStyles['wan'] ?? FALLBACK_CONFIG.arcStyles['wan']
         const node  = arcG.append('path')
           .attr('d', d)
           .attr('stroke', style.color)
@@ -230,7 +318,8 @@ function LeafletGeoMap({ geoData }: { geoData: GeoDataResponse }) {
       pathDs.forEach((d, i) => {
         const arc   = geoData.arcs[i]
         const vis   = visibleNodes[i]
-        const style = ARC_STYLE[arc.arc_type ?? 'wan'] ?? ARC_STYLE.wan
+        const cfg   = configRef.current
+        const style = cfg.arcStyles[arc.arc_type ?? 'wan'] ?? cfg.arcStyles['wan'] ?? FALLBACK_CONFIG.arcStyles['wan']
         const baseW = widthScale(arc.bytes)
         const typeLabel = style.label
 
@@ -281,208 +370,15 @@ function LeafletGeoMap({ geoData }: { geoData: GeoDataResponse }) {
   )
 }
 
-// ── VPN Mappings Panel ─────────────────────────────────────────────────────
-const GROUP_BADGE: Record<string, string> = {
-  medical: 'bg-violet-800 text-violet-200',
-  dental:  'bg-emerald-800 text-emerald-200',
-  other:   'bg-gray-700 text-gray-300',
-}
-const TYPE_BADGE: Record<string, string> = {
-  gp:  'bg-emerald-700 text-emerald-100',
-  s2s: 'bg-blue-700 text-blue-100',
-}
-
-function VpnPanel({ onClose, isAdmin }: { onClose: () => void; isAdmin: boolean }) {
-  const [mappings, setMappings] = useState<VpnMapping[]>([])
-  const [loading,  setLoading]  = useState(true)
-  const [showAdd,  setShowAdd]  = useState(false)
-  const [form, setForm] = useState<VpnMappingIn>({
-    site_name: '', group_name: 'medical', public_ip: '', cidr_or_ip: '', entry_type: 's2s',
-  })
-  const [saving, setSaving] = useState(false)
-  const [error,  setError]  = useState('')
-
-  useEffect(() => {
-    api.getVpnMappings()
-      .then(setMappings)
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
-
-  async function handleAdd() {
-    if (!form.site_name.trim() || !form.public_ip.trim() || !form.cidr_or_ip.trim()) {
-      setError('All fields are required')
-      return
-    }
-    setSaving(true); setError('')
-    try {
-      const m = await api.createVpnMapping(form)
-      setMappings(prev => [...prev, m])
-      setForm({ site_name: '', group_name: 'medical', public_ip: '', cidr_or_ip: '', entry_type: 's2s' })
-      setShowAdd(false)
-    } catch (e: any) {
-      setError(e.message ?? 'Failed to save')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleDelete(id: number) {
-    try {
-      await api.deleteVpnMapping(id)
-      setMappings(prev => prev.filter(m => m.id !== id))
-    } catch {}
-  }
-
-  // Group by group_name for display
-  const byGroup: Record<string, VpnMapping[]> = {}
-  for (const m of mappings) {
-    const g = m.group_name || 'other'
-    if (!byGroup[g]) byGroup[g] = []
-    byGroup[g].push(m)
-  }
-
-  return (
-    <div className="bg-gray-900 border border-gray-700 rounded-xl p-3 flex-shrink-0">
-      {/* Panel header */}
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-          <Network size={12} className="text-blue-400" />
-          VPN Site Mappings
-        </span>
-        <div className="flex items-center gap-2">
-          {isAdmin && !showAdd && (
-            <button
-              onClick={() => setShowAdd(true)}
-              className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
-            >
-              <Plus size={11} /> Add
-            </button>
-          )}
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors">
-            <X size={14} />
-          </button>
-        </div>
-      </div>
-
-      {/* Mapping list */}
-      {loading ? (
-        <p className="text-xs text-gray-500 text-center py-3">Loading…</p>
-      ) : (
-        <div className="overflow-y-auto max-h-44 space-y-2.5">
-          {Object.keys(byGroup).length === 0 ? (
-            <p className="text-xs text-gray-500 text-center py-3">No VPN mappings configured</p>
-          ) : (
-            Object.entries(byGroup).map(([group, items]) => (
-              <div key={group}>
-                <div className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded mb-1 ${GROUP_BADGE[group] ?? GROUP_BADGE.other}`}>
-                  {group.charAt(0).toUpperCase() + group.slice(1)}
-                </div>
-                <table className="w-full text-xs border-collapse">
-                  <tbody>
-                    {items.map(m => (
-                      <tr key={m.id} className="group/row hover:bg-gray-800/50">
-                        <td className="py-0.5 pr-3 text-white whitespace-nowrap">{m.site_name}</td>
-                        <td className="py-0.5 pr-3 text-gray-400 font-mono">{m.public_ip}</td>
-                        <td className="py-0.5 pr-3 text-gray-300 font-mono">{m.cidr_or_ip}</td>
-                        <td className="py-0.5 pr-2">
-                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${TYPE_BADGE[m.entry_type] ?? 'bg-gray-700 text-gray-300'}`}>
-                            {m.entry_type.toUpperCase()}
-                          </span>
-                        </td>
-                        {isAdmin && (
-                          <td className="py-0.5 w-4">
-                            <button
-                              onClick={() => handleDelete(m.id)}
-                              title="Delete mapping"
-                              className="text-gray-700 hover:text-red-400 opacity-0 group-hover/row:opacity-100 transition-all"
-                            >
-                              <Trash2 size={11} />
-                            </button>
-                          </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* Add form */}
-      {showAdd && isAdmin && (
-        <div className="mt-2 pt-2 border-t border-gray-700">
-          <div className="flex gap-1.5 mb-1.5">
-            <input
-              placeholder="Site name"
-              value={form.site_name}
-              onChange={e => setForm(f => ({ ...f, site_name: e.target.value }))}
-              className="flex-1 min-w-0 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-            />
-            <select
-              value={form.group_name}
-              onChange={e => setForm(f => ({ ...f, group_name: e.target.value }))}
-              className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
-            >
-              <option value="medical">Medical</option>
-              <option value="dental">Dental</option>
-              <option value="other">Other</option>
-            </select>
-            <input
-              placeholder="Public IP"
-              value={form.public_ip}
-              onChange={e => setForm(f => ({ ...f, public_ip: e.target.value }))}
-              className="w-32 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-white placeholder-gray-500 font-mono focus:outline-none focus:border-blue-500"
-            />
-            <input
-              placeholder="CIDR or IP"
-              value={form.cidr_or_ip}
-              onChange={e => setForm(f => ({ ...f, cidr_or_ip: e.target.value }))}
-              className="w-32 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-white placeholder-gray-500 font-mono focus:outline-none focus:border-blue-500"
-            />
-            <select
-              value={form.entry_type}
-              onChange={e => setForm(f => ({ ...f, entry_type: e.target.value }))}
-              className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
-            >
-              <option value="s2s">S2S</option>
-              <option value="gp">GP</option>
-            </select>
-          </div>
-          {error && <p className="text-xs text-red-400 mb-1.5">{error}</p>}
-          <div className="flex gap-2">
-            <button
-              onClick={handleAdd}
-              disabled={saving}
-              className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors disabled:opacity-50"
-            >
-              {saving ? 'Saving…' : 'Add Mapping'}
-            </button>
-            <button
-              onClick={() => { setShowAdd(false); setError('') }}
-              className="px-3 py-1 text-xs text-gray-400 hover:text-white transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 const WINDOWS = ['1h', '6h', '24h', '7d', '30d']
 
 // ── GeoPage — full nav page at /geo ────────────────────────────────────────
 export function GeoPage() {
-  const [timeWindow,   setTimeWindow]   = useState('1h')
-  const [geoData,      setGeoData]      = useState<GeoDataResponse | null>(null)
-  const [loading,      setLoading]      = useState(true)
-  const [error,        setError]        = useState(false)
-  const [showVpnPanel, setShowVpnPanel] = useState(false)
-  const isAdmin = getTokenRole() === 'admin'
+  const [timeWindow, setTimeWindow] = useState('1h')
+  const [geoData,    setGeoData]    = useState<GeoDataResponse | null>(null)
+  const [loading,    setLoading]    = useState(true)
+  const [error,      setError]      = useState(false)
+  const config = useGeoConfig()
 
   const load = useCallback(() => {
     setLoading(true); setError(false)
@@ -513,17 +409,6 @@ export function GeoPage() {
         <h1 className="text-xl font-semibold text-white">Geo Map</h1>
         <div className="flex items-center gap-3">
           {loading && <span className="text-xs text-gray-400 animate-pulse">Loading…</span>}
-          <button
-            onClick={() => setShowVpnPanel(v => !v)}
-            title="VPN site mappings"
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
-              showVpnPanel
-                ? 'bg-blue-600/20 border border-blue-500/40 text-blue-300'
-                : 'text-gray-400 hover:text-white hover:bg-gray-800'
-            }`}
-          >
-            <Network size={13} /> VPN Sites
-          </button>
           <button onClick={load} title="Refresh" className="p-1.5 rounded text-gray-400 hover:text-white transition-colors">
             <RefreshCw size={14} />
           </button>
@@ -544,11 +429,6 @@ export function GeoPage() {
         </div>
       </div>
 
-      {/* VPN panel (collapsible) */}
-      {showVpnPanel && (
-        <VpnPanel onClose={() => setShowVpnPanel(false)} isAdmin={isAdmin} />
-      )}
-
       {/* Map */}
       <div className="flex-1 min-h-0 bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
         {error ? (
@@ -559,8 +439,8 @@ export function GeoPage() {
           <div className="flex items-center justify-center h-full text-sm text-gray-500">
             No external IP traffic in the {timeWindow} window
           </div>
-        ) : hasData ? (
-          <LeafletGeoMap geoData={geoData!} />
+        ) : hasData && config ? (
+          <LeafletGeoMap geoData={geoData!} config={config} />
         ) : null}
       </div>
     </div>
@@ -572,6 +452,7 @@ export function GeoMapCard({ timeWindow }: { timeWindow: string }) {
   const [geoData, setGeoData] = useState<GeoDataResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(false)
+  const config = useGeoConfig()
 
   const load = useCallback(() => {
     setLoading(true); setError(false)
@@ -622,8 +503,8 @@ export function GeoMapCard({ timeWindow }: { timeWindow: string }) {
           <div className="flex items-center justify-center h-full text-xs text-gray-500">
             No external IP traffic in this window
           </div>
-        ) : hasData ? (
-          <LeafletGeoMap geoData={geoData!} />
+        ) : hasData && config ? (
+          <LeafletGeoMap geoData={geoData!} config={config} />
         ) : null}
       </div>
     </div>
@@ -636,6 +517,7 @@ export default function GeoMapPage() {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(false)
   const [ready,   setReady]   = useState(false)
+  const config = useGeoConfig()
 
   const params     = new URLSearchParams(window.location.search)
   const timeWindow = params.get('window') ?? '1h'
@@ -701,9 +583,9 @@ export default function GeoMapPage() {
             No external IP traffic in the {timeWindow} window
           </div>
         )}
-        {hasData && (
+        {hasData && config && (
           <div style={{ width: '100%', height: '100%' }}>
-            <LeafletGeoMap geoData={geoData!} />
+            <LeafletGeoMap geoData={geoData!} config={config} />
           </div>
         )}
       </div>
