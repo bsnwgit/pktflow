@@ -310,15 +310,22 @@ async def widget_geo_map():
 <div id="map"></div>
 <script>
 const GD={geo_json};
-const map=L.map('map',{{center:[20,0],zoom:2,attributionControl:false,zoomControl:true}});
+const map=L.map('map',{{attributionControl:false,zoomControl:true}});
 L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',{{subdomains:'abcd'}}).addTo(map);
 GD.arcs.forEach(a=>L.polyline([[a.src_lat,a.src_lng],[a.dst_lat,a.dst_lng]],{{color:'#60a5fa',weight:1.2,opacity:0.45}}).addTo(map));
+const pts=[];
 GD.locations.forEach(loc=>{{
   const r=Math.max(4,Math.min(16,Math.sqrt((loc.bytes||1)/2000)));
   L.circleMarker([loc.lat,loc.lng],{{radius:r,color:'#60a5fa',fillColor:'#60a5fa',fillOpacity:0.65,weight:1.5}})
    .bindTooltip('<b>'+loc.ip+'</b>'+(loc.city?'<br>'+loc.city+(loc.country?', '+loc.country:''):''),{{sticky:true}}).addTo(map);
+  pts.push([loc.lat,loc.lng]);
 }});
-if(!GD.locations.length)document.getElementById('map').innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#334155;font-size:13px">No public IP geo data available</div>';
+if(pts.length){{
+  map.fitBounds(L.latLngBounds(pts),{{padding:[30,30],maxZoom:10}});
+}}else{{
+  map.setView([20,0],2);
+  document.getElementById('map').innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#334155;font-size:13px">No public IP geo data available</div>';
+}}
 </script>"""
     return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Geo Map</title>{extra_head}</head><body style="margin:0;background:#0a1628;font-family:Inter,system-ui,sans-serif;display:flex;flex-direction:column;height:100vh;overflow:hidden">{body}</body></html>""")
 
