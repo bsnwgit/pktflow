@@ -352,8 +352,6 @@ function TopTalkersTable({ talkers, totalBytes, window, externalExpanded, onExte
                     <td className="px-2 py-2.5" onClick={e => e.stopPropagation()}>
                       <a
                         href={`/explorer?src_ip=${encodeURIComponent(t.src_ip)}&dst_ip=${encodeURIComponent(t.dst_ip)}&dst_port=${t.dst_port}&protocol=${t.protocol}&window=${window}`}
-                        target="_blank"
-                        rel="noreferrer"
                         className="text-blue-400 hover:text-blue-300 transition-colors"
                         title="View in Flow Explorer"
                       >

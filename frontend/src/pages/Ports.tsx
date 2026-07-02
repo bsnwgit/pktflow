@@ -391,8 +391,6 @@ function PortInventoryTable({ window, sampler_ip, site }: { window: string; samp
                     <td className="px-2 py-2" onClick={e => e.stopPropagation()}>
                       <a
                         href={`/explorer?dst_port=${row.port}&protocol=${row.protocol}&window=${window}${sampler_ip ? `&sampler=${encodeURIComponent(sampler_ip)}` : ''}`}
-                        target="_blank"
-                        rel="noreferrer"
                         className="text-blue-400 hover:text-blue-300 transition-colors"
                         title="View in Flow Explorer"
                       >
