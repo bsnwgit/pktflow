@@ -12,6 +12,7 @@ from __future__ import annotations
 import aiosqlite
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from typing import Optional
 
 from app.database import DB_PATH
 from app.dependencies import CurrentUser, AdminUser
@@ -50,7 +51,7 @@ class LineStyle(LineStyleIn):
 class TrafficTypeIn(BaseModel):
     name:          str
     label:         str
-    line_style_id: int | None = None
+    line_style_id: Optional[int] = None
     is_default:    bool = False
 
 
@@ -58,12 +59,12 @@ class TrafficType(BaseModel):
     id:            int
     name:          str
     label:         str
-    line_style_id: int | None
+    line_style_id: Optional[int]
     is_default:    int          # 0 or 1 — kept as int for SQLite compat
     created_at:    str
     # Flattened from joined line_styles row
-    line_color:    str | None = None
-    line_dash:     str | None = None
+    line_color:    Optional[str] = None
+    line_dash:     Optional[str] = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
