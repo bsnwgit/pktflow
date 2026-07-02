@@ -231,7 +231,7 @@
   <text x="795" y="509" text-anchor="middle" fill="#22d3ee" font-size="8" font-weight="600">REST API / JWT</text>
 
   <!-- ─── STAGE 5: Dashboard ─── -->
-  <rect x="910" y="148" width="168" height="304" rx="12" fill="url(#dashGrad)" stroke="#22d3ee" stroke-width="1.5" filter="url(#shadow)"/>
+  <rect x="910" y="148" width="168" height="332" rx="12" fill="url(#dashGrad)" stroke="#22d3ee" stroke-width="1.5" filter="url(#shadow)"/>
 
   <!-- Mini logo in dashboard header -->
   <rect x="918" y="155" width="24" height="24" rx="4" fill="#0d1f3d"/>
@@ -266,6 +266,9 @@
 
   <rect x="920" y="416" width="150" height="22" rx="4" fill="#0a1e2e" stroke="#22d3ee" stroke-width="0.7"/>
   <text x="995" y="431" text-anchor="middle" fill="#7dd3fc" font-size="8">Multi-site · Multi-sampler</text>
+
+  <rect x="920" y="444" width="150" height="22" rx="4" fill="#0a1e2e" stroke="#22d3ee" stroke-width="0.7"/>
+  <text x="995" y="459" text-anchor="middle" fill="#7dd3fc" font-size="8">Geo Map · Leaflet · VPN Mapping</text>
 
   <text x="994" y="552" text-anchor="middle" fill="#22d3ee" font-size="10" font-weight="600" opacity="0.8">REACT</text>
   <text x="994" y="566" text-anchor="middle" fill="#22d3ee" font-size="10" font-weight="600" opacity="0.8">DASHBOARD</text>
