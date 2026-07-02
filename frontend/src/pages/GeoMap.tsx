@@ -266,7 +266,7 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
           { direction: 'top', offset: L.point(0, -r - 4), className: 'pf-geo-tooltip', opacity: 1 }
         )
         .on('click', () => {
-          window.open(`/explorer?src_ip=${loc.ip}`, '_blank', 'noopener')
+          window.location.href = `/explorer?src_ip=${loc.ip}`
         })
         .addTo(map)
 
@@ -337,10 +337,7 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
             d3.select(vis).attr('opacity', 0.6).attr('stroke-width', baseW)
           })
           .on('click', () => {
-            window.open(
-              `/explorer?src_ip=${arc.src_ip}&dst_ip=${arc.dst_ip}`,
-              '_blank', 'noopener'
-            )
+            window.location.href = `/explorer?src_ip=${arc.src_ip}&dst_ip=${arc.dst_ip}`
           })
           .append('title')
             .text(
@@ -397,7 +394,7 @@ export function GeoPage() {
       sessionStorage.setItem('pf_pop_token', tok)
       sessionStorage.setItem('pf_pop_role',  role)
     }
-    window.open(`/geomap?window=${timeWindow}`, '_blank', 'noopener')
+    window.location.href = `/geomap?window=${timeWindow}`
   }
 
   const hasData = geoData && geoData.locations.length > 0
@@ -471,7 +468,7 @@ export function GeoMapCard({ timeWindow }: { timeWindow: string }) {
       sessionStorage.setItem('pf_pop_token', tok)
       sessionStorage.setItem('pf_pop_role',  role)
     }
-    window.open(`/geomap?window=${timeWindow}`, '_blank', 'noopener')
+    window.location.href = `/geomap?window=${timeWindow}`
   }
 
   const hasData = geoData && geoData.locations.length > 0
