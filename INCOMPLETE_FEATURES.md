@@ -1,6 +1,6 @@
 # pktFlow — Incomplete & Untested Features
 
-Generated: 2026-06-25  
+Generated: 2026-07-01  
 Status of every planned feature that is not fully built and production-verified.
 
 ---
@@ -78,10 +78,26 @@ Visualization planned: `src_ip → dst_port → dst_ip` alluvial/Sankey chart wi
 
 ---
 
+## Geo Map — BUILT AND WORKING ✅
+
+Deployed 2026-07-01.
+
+- **Leaflet dark map** with D3 SVG arc overlay (`GeoMap.tsx`)
+- **ip-api.com batch geo lookup** — 100 IPs/request, no API key required
+- **VPN site mapping** (`migrations/006_vpn_mappings.sql`, `app/api/vpn_mappings.py`) — RFC-1918 private CIDRs/IPs mapped to public firewall IPs so VPN traffic plots at the correct geographic location
+- **Arc type classification** — GP > S2S > WAN priority; arc colors: GlobalProtect (green dash-dot), Site-to-Site (blue dashed), WAN (solid red)
+- **Circle markers by group** — medical (purple), dental (green), external (red)
+- **VPN Sites panel** — collapsible, admin CRUD for adding/deleting mappings
+- **Map legend** — Leaflet control overlay (bottom-left)
+- **API** — `/api/flows/geo` (locations + arcs with `arc_type`), `/api/vpn-mappings` CRUD
+
+---
+
 ## Summary Table
 
 | Feature | Backend | Frontend | Tested |
 |---------|---------|----------|--------|
+| **Geo Map + VPN mapping** | ✅ Built | ✅ Built | ✅ Production |
 | Slack notifications | ✅ Written | ✅ Settings UI | ❌ |
 | Email notifications | ✅ Written | ✅ Settings UI | ❌ |
 | PagerDuty notifications | ✅ Written | ✅ Settings UI | ❌ |

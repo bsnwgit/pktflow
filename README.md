@@ -20,6 +20,7 @@ A production NetFlow visualization and alerting platform. Receives live NetFlow 
 - **Device View** — per-sampler traffic history, top talkers table, protocol distribution
 - **Flow Explorer** — search and filter flows by IP, port, protocol, time range; paginated results; CSV/JSON export
 - **Network Topology** — D3 force-directed graph with site cluster labeling; export to PNG, SVG, JSON, DOT, Draw.io, or Lucidchart
+- **Geo Map** — Leaflet dark map with D3 SVG arc overlays; ip-api.com geo lookup; arc classification by type (GlobalProtect VPN = green dash-dot, Site-to-Site VPN = blue dashed, WAN = solid red); circle markers colored by site group (medical = purple, dental = green, external = red); collapsible VPN Sites panel (admin CRUD); map legend overlay; VPN site mapping resolves RFC-1918 private IPs to their firewall public IPs for accurate geo placement
 
 ### Alerting
 - **data_gap** — fires when a known sampler goes silent for a configurable period; dismissed samplers are excluded
@@ -352,12 +353,13 @@ pktflow/
 ├── app/
 │   ├── api/
 │   │   ├── ingest.py       POST /api/ingest/flows
-│   │   ├── flows.py        GET /api/flows/*
+│   │   ├── flows.py        GET /api/flows/* (includes /geo endpoint)
 │   │   ├── alerts.py       Alert rules + events
 │   │   ├── auth.py         Login, SAML, token refresh
 │   │   ├── devices.py      Device registry CRUD + unknown samplers
 │   │   ├── settings.py     App settings CRUD
 │   │   ├── users.py        User management
+│   │   ├── vpn_mappings.py VPN site mapping CRUD (/api/vpn-mappings)
 │   │   ├── system.py       Health, restart, SSL upload, cleanup, backup
 │   │   ├── ws.py           WebSocket endpoint + broadcast helpers
 │   │   └── ai.py           AI assistant (Claude)
@@ -383,7 +385,7 @@ pktflow/
 ├── clickhouse/schema.sql   flows + rollup tables + materialized views
 ├── frontend/src/
 │   ├── pages/              Dashboard, Analytics, DeviceView, FlowExplorer,
-│   │                         Topology, Ports, Alerts, Settings, Users
+│   │                         Topology, GeoMap, Ports, Alerts, Settings, Users
 │   ├── components/         Layout, AiAssistant
 │   ├── api/client.ts       Typed API client + getToken() for WebSocket
 │   ├── hooks/useWebSocket.ts  WebSocket hook
@@ -419,11 +421,23 @@ pktflow/
 | `GET` | `/api/flows/search` | Paginated flow search |
 | `GET` | `/api/flows/topology` | Node/edge list for topology graph |
 | `GET` | `/api/flows/topology/lucidchart` | Export topology to Lucidchart |
+| `GET` | `/api/flows/geo` | Geo-located IP pairs + arc type classification for Geo Map |
 | `GET` | `/api/flows/rate` | Current flows/sec |
 | `GET` | `/api/flows/export` | Download flows as CSV or JSON |
 | `GET` | `/api/flows/devices` | Device summaries with live stats |
 
 Common query parameters: `sampler_ip`, `src_ip`, `dst_ip`, `src_port`, `dst_port`, `protocol`, `site`, `start`, `end`, `limit`, `offset`.
+
+### VPN Site Mappings
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/vpn-mappings` | JWT | List all VPN site mappings |
+| `POST` | `/api/vpn-mappings` | Admin JWT | Create a new VPN mapping |
+| `PUT` | `/api/vpn-mappings/{id}` | Admin JWT | Update a VPN mapping |
+| `DELETE` | `/api/vpn-mappings/{id}` | Admin JWT | Delete a VPN mapping |
+
+VPN mappings map private RFC-1918 CIDRs or single IPs to a public firewall IP and a site group. The `/api/flows/geo` endpoint uses these to resolve private addresses to their public IPs before geo lookup, so VPN traffic shows the correct real-world location on the map. `entry_type` is `gp` (GlobalProtect) or `s2s` (Site-to-Site), which determines arc color/style on the map.
 
 ### WebSocket
 
@@ -495,6 +509,8 @@ After pktFlow restarts, Vector detects the connection reset and immediately retr
 | Okta OIDC | SAML works; OIDC (`app/auth/okta.py`) not implemented |
 | AI assistant | Code written; needs `anthropic` package in venv + API key in Settings |
 | Topology node click → flow drill-down | Nodes not interactive beyond hover |
+| Traffic by Port page | Not yet built — planned: port inventory, protocol mix, top ports, traffic chart |
+| Sankey flow diagram | Not yet built — planned: D3-sankey `src_ip → dst_port → dst_ip` arc chart |
 | Pie charts on Device View | Not built |
 | Storage "Test Connection" button | UI exists, no backend endpoint |
 | Production-test DuckDB backend | Implemented but never run against real data |
