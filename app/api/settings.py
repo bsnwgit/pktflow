@@ -19,7 +19,7 @@ router = APIRouter()
 # ── Default settings (applied on first run) ───────────────────────────────────
 DEFAULTS: dict[str, Any] = {
     # Storage
-    "storage_backend": "duckdb",          # clickhouse | duckdb
+    "storage_backend": "clickhouse",      # clickhouse | duckdb
     "retention_days_raw": 90,
     "retention_days_hourly": 365,
 
@@ -95,7 +95,7 @@ DEFAULTS: dict[str, Any] = {
     "backup_enabled": False,
     "backup_interval_hours": 24,
     "backup_rotation_count": 5,
-    "backup_path": "/opt/pktflow/backups",
+    "backup_path": "",  # computed at seed time — see _ensure_defaults()
     "backup_include_clickhouse": True,
 
     # Live updates (WebSocket)
@@ -115,7 +115,16 @@ _SECRET_KEYS = frozenset({
 
 
 async def _ensure_defaults(db: aiosqlite.Connection) -> None:
+    from pathlib import Path
+
+    from app.config import get_settings
+
     for key, value in DEFAULTS.items():
+        if key == "backup_path" and not value:
+            # Default backups into a "backups" dir alongside the app database,
+            # i.e. inside whatever directory the app was actually installed to
+            # — not a hardcoded path that only matches the default install dir.
+            value = str(Path(get_settings().db_path).parent / "backups")
         await db.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
             (key, json.dumps(value)),
