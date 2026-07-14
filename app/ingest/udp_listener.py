@@ -56,17 +56,24 @@ def _decode_v9_flows(
     templates: dict,
 ) -> list[FlowRecord]:
     """Parse one raw UDP datagram; return normalized FlowRecords (may be empty)."""
-    from netflow import parse_packet  # lazy import — only needed when UDP is active
+    # Lazy imports — only needed when UDP is active
+    from netflow import parse_packet
+    from netflow.ipfix import IPFIXTemplateNotRecognized
+    from netflow.v9 import V9TemplateNotRecognized
 
     try:
         packet = parse_packet(data, templates)
+    except (V9TemplateNotRecognized, IPFIXTemplateNotRecognized):
+        # Expected while waiting for the first template packet from this
+        # exporter. These are raised with no message text, so checking
+        # str(exc) (as this used to do) never matched and every one of
+        # these got misreported as an opaque "UDP parse error from ...: "
+        # with an empty message — checking the exception type directly
+        # instead of sniffing its (empty) string form.
+        log.info("UDP template not yet seen from %s — dropping packet", src_ip)
+        return []
     except Exception as exc:
-        msg = str(exc).lower()
-        if "template" in msg:
-            # Expected while waiting for the first template packet from this exporter
-            log.info("UDP template not yet seen from %s — dropping packet", src_ip)
-        else:
-            log.info("UDP parse error from %s: %s", src_ip, exc)
+        log.info("UDP parse error from %s: %s", src_ip, exc)
         return []
 
     now = datetime.now(tz=timezone.utc)
