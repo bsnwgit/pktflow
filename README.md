@@ -8,7 +8,7 @@ A production NetFlow visualization and alerting platform. Receives live NetFlow 
 
 ## Quick Start
 
-Requires a fresh Ubuntu Server 22.04/24.04 LTS host with `sudo` access, and Node.js 20.x LTS installed for the frontend build (not installed by `install.sh` — see [Requirements](#requirements)).
+Requires a fresh Ubuntu Server 22.04/24.04 LTS host with `sudo` access, and Node.js 20.x LTS installed beforehand for the frontend build (`install.sh` builds the frontend automatically if `npm` is already on `PATH`, but does not install Node.js itself — see [Requirements](#requirements)).
 
 ```bash
 # 1. Clone the repository
@@ -16,21 +16,17 @@ git clone https://github.com/bsnwgit/pktflow.git
 cd pktflow
 
 # 2. Run the installer — system packages, ClickHouse, Python deps, schema,
-#    config.yaml + secret key, admin user, systemd service (installed + started)
+#    config.yaml + secret key, admin user, frontend build (if npm is present),
+#    systemd service (installed + started)
 bash install.sh
 # Prints the admin password and ingest token at the end — save them, they are
-# not shown again.
+# not shown again. If npm wasn't found, the final banner prints the exact
+# manual frontend-build commands to run before the web UI will load.
 
-# 3. Build and deploy the frontend (install.sh does not do this — see
-#    Installation § 8 below for why it's a separate step)
-cd frontend && npm install && npm run build && cd ..
-sudo cp -r frontend/dist /opt/pktflow/frontend/dist
-sudo systemctl restart pktflow
-
-# 4. Open the firewall for the app port (adjust if PKTFLOW_INSTALL_DIR/port differ)
+# 3. Open the firewall for the app port (adjust if PKTFLOW_INSTALL_DIR/port differ)
 sudo ufw allow 8766/tcp
 
-# 5. Open http://<server-ip>:8766 and log in with the admin credentials from step 2
+# 4. Open http://<server-ip>:8766 and log in with the admin credentials from step 2
 ```
 
 For a fully manual walkthrough of what `install.sh` does (e.g. to customize the install path or run steps individually), see [Installation](#installation).
@@ -174,7 +170,7 @@ React 18, TypeScript, Vite, Tailwind CSS, Recharts, D3.js
 
 ## Installation
 
-`install.sh` (see [Quick Start](#quick-start)) automates everything below except **step 8 (build the frontend)** and **step 10 (open the firewall)** — those are always manual. Note that `install.sh` creates the admin user and ingest token directly (printing a generated password at the end) rather than via the `admin_user`/`admin_password` config.yaml fields described in step 7; use whichever approach matches how you're installing. This section is the full manual walkthrough — useful to customize the install, run steps individually, or understand what the script does.
+`install.sh` (see [Quick Start](#quick-start)) automates everything below except **step 10 (open the firewall)**, which is always manual. **Step 8 (build the frontend) is automated too, but only if `npm` is already on `PATH`** — `install.sh` does not install Node.js itself (see [Requirements](#requirements)); if `npm` isn't found, that step is skipped and the script's final banner prints the exact manual commands to run afterward. Note that `install.sh` creates the admin user and ingest token directly (printing a generated password at the end) rather than via the `admin_user`/`admin_password` config.yaml fields described in step 7; use whichever approach matches how you're installing. This section is the full manual walkthrough — useful to customize the install, run steps individually, or understand what the script does.
 
 ### 1. Clone the repository
 
@@ -266,6 +262,8 @@ Set `admin_user`/`admin_password` here — that's what lets you log in at all on
 | `log_file` | `/opt/pktflow/pktflow.log` | Log path |
 
 ### 8. Build the frontend
+
+`install.sh` does this automatically if `npm` is on `PATH` at install time. This is the manual equivalent, for running it yourself or rebuilding after a code change (see [Deployment](#deployment)).
 
 Requires Node.js 20.x LTS. The frontend must be built on Linux — not on Windows (Windows `node_modules` lacks the Linux rollup native binary).
 
