@@ -41,4 +41,4 @@ cors_origins:
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 log_level: "info"
-log_file: "/opt/pktflow/pktflow.log"
+log_file: "/opt/pktflow/logs/pktflow.log"
