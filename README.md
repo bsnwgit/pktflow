@@ -97,7 +97,7 @@ All configuration is managed via the Settings UI (no file edits required after i
 - **Device registry** — name, IP, site per sampler; CSV import; live stats per device
 - **Unknown samplers** — IPs sending flows but not in the registry appear in Settings → Devices with dismiss support
 - **Data retention** — configurable TTL for ClickHouse flows (default 90 days); manual cleanup trigger
-- **Auto-backup** — one-click local backup with 2-revision rotation
+- **Backup** — one-click or scheduled local backup (SQLite DB + ClickHouse flows export) with configurable rotation count
 - **WebSocket** — real-time browser push after every ingest flush; single-worker process ensures all clients receive all broadcasts
 
 ---
@@ -341,8 +341,8 @@ All settings are in the browser UI at `/settings`. Changes take effect immediate
 | Ingest token | Bearer token required by collector Vector sinks |
 | Buffer flush interval | Seconds between ClickHouse writes (default 5) |
 | Buffer max size | Max records held before forced flush |
-| Direct UDP ingest enabled | Enable built-in NetFlow UDP listener |
-| UDP listen port | Port for direct UDP ingest (default 2055) |
+| Direct UDP ingest enabled | Enable built-in NetFlow UDP listener. **Requires a service restart to take effect** — the listener only starts/stops at process startup, it does not react to this setting changing live. |
+| UDP listen port | Port for direct UDP ingest (default 2055). **Requires a service restart to take effect.** |
 | WebSocket stream raw flows | Push raw flow batches to connected browsers after each flush (bandwidth-heavy; off by default) |
 | WebSocket max raw flows | Cap on flows sent per broadcast when raw streaming is enabled |
 
@@ -388,9 +388,21 @@ Notification channels are configured per-alert-rule. Available channels:
 
 | Setting | Description |
 |---------|-------------|
-| Storage backend | `clickhouse` (production) or `duckdb` (experimental) |
+| Storage backend | `clickhouse` (production, default) or `duckdb` (**incomplete** — missing a required backend method, selecting it will crash the app on next restart; do not use until `app/storage/duckdb.py` implements `get_top_ports`). **Requires a service restart to take effect.** |
 | Flow retention days | ClickHouse TTL for raw flows table (default 90) |
 | Manual cleanup | Trigger immediate retention cleanup |
+
+### Backup
+
+| Setting | Description |
+|---------|-------------|
+| Auto backup | Run a scheduled backup at the configured interval |
+| Interval | Hours between automatic backup runs (default 24) |
+| Rotation count | Number of snapshots to keep before old ones are deleted (default 5) |
+| Backup path | Destination directory for snapshots. Defaults to a `backups/` directory next to `pktflow.db` (i.e. inside the install directory) if left blank |
+| Include ClickHouse | Also export the `flows` table to CSV alongside the SQLite snapshot |
+
+Each run creates a timestamped `pktflow-backup-<UTC timestamp>/` directory containing a consistent copy of `pktflow.db` (via SQLite's own backup API, safe to run against a live database) and, if enabled, `flows.csv`. Trigger manually from Settings → Backup → **Run Backup Now**, or via `POST /api/system/backup`.
 
 ### Integrations
 
@@ -401,8 +413,8 @@ Notification channels are configured per-alert-rule. Available channels:
 
 ### System
 
-- **Restart Service** — triggers a service restart; wait ~5 seconds for the service to come back
-- **Backup** — runs the local backup script; keeps 2 rotating snapshots
+- **Restart Service** — triggers a service restart; wait ~5 seconds for the service to come back. Tries `sudo systemctl restart pktflow` first; if the service user doesn't have passwordless sudo for that command (the common case), it falls back to sending itself `SIGTERM` and relying on systemd to bring it back up. **This fallback only works if `pktflow.service` has `Restart=always`** (the shipped template does) — with `Restart=on-failure`, a clean `SIGTERM` is not considered a failure by systemd and the service will stop and stay stopped instead of restarting. If you've customized the unit file, keep `Restart=always` or set up passwordless sudo for `systemctl restart pktflow` for this button to work reliably.
+- **Backup** — see [Backup](#backup) above
 
 ### Okta SAML
 
@@ -632,11 +644,11 @@ After pktFlow restarts, Vector detects the connection reset and immediately retr
 ## Known Issues & Quirks
 
 1. **Workers = 1 required for WebSocket** — `start.sh` uses `--workers 1`. With multiple workers, each has its own in-memory `ws_manager`; broadcasts from the ingest worker don't reach WS connections on other workers.
-2. **Schema startup warnings** — `_ensure_schema` logs "Schema statement warning" on startup for SQL comments in multi-statement blocks. Cosmetic only.
-3. **goflow2 template errors after restart** — Normal. goflow2 loses cached NetFlow v9 templates on restart; "template error" log lines resolve within seconds when the router sends the next template packet.
-4. **Collector orphan process** — If `goflow2-vector` is restarted while flows are active, the old goflow2 process may survive and hold port 2055. Symptom: service is `active` but no flows arriving. Fix: `sudo kill -9 <old_goflow2_pid>`.
-5. **ClickHouse threading** — `clickhouse-driver` is not thread-safe. All calls are serialized with `threading.Lock()` in `clickhouse.py`.
-6. **passlib/bcrypt on Python 3.12+** — Pin `passlib==1.7.4` and `bcrypt==4.0.1` to avoid attribute errors.
+2. **goflow2 template errors after restart** — Normal. goflow2 loses cached NetFlow v9 templates on restart; "template error" log lines resolve within seconds when the router sends the next template packet.
+3. **Collector orphan process** — If `goflow2-vector` is restarted while flows are active, the old goflow2 process may survive and hold port 2055. Symptom: service is `active` but no flows arriving. Fix: `sudo kill -9 <old_goflow2_pid>`.
+4. **ClickHouse threading** — `clickhouse-driver` is not thread-safe. All calls are serialized with `threading.Lock()` in `clickhouse.py`.
+5. **passlib/bcrypt on Python 3.12+** — Pin `passlib==1.7.4` and `bcrypt==4.0.1` to avoid attribute errors.
+6. **Direct UDP ingest depends on a `netflow` library workaround** — the third-party `netflow` package (`bitkeks/python-netflow-v9-softflowd`) initializes its own template cache as a list, but its NetFlow v9 parser then indexes into that same object using the exporter's raw Template ID (commonly ≥256 for real hardware) as a dict-style key — this raises `IndexError` for any realistic Template ID, silently dropping every flow record after the first template arrives. `app/ingest/udp_listener.py` works around this by pre-seeding the template cache as `{"netflow": {}, "ipfix": {}}` (dicts) before the library ever gets a chance to install its own broken list default. If you upgrade the `netflow` dependency, re-verify this workaround is still needed (or still effective) against a real capture before relying on direct UDP ingest.
 
 ---
 
@@ -652,7 +664,7 @@ After pktFlow restarts, Vector detects the connection reset and immediately retr
 | Sankey flow diagram | Not yet built — planned: D3-sankey `src_ip → dst_port → dst_ip` arc chart |
 | Pie charts on Device View | Not built |
 | Storage "Test Connection" button | UI exists, no backend endpoint |
-| Production-test DuckDB backend | Implemented but not validated at scale |
+| DuckDB backend | **Broken, not just unvalidated** — `DuckDBBackend` doesn't implement the abstract `get_top_ports` method required by `StorageBackend`, so selecting it crashes the app on next restart (`TypeError: Can't instantiate abstract class DuckDBBackend`). `storage_backend` now defaults to `clickhouse` everywhere specifically to avoid this; do not switch to `duckdb` until this method is implemented. |
 | Migration mode / flow forwarding | UI toggle exists, no backend logic |
 
 ---
