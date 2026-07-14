@@ -17,7 +17,8 @@ env/
 .env
 .env.local
 .env.production
-config.yaml          # contains secret_key and passwords — use config.example.yaml as template
+# config.yaml contains secret_key and passwords — use config.example.yaml as template
+config.yaml
 # Note: .env.example is intentionally NOT ignored — it's the public template
 
 # Runtime data (never commit databases or logs)
@@ -60,10 +61,9 @@ FLOW_VOLUME_ANALYSIS.md
 ARCHITECTURE.md
 O2_SSH_CONNECTION.md
 PKTFLOW_LOGS_IMPLEMENTATION.md
-backup.py
+/backup.py
 check_deploy.py
 deploy_*.py
-app/backup.py
 scripts/deploy_frontend.py
 scripts/deploy_ssl.py
 scripts/deploy_*.py
