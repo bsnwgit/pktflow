@@ -1,18 +1,24 @@
 #!/bin/bash
 # pktFlow install script — Ubuntu Server 22.04/24.04 LTS
 # Usage: bash install.sh
-# Override defaults with env vars, e.g.:
+# Prompts for the install directory (default /opt/pktflow) when run interactively.
+# Override defaults with env vars to skip the prompt, e.g.:
 #   PKTFLOW_INSTALL_DIR=/opt/pktflow PKTFLOW_SERVICE_USER=pktflow bash install.sh
 
 set -euo pipefail
 
-INSTALL_DIR="${PKTFLOW_INSTALL_DIR:-/opt/pktflow}"
+if [ -z "${PKTFLOW_INSTALL_DIR:-}" ] && [ -t 0 ]; then
+    read -rp "Install directory [/opt/pktflow]: " INSTALL_DIR_INPUT
+    INSTALL_DIR="${INSTALL_DIR_INPUT:-/opt/pktflow}"
+else
+    INSTALL_DIR="${PKTFLOW_INSTALL_DIR:-/opt/pktflow}"
+fi
 LOG_DIR="${PKTFLOW_LOG_DIR:-$INSTALL_DIR/logs}"
 SERVICE_USER="${PKTFLOW_SERVICE_USER:-$(whoami)}"
 SERVICE_GROUP="${PKTFLOW_SERVICE_GROUP:-$SERVICE_USER}"
 VENV="$INSTALL_DIR/venv"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(dirname "$SCRIPT_DIR")"
+REPO_DIR="$SCRIPT_DIR"
 
 echo "=== pktFlow Installer ==="
 echo "Install dir: $INSTALL_DIR"
@@ -29,11 +35,13 @@ sudo apt-get install -y --no-install-recommends \
 
 # ── 2. Create directories ─────────────────────────────────────────────────────
 echo "[2/9] Creating directories..."
+BACKUP_DIR="$INSTALL_DIR/backups"
 sudo mkdir -p "$INSTALL_DIR"
 sudo mkdir -p "$LOG_DIR"
+sudo mkdir -p "$BACKUP_DIR"
 # Owned by the invoking user for now so the steps below don't need sudo;
 # re-owned to $SERVICE_USER:$SERVICE_GROUP at the end (step 9).
-sudo chown "$(whoami):$(whoami)" "$INSTALL_DIR" "$LOG_DIR"
+sudo chown "$(whoami):$(whoami)" "$INSTALL_DIR" "$LOG_DIR" "$BACKUP_DIR"
 
 # ── 3. Install ClickHouse ─────────────────────────────────────────────────────
 echo "[3/9] Checking ClickHouse..."
@@ -76,10 +84,14 @@ echo "  Python dependencies installed."
 
 # ── 6. Copy app files ─────────────────────────────────────────────────────────
 echo "[6/9] Copying application files..."
-cp -r "$REPO_DIR/app"         "$INSTALL_DIR/"
-cp -r "$REPO_DIR/migrations"  "$INSTALL_DIR/"
-cp -r "$REPO_DIR/clickhouse"  "$INSTALL_DIR/"
-cp -r "$REPO_DIR/scripts"     "$INSTALL_DIR/"
+if [ "$REPO_DIR" = "$INSTALL_DIR" ]; then
+    echo "  Install dir is the repo checkout itself — nothing to copy."
+else
+    cp -r "$REPO_DIR/app"         "$INSTALL_DIR/"
+    cp -r "$REPO_DIR/migrations"  "$INSTALL_DIR/"
+    cp -r "$REPO_DIR/clickhouse"  "$INSTALL_DIR/"
+    cp -r "$REPO_DIR/scripts"     "$INSTALL_DIR/"
+fi
 
 # ── 7. Config file ────────────────────────────────────────────────────────────
 echo "[7/9] Setting up config..."
