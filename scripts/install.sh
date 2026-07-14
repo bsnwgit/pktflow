@@ -1,5 +1,5 @@
 #!/bin/bash
-# pktFlow install script
+# pktFlow install script — Ubuntu Server 22.04/24.04 LTS
 # Usage: bash install.sh
 # Override defaults with env vars, e.g.:
 #   PKTFLOW_INSTALL_DIR=/opt/pktflow PKTFLOW_SERVICE_USER=pktflow bash install.sh
@@ -19,28 +19,35 @@ echo "Install dir: $INSTALL_DIR"
 echo "Service user: $SERVICE_USER"
 echo ""
 
-# ── 1. Create directories ─────────────────────────────────────────────────────
-echo "[1/8] Creating directories..."
-mkdir -p "$INSTALL_DIR"
-mkdir -p "$LOG_DIR"
+# ── 1. System packages ────────────────────────────────────────────────────────
+echo "[1/9] Installing system packages..."
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+    python3 python3-venv python3-pip \
+    libxmlsec1-dev libxmlsec1-openssl libxml2-dev pkg-config gcc \
+    curl ca-certificates gnupg apt-transport-https
 
-# ── 2. Install ClickHouse ─────────────────────────────────────────────────────
-echo "[2/8] Checking ClickHouse..."
+# ── 2. Create directories ─────────────────────────────────────────────────────
+echo "[2/9] Creating directories..."
+sudo mkdir -p "$INSTALL_DIR"
+sudo mkdir -p "$LOG_DIR"
+# Owned by the invoking user for now so the steps below don't need sudo;
+# re-owned to $SERVICE_USER:$SERVICE_GROUP at the end (step 9).
+sudo chown "$(whoami):$(whoami)" "$INSTALL_DIR" "$LOG_DIR"
+
+# ── 3. Install ClickHouse ─────────────────────────────────────────────────────
+echo "[3/9] Checking ClickHouse..."
 if ! command -v clickhouse-server &>/dev/null; then
     echo "  Installing ClickHouse..."
     curl -fsSL https://packages.clickhouse.com/rpm/lts/repodata/repomd.xml.key \
         | sudo gpg --dearmor -o /usr/share/keyrings/clickhouse-keyring.gpg
 
-    # For Amazon Linux 2 / RHEL-based
-    sudo tee /etc/yum.repos.d/clickhouse.repo > /dev/null << 'EOF'
-[clickhouse-stable]
-name=ClickHouse - Stable Repository
-baseurl=https://packages.clickhouse.com/rpm/lts/
-gpgcheck=1
-gpgkey=https://packages.clickhouse.com/rpm/lts/repodata/repomd.xml.key
-enabled=1
-EOF
-    sudo yum install -y clickhouse-server clickhouse-client
+    ARCH="$(dpkg --print-architecture)"
+    echo "deb [signed-by=/usr/share/keyrings/clickhouse-keyring.gpg arch=${ARCH}] https://packages.clickhouse.com/deb stable main" \
+        | sudo tee /etc/apt/sources.list.d/clickhouse.list > /dev/null
+
+    sudo apt-get update
+    sudo apt-get install -y clickhouse-server clickhouse-client
     sudo systemctl enable clickhouse-server
     sudo systemctl start clickhouse-server
     echo "  ClickHouse installed and started."
@@ -56,26 +63,26 @@ for i in {1..10}; do
     sleep 2
 done
 
-# ── 3. Initialize ClickHouse schema ──────────────────────────────────────────
-echo "[3/8] Initializing ClickHouse schema..."
+# ── 4. Initialize ClickHouse schema ──────────────────────────────────────────
+echo "[4/9] Initializing ClickHouse schema..."
 clickhouse-client --multiquery < "$REPO_DIR/clickhouse/schema.sql" && echo "  Schema applied."
 
-# ── 4. Python virtualenv ──────────────────────────────────────────────────────
-echo "[4/8] Setting up Python virtualenv..."
+# ── 5. Python virtualenv ──────────────────────────────────────────────────────
+echo "[5/9] Setting up Python virtualenv..."
 python3 -m venv "$VENV"
 "$VENV/bin/pip" install --quiet --upgrade pip
 "$VENV/bin/pip" install --quiet -r "$REPO_DIR/requirements.txt"
 echo "  Python dependencies installed."
 
-# ── 5. Copy app files ─────────────────────────────────────────────────────────
-echo "[5/8] Copying application files..."
+# ── 6. Copy app files ─────────────────────────────────────────────────────────
+echo "[6/9] Copying application files..."
 cp -r "$REPO_DIR/app"         "$INSTALL_DIR/"
 cp -r "$REPO_DIR/migrations"  "$INSTALL_DIR/"
 cp -r "$REPO_DIR/clickhouse"  "$INSTALL_DIR/"
 cp -r "$REPO_DIR/scripts"     "$INSTALL_DIR/"
 
-# ── 6. Config file ────────────────────────────────────────────────────────────
-echo "[6/8] Setting up config..."
+# ── 7. Config file ────────────────────────────────────────────────────────────
+echo "[7/9] Setting up config..."
 if [ ! -f "$INSTALL_DIR/config.yaml" ]; then
     cp "$REPO_DIR/config.example.yaml" "$INSTALL_DIR/config.yaml"
     # Generate a random secret key
@@ -88,8 +95,8 @@ else
     echo "  Config already exists — skipping."
 fi
 
-# ── 7. Generate ingest token + create admin user ──────────────────────────────
-echo "[7/8] Initializing database and admin user..."
+# ── 8. Generate ingest token + create admin user ──────────────────────────────
+echo "[8/9] Initializing database and admin user..."
 INGEST_TOKEN=$(openssl rand -hex 24)
 ADMIN_PASS=$(openssl rand -base64 12 | tr -d '/+=' | head -c 16)
 
@@ -123,8 +130,10 @@ async def setup():
 asyncio.run(setup())
 PYEOF
 
-# ── 8. Install systemd service ────────────────────────────────────────────────
-echo "[8/8] Installing systemd service..."
+# ── 9. Install systemd service ────────────────────────────────────────────────
+echo "[9/9] Installing systemd service..."
+# Re-own the install/log dirs to the service user before starting the service.
+sudo chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR" "$LOG_DIR"
 sed \
     -e "s#__INSTALL_DIR__#$INSTALL_DIR#g" \
     -e "s#__LOG_DIR__#$LOG_DIR#g" \
@@ -139,7 +148,7 @@ echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║              pktFlow installed successfully!             ║"
 echo "╠══════════════════════════════════════════════════════════╣"
-printf "║  URL:           http://%-35s║\n" "$(hostname -I | awk '{print $1}'):8080"
+printf "║  URL:           http://%-35s║\n" "$(hostname -I | awk '{print $1}'):8766"
 echo "║  Username:      admin                                    ║"
 printf "║  Password:      %-43s║\n" "$ADMIN_PASS"
 echo "║                                                          ║"
