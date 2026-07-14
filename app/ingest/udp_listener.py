@@ -64,9 +64,9 @@ def _decode_v9_flows(
         msg = str(exc).lower()
         if "template" in msg:
             # Expected while waiting for the first template packet from this exporter
-            log.debug("UDP template not yet seen from %s — dropping packet", src_ip)
+            log.info("UDP template not yet seen from %s — dropping packet", src_ip)
         else:
-            log.debug("UDP parse error from %s: %s", src_ip, exc)
+            log.info("UDP parse error from %s: %s", src_ip, exc)
         return []
 
     now = datetime.now(tz=timezone.utc)
@@ -126,10 +126,9 @@ def _decode_v9_flows(
                 flow_dir     = flow_dir,
             ))
         except Exception as exc:
-            log.debug("Flow record normalization error from %s: %s", src_ip, exc)
+            log.info("Flow record normalization error from %s: %s", src_ip, exc)
 
-    if records:
-        log.debug("UDP decoded %d flow(s) from %s", len(records), src_ip)
+    log.info("UDP packet from %s: %d raw flow(s), %d normalized", src_ip, len(raw_flows), len(records))
 
     return records
 
@@ -140,7 +139,17 @@ class _NetFlowUDPProtocol(asyncio.DatagramProtocol):
     """asyncio datagram protocol — one instance per listener socket."""
 
     def __init__(self) -> None:
-        self._templates: dict = {}   # shared, mutated in-place by parse_packet
+        # Pre-seed "netflow"/"ipfix" as dicts, not the library's own default.
+        # netflow.utils.parse_packet() does `templates["netflow"] = []` (a
+        # LIST) if the key is missing, per its own docstring/example — but
+        # netflow.v9.V9ExportPacket then does `self._templates[id_] = template`
+        # using the raw Template ID (commonly 256+ in real exporters) as an
+        # arbitrary key, which only works on a dict. On a list this always
+        # raises IndexError for any realistic Template ID, silently dropping
+        # every flow record after the first template arrives. Pre-supplying
+        # dicts here (the check is `if "netflow" not in templates`, so our
+        # values are used as-is) sidesteps the bug entirely.
+        self._templates: dict = {"netflow": {}, "ipfix": {}}   # shared, mutated in-place by parse_packet
 
     def connection_made(self, transport: asyncio.DatagramTransport) -> None:
         self._transport = transport
