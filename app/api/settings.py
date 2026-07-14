@@ -26,7 +26,7 @@ DEFAULTS: dict[str, Any] = {
     # Ingest
     "ingest_method": "http",             # http | udp | both
     "ingest_token": "",                  # Set by install.sh
-    "ingest_http_port": 8080,
+    "ingest_http_port": 8766,
     "ingest_udp_port_netflow": 2055,
     "ingest_udp_port_sflow": 6343,
     "allowed_hosts": [],                 # Empty = allow all

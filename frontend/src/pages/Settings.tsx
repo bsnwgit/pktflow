@@ -936,7 +936,7 @@ export default function Settings() {
             />
           </Field>
           <Field label="HTTP port" hint="Port pktFlow listens on">
-            <NumberInput value={num('ingest_http_port', 8080)} onChange={v => set('ingest_http_port', v)} min={1} max={65535} />
+            <NumberInput value={num('ingest_http_port', 8766)} onChange={v => set('ingest_http_port', v)} min={1} max={65535} />
           </Field>
           <Field label="UDP NetFlow port">
             <NumberInput value={num('ingest_udp_port_netflow', 2055)} onChange={v => set('ingest_udp_port_netflow', v)} min={1} max={65535} />
