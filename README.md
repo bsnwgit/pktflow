@@ -6,59 +6,51 @@ A production NetFlow visualization and alerting platform. Receives live NetFlow 
 
 ---
 
-## Quick Start — Docker Compose
+## Quick Start
 
-The fastest way to run pktFlow. Requires Docker and Docker Compose.
+Requires a fresh Ubuntu Server 22.04/24.04 LTS host with `sudo` access, and Node.js 20.x LTS installed for the frontend build (not installed by `install.sh` — see [Requirements](#requirements)).
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/bsnwgit/pktflow.git
 cd pktflow
 
-# 2. Configure environment
-cp .env.example .env
-# Edit .env:
-#   - Set PKTFLOW_SECRET_KEY to a random value: openssl rand -hex 32
-#   - Set PKTFLOW_ADMIN_USER and PKTFLOW_ADMIN_PASSWORD (created on first run)
+# 2. Run the installer — system packages, ClickHouse, Python deps, schema,
+#    config.yaml + secret key, admin user, systemd service (installed + started)
+bash install.sh
+# Prints the admin password and ingest token at the end — save them, they are
+# not shown again.
 
-# 3. Start the stack
-docker compose up -d
+# 3. Build and deploy the frontend (install.sh does not do this — see
+#    Installation § 8 below for why it's a separate step)
+cd frontend && npm install && npm run build && cd ..
+sudo cp -r frontend/dist /opt/pktflow/frontend/dist
+sudo systemctl restart pktflow
 
-# 4. Open the dashboard
-# http://your-server-ip
+# 4. Open the firewall for the app port (adjust if PKTFLOW_INSTALL_DIR/port differ)
+sudo ufw allow 8766/tcp
+
+# 5. Open http://<server-ip>:8766 and log in with the admin credentials from step 2
 ```
 
-pktFlow listens on **port 80** (HTTP) and **port 443** (HTTPS) by default. Log in with the admin credentials from your `.env`.
-
-### Data persistence
-
-All application data is stored in named Docker volumes that survive container updates and reboots:
-
-| Volume | Contents |
-|--------|----------|
-| `pktflow-data` | SQLite app database, SSL certs, application logs |
-| `clickhouse-data` | All flow data (ClickHouse) |
-
-To update pktFlow without losing data:
-
-```bash
-docker compose pull
-docker compose up -d
-```
+For a fully manual walkthrough of what `install.sh` does (e.g. to customize the install path or run steps individually), see [Installation](#installation).
 
 ### Environment variables
 
+All settings in `config.example.yaml` can also be passed as `PKTFLOW_*` environment variables instead of editing `config.yaml` — environment variables take priority. Commonly used ones:
+
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `PKTFLOW_CONFIG` | (none) | Path to `config.yaml` to load |
+| `PKTFLOW_INSTALL_DIR` | (none) | Install directory `install.sh` deployed to; used by `pktflow.service` and the SSL/backup/config-restore paths |
+| `PKTFLOW_HOST` | `0.0.0.0` | Bind address |
+| `PKTFLOW_PORT` | `8766` | Listen port |
+| `PKTFLOW_DB_PATH` | `/data/pktflow.db` | SQLite app database path |
+| `PKTFLOW_CLICKHOUSE_HOST` / `_PORT` / `_DATABASE` / `_USER` / `_PASSWORD` | `localhost` / `9000` / `pktflow` / `default` / `` | ClickHouse connection |
 | `PKTFLOW_SECRET_KEY` | (required) | JWT signing key — `openssl rand -hex 32` |
-| `PKTFLOW_ADMIN_USER` | `admin` | Initial admin username (first-run only) |
-| `PKTFLOW_ADMIN_PASSWORD` | `changeme` | Initial admin password (first-run only) |
-| `PKTFLOW_PORT` | `80` | App listen port (inside the container) |
-| `PKTFLOW_CLICKHOUSE_HOST` | `clickhouse` | ClickHouse hostname |
-| `PKTFLOW_CLICKHOUSE_PASSWORD` | `` | ClickHouse password (blank = no auth) |
+| `PKTFLOW_ADMIN_USER` / `PKTFLOW_ADMIN_PASSWORD` | (blank) | First-run admin seed — only used if no users exist yet |
 | `PKTFLOW_CORS_ORIGINS` | `["*"]` | Restrict to your dashboard origin in production |
-
-All settings in `config.example.yaml` can also be passed as `PKTFLOW_*` environment variables (e.g., `PKTFLOW_DB_PATH`, `PKTFLOW_LOG_LEVEL`).
+| `PKTFLOW_LOG_LEVEL` / `PKTFLOW_LOG_FILE` | `info` / `/data/logs/pktflow.log` | Logging |
 
 ---
 
@@ -121,7 +113,7 @@ Collector host (goflow2 → Vector)
     │  Vector transforms: snake_case, adds .site label
     │  HTTPS POST JSON array → pktFlow ingest endpoint
     ▼
-pktFlow (FastAPI, port 80, HTTP/HTTPS)
+pktFlow (FastAPI, port 8766, HTTP/HTTPS)
     │  Normalizer: Vector JSON → FlowRecord (rejects 0.0.0.0)
     │  IngestBuffer: batched write + WebSocket broadcast
     ▼
@@ -140,21 +132,21 @@ React Dashboard (served by FastAPI, same port)
 
 ## Requirements
 
-### Docker (recommended)
-
-- Docker Engine 24+
-- Docker Compose v2
-
-### Bare-metal
-
 | Component | Version | Notes |
 |-----------|---------|-------|
-| Python | 3.9+ | 3.11+ recommended |
-| ClickHouse | 24.x+ | |
-| Node.js | 18+ | Frontend build only |
-| npm | 9+ | Frontend build only |
-| OS | Debian/Ubuntu 22+, RHEL/Amazon Linux 2023+ | systemd required |
-| libxmlsec1-dev | system | Required by python3-saml |
+| OS | Ubuntu Server 22.04 LTS or 24.04 LTS | systemd required |
+| Python | 3.10+ (ships with Ubuntu 22.04/24.04) | venv created via `python3-venv` |
+| ClickHouse | 24.x+ (installed by `install.sh` from the official apt repo) | |
+| Node.js | 20.x LTS | Frontend build only, not installed by `install.sh` |
+| npm | 10+ | Frontend build only |
+| System packages | `python3-venv`, `python3-pip`, `libxmlsec1-dev`, `libxmlsec1-openssl`, `libxml2-dev`, `pkg-config`, `gcc`, `curl`, `ca-certificates`, `gnupg`, `apt-transport-https` | Installed by `install.sh`; `libxmlsec1*`/`pkg-config`/`gcc` are required to build `python3-saml`'s xmlsec bindings |
+
+Node.js is not installed by `install.sh` — install it yourself before the frontend build step, e.g. via [NodeSource](https://github.com/nodesource/distributions):
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
 
 ### Collector hosts (one per site)
 
@@ -180,11 +172,52 @@ React 18, TypeScript, Vite, Tailwind CSS, Recharts, D3.js
 
 ---
 
-## Installation — Bare Metal
+## Installation
 
-> Docker Compose (above) is the recommended install path. These instructions are for bare-metal deployments.
+`install.sh` (see [Quick Start](#quick-start)) automates everything below except **step 8 (build the frontend)** and **step 10 (open the firewall)** — those are always manual. Note that `install.sh` creates the admin user and ingest token directly (printing a generated password at the end) rather than via the `admin_user`/`admin_password` config.yaml fields described in step 7; use whichever approach matches how you're installing. This section is the full manual walkthrough — useful to customize the install, run steps individually, or understand what the script does.
 
-### 1. Apply ClickHouse schema
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/bsnwgit/pktflow.git
+cd pktflow
+```
+
+All commands below assume you're in the repo root unless otherwise noted.
+
+### 2. Create the install directory
+
+```bash
+INSTALL_DIR=/opt/pktflow
+sudo mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/logs"
+sudo chown "$(whoami):$(whoami)" "$INSTALL_DIR" "$INSTALL_DIR/logs"
+```
+
+`/opt` is root-owned by default, so this needs `sudo`. Steps 5–8 below run as your regular user against this now-owned directory; step 9 re-owns everything to whichever user/group the systemd service runs as.
+
+### 3. System packages + ClickHouse
+
+```bash
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+    python3 python3-venv python3-pip \
+    libxmlsec1-dev libxmlsec1-openssl libxml2-dev pkg-config gcc \
+    curl ca-certificates gnupg apt-transport-https
+
+# ClickHouse — official apt repo
+curl -fsSL https://packages.clickhouse.com/rpm/lts/repodata/repomd.xml.key \
+    | sudo gpg --dearmor -o /usr/share/keyrings/clickhouse-keyring.gpg
+ARCH="$(dpkg --print-architecture)"
+echo "deb [signed-by=/usr/share/keyrings/clickhouse-keyring.gpg arch=${ARCH}] https://packages.clickhouse.com/deb stable main" \
+    | sudo tee /etc/apt/sources.list.d/clickhouse.list
+sudo apt-get update
+sudo apt-get install -y clickhouse-server clickhouse-client
+sudo systemctl enable --now clickhouse-server
+```
+
+`libxmlsec1-dev`, `libxmlsec1-openssl`, `libxml2-dev`, `pkg-config`, and `gcc` are required to build `python3-saml`'s xmlsec native bindings.
+
+### 4. Apply ClickHouse schema
 
 ```bash
 clickhouse-client --multiquery < clickhouse/schema.sql
@@ -192,31 +225,37 @@ clickhouse-client --multiquery < clickhouse/schema.sql
 
 Creates `pktflow` database with `flows`, `flows_hourly`, `flows_daily` tables and two materialized views.
 
-### 2. Install Python dependencies
+### 5. Install Python dependencies
 
 ```bash
-# Install system dependency for python3-saml
-sudo apt-get install -y libxmlsec1-dev libxml2-dev pkg-config  # Debian/Ubuntu
-# sudo dnf install -y xmlsec1-devel                             # RHEL/Amazon Linux
-
 python3 -m venv /opt/pktflow/venv
 /opt/pktflow/venv/bin/pip install -r requirements.txt
 ```
 
-### 3. Configure
+### 6. Copy application files
+
+`pktflow.service` runs `uvicorn app.main:app` with `WorkingDirectory=/opt/pktflow`, so the app package must live there — not just the venv:
+
+```bash
+cp -r app migrations clickhouse scripts /opt/pktflow/
+```
+
+### 7. Configure
 
 ```bash
 cp config.example.yaml /opt/pktflow/config.yaml
-# Edit config.yaml — set secret_key, db_path, cors_origins
+# Edit config.yaml — set secret_key, db_path, cors_origins, admin_user, admin_password
 openssl rand -hex 32   # use this as secret_key
 ```
+
+Set `admin_user`/`admin_password` here — that's what lets you log in at all on a fresh install; the app creates that account on first startup (see [`_seed_admin_user`](app/database.py)) and it is not re-run once any user exists.
 
 **config.yaml reference:**
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `host` | `0.0.0.0` | Bind address |
-| `port` | `80` | Listen port |
+| `port` | `8766` | Listen port |
 | `db_path` | `/opt/pktflow/pktflow.db` | SQLite database path |
 | `clickhouse_host` | `localhost` | ClickHouse host |
 | `clickhouse_port` | `9000` | ClickHouse native protocol port |
@@ -226,9 +265,9 @@ openssl rand -hex 32   # use this as secret_key
 | `admin_password` | (blank) | Initial admin password — created on first run |
 | `log_file` | `/opt/pktflow/pktflow.log` | Log path |
 
-### 4. Build the frontend
+### 8. Build the frontend
 
-The frontend must be built on Linux — not on Windows (Windows `node_modules` lacks the Linux rollup native binary).
+Requires Node.js 20.x LTS. The frontend must be built on Linux — not on Windows (Windows `node_modules` lacks the Linux rollup native binary).
 
 ```bash
 cp -r frontend /tmp/pktflow-fe
@@ -238,22 +277,38 @@ npm run build > /dev/null 2>&1 && echo "build ok" || echo "BUILD FAILED"
 cp -r dist /opt/pktflow/frontend/dist
 ```
 
-### 5. Start the service
+### 9. Start the service
+
+`pktflow.service` is a template — substitute the placeholders before installing it, or just run `install.sh` which does this for you:
 
 ```bash
-# Copy and install systemd unit (update paths in pktflow.service first)
-sudo cp pktflow.service /etc/systemd/system/
+sed \
+    -e "s#__INSTALL_DIR__#/opt/pktflow#g" \
+    -e "s#__LOG_DIR__#/opt/pktflow/logs#g" \
+    -e "s#__SERVICE_USER__#$(whoami)#g" \
+    -e "s#__SERVICE_GROUP__#$(whoami)#g" \
+    pktflow.service | sudo tee /etc/systemd/system/pktflow.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now pktflow
 sudo systemctl status pktflow
 ```
 
-### 6. Verify
+### 10. Open the firewall
 
 ```bash
-curl -s http://localhost/api/health
-curl -s http://localhost/api/ingest/stats
+sudo ufw allow 8766/tcp
 ```
+
+If using direct UDP ingest instead of a goflow2/Vector collector, also open the configured UDP port(s) (defaults: `2055` NetFlow, `6343` sFlow) — see Settings → Ingest.
+
+### 11. Verify
+
+```bash
+curl -s http://localhost:8766/api/health
+curl -s http://localhost:8766/api/ingest/stats
+```
+
+Log in at `http://<server-ip>:8766` with the `admin_user`/`admin_password` from step 7, then set the ingest token collectors will authenticate with at **Settings → Ingest**.
 
 ---
 
@@ -467,12 +522,9 @@ pktflow/
 │   ├── hooks/useWebSocket.ts  WebSocket hook
 │   └── utils/protocols.ts  Shared protocol name map
 ├── migrations/             SQLite migration scripts (auto-applied on startup)
-├── Dockerfile              Multi-stage build (Node frontend → Python app)
-├── docker-compose.yml      pktFlow + ClickHouse stack
-├── .env.example            Environment variable template
-├── docker-entrypoint.sh    Container startup script
-├── config.example.yaml     Config file template (bare-metal installs)
-├── pktflow.service         systemd unit (bare-metal installs)
+├── install.sh              Ubuntu install script (ClickHouse, venv, systemd service)
+├── config.example.yaml     Config file template
+├── pktflow.service         systemd unit template (placeholders filled in by install.sh)
 ├── start.sh                SSL-aware startup wrapper
 └── requirements.txt
 ```
@@ -549,13 +601,13 @@ Message types: `device_update` (device summaries), `ingest_stats` (buffer counte
 
 ---
 
-## Deployment — Bare Metal
+## Deployment
 
 ### Backend changes
 
 1. Copy changed files to `/opt/pktflow/` on the server (same relative path as the repo)
 2. `sudo systemctl restart pktflow`
-3. Verify: `curl -s http://localhost/api/health`
+3. Verify: `curl -s http://localhost:8766/api/health`
 
 ### Frontend changes
 

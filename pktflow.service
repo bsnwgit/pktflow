@@ -18,7 +18,7 @@ Environment=PKTFLOW_INSTALL_DIR=__INSTALL_DIR__
 # DuckDB requires single worker (one write connection allowed)
 ExecStart=__INSTALL_DIR__/venv/bin/uvicorn app.main:app \
     --host 0.0.0.0 \
-    --port 8080 \
+    --port 8766 \
     --workers 1 \
     --log-level info \
     --no-access-log
