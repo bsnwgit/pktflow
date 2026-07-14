@@ -11,9 +11,9 @@
  *   s2s — Site-to-Site VPN   → blue   (#3b82f6), dashed
  *   wan — Regular WAN traffic → red    (#ef4444), solid
  *
- * Circle marker colours by group:
- *   medical → purple  (#a78bfa)
- *   dental  → green   (#34d399)
+ * Circle marker colours by group (configured in Settings → Geo Map → Site Groups):
+ *   group_a → purple  (#a78bfa)
+ *   group_b → green   (#34d399)
  *   other   → blue    (#60a5fa)
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
@@ -41,8 +41,8 @@ const FALLBACK_CONFIG: GeoConfig = {
     s2s: { color: '#3b82f6', dash: '10,5',         label: 'Site-to-Site VPN'  },
     wan: { color: '#ef4444', dash: '',             label: 'WAN Traffic'       },
   },
-  groupColors:  { medical: '#a78bfa', dental: '#34d399' },
-  groupStrokes: { medical: '#c4b5fd', dental: '#6ee7b7' },
+  groupColors:  { group_a: '#a78bfa', group_b: '#34d399' },
+  groupStrokes: { group_a: '#c4b5fd', group_b: '#6ee7b7' },
   defaultFill:  '#ef4444',
   defaultStroke: '#fca5a5',
   siteGroups:   [],
@@ -184,10 +184,10 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
             </div>`
           ).join('')
         : `<div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
-            <div style="width:10px;height:10px;border-radius:50%;background:#a78bfa;flex-shrink:0"></div>Medical
+            <div style="width:10px;height:10px;border-radius:50%;background:#a78bfa;flex-shrink:0"></div>Group A
           </div>
           <div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
-            <div style="width:10px;height:10px;border-radius:50%;background:#34d399;flex-shrink:0"></div>Dental
+            <div style="width:10px;height:10px;border-radius:50%;background:#34d399;flex-shrink:0"></div>Group B
           </div>
           <div style="display:flex;align-items:center;gap:7px">
             <div style="width:10px;height:10px;border-radius:50%;background:#ef4444;flex-shrink:0"></div>External

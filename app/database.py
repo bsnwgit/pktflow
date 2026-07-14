@@ -93,5 +93,5 @@ async def init_db() -> None:
                 )
                 await conn.commit()
 
-    # Seed default admin user if no users exist (first-run / Docker setup)
+    # Seed default admin user if no users exist (first-run setup)
     await _seed_admin_user()
