@@ -7,8 +7,8 @@ PRAGMA foreign_keys=ON;
 
 CREATE TABLE IF NOT EXISTS vpn_mappings (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    site_name   TEXT NOT NULL,                  -- display name e.g. "QTS", "OneNeck", "Vyne AWS"
-    group_name  TEXT NOT NULL DEFAULT 'other',  -- "medical" or "dental"
+    site_name   TEXT NOT NULL,                  -- display name e.g. "Site A", "Site B", "Cloud AWS"
+    group_name  TEXT NOT NULL DEFAULT 'other',  -- arbitrary grouping label, configured in Settings → Geo Map → Site Groups
     public_ip   TEXT NOT NULL,                  -- public firewall IP used for geo lookup
     cidr_or_ip  TEXT NOT NULL UNIQUE,           -- RFC-1918 CIDR (e.g. "10.42.0.0/16") or single IP
     entry_type  TEXT NOT NULL DEFAULT 's2s'

@@ -476,8 +476,8 @@ export interface GeoLocation {
   ip: string; lat: number; lng: number
   city: string; country: string; country_code: string
   bytes: number; flows: number
-  site_name?: string   // set when the IP is VPN-mapped (e.g. "QTS", "Vyne AWS")
-  group?: string       // "medical" | "dental" | "" when VPN-mapped
+  site_name?: string   // set when the IP is VPN-mapped (e.g. "Site A", "Cloud AWS")
+  group?: string       // site group name (configured in Settings → Geo Map → Site Groups), or "" when VPN-mapped
 }
 export interface GeoArc {
   src_ip: string; src_lat: number; src_lng: number

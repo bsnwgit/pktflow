@@ -22,9 +22,10 @@ CREATE TABLE IF NOT EXISTS site_groups (
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Example placeholder groups — rename/edit/delete via Settings → Geo Map → Site Groups.
 INSERT OR IGNORE INTO site_groups (name, display_name, fill_color, stroke_color, badge_bg, badge_text) VALUES
-    ('medical', 'Medical', '#a78bfa', '#c4b5fd', 'bg-violet-800',  'text-violet-200'),
-    ('dental',  'Dental',  '#34d399', '#6ee7b7', 'bg-emerald-800', 'text-emerald-200'),
+    ('group_a', 'Group A', '#a78bfa', '#c4b5fd', 'bg-violet-800',  'text-violet-200'),
+    ('group_b', 'Group B', '#34d399', '#6ee7b7', 'bg-emerald-800', 'text-emerald-200'),
     ('other',   'Other',   '#60a5fa', '#93c5fd', 'bg-gray-700',    'text-gray-300');
 
 -- ── Line Style Catalog ────────────────────────────────────────────────────────
