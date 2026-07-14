@@ -23,7 +23,15 @@ ExecStart=__INSTALL_DIR__/venv/bin/uvicorn app.main:app \
     --log-level info \
     --no-access-log
 
-Restart=on-failure
+# `always` (not `on-failure`) so the app's own restart-service fallback
+# (sending SIGTERM to the master process when it lacks passwordless sudo to
+# run `systemctl restart` directly — see app/api/system.py _delayed_restart)
+# actually causes systemd to bring the service back up. A clean SIGTERM is
+# not "failure" from systemd's point of view, so on-failure never restarts
+# it — the service just stops and stays down. `systemctl stop`/`restart`
+# still work normally either way, since those go through systemd's own
+# stop sequence, which isn't affected by the Restart= policy.
+Restart=always
 RestartSec=5
 StartLimitInterval=60
 StartLimitBurst=5
