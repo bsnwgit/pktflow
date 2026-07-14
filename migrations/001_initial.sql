@@ -52,14 +52,15 @@ CREATE TABLE IF NOT EXISTS devices (
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Pre-populate with known samplers from audit
+-- Example placeholder samplers — replace with your own devices via
+-- Settings → Devices, or delete these rows once real samplers are registered.
 INSERT OR IGNORE INTO devices (ip, name, site) VALUES
-    ('192.168.44.7',  'Site-B-fw1',  'Site-B'),
-    ('192.168.44.8',  'Site-B-fw2',  'Site-B'),
-    ('172.27.28.88',  'Site-A-sw1',      'Site-A'),
-    ('172.27.28.89',  'Site-A-fw1',      'Site-A'),
-    ('10.19.56.186',  'AWS-az2a',     'aws'),
-    ('10.19.81.236',  'AWS-az2b',     'aws');
+    ('10.0.1.10',  'site-a-fw1',  'site-a'),
+    ('10.0.1.11',  'site-a-fw2',  'site-a'),
+    ('10.0.2.10',  'site-b-sw1',  'site-b'),
+    ('10.0.2.11',  'site-b-fw1',  'site-b'),
+    ('10.0.3.10',  'cloud-az1',   'cloud'),
+    ('10.0.3.11',  'cloud-az2',   'cloud');
 
 
 -- ─────────────────────────────────────────────────────────────────────────────

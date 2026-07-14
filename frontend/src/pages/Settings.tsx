@@ -936,7 +936,7 @@ export default function Settings() {
             />
           </Field>
           <Field label="HTTP port" hint="Port pktFlow listens on">
-            <NumberInput value={num('ingest_http_port', 8080)} onChange={v => set('ingest_http_port', v)} min={1} max={65535} />
+            <NumberInput value={num('ingest_http_port', 8766)} onChange={v => set('ingest_http_port', v)} min={1} max={65535} />
           </Field>
           <Field label="UDP NetFlow port">
             <NumberInput value={num('ingest_udp_port_netflow', 2055)} onChange={v => set('ingest_udp_port_netflow', v)} min={1} max={65535} />
@@ -2585,8 +2585,8 @@ function GeoMapTab() {
 
 // ── VPN Mappings Tab ──────────────────────────────────────────────────────────
 const VPN_GROUP_BADGE: Record<string, string> = {
-  medical: 'bg-violet-800 text-violet-200',
-  dental:  'bg-emerald-800 text-emerald-200',
+  group_a: 'bg-violet-800 text-violet-200',
+  group_b: 'bg-emerald-800 text-emerald-200',
   other:   'bg-gray-700 text-gray-300',
 }
 const VPN_TYPE_BADGE: Record<string, string> = {
@@ -2601,8 +2601,8 @@ function VpnMappingsTab() {
   const [loading,    setLoading]    = useState(true)
   const [showAdd,    setShowAdd]    = useState(false)
   const [editingId,  setEditingId]  = useState<number | null>(null)
-  const [editForm,   setEditForm]   = useState<VpnMappingIn>({ site_name: '', group_name: 'medical', public_ip: '', cidr_or_ip: '', entry_type: 's2s' })
-  const [form,       setForm]       = useState<VpnMappingIn>({ site_name: '', group_name: 'medical', public_ip: '', cidr_or_ip: '', entry_type: 's2s' })
+  const [editForm,   setEditForm]   = useState<VpnMappingIn>({ site_name: '', group_name: 'group_a', public_ip: '', cidr_or_ip: '', entry_type: 's2s' })
+  const [form,       setForm]       = useState<VpnMappingIn>({ site_name: '', group_name: 'group_a', public_ip: '', cidr_or_ip: '', entry_type: 's2s' })
   const [saving,       setSaving]       = useState(false)
   const [editSaving,   setEditSaving]   = useState(false)
   const [error,        setError]        = useState('')
@@ -2614,7 +2614,7 @@ function VpnMappingsTab() {
     : [{ value: 's2s', label: 'S2S — Site-to-Site VPN' }, { value: 'gp', label: 'GP — GlobalProtect' }]
   const siteGroupOptions = siteGroups.length
     ? siteGroups.map(g => ({ value: g.name, label: g.display_name }))
-    : [{ value: 'medical', label: 'Medical' }, { value: 'dental', label: 'Dental' }, { value: 'other', label: 'Other' }]
+    : [{ value: 'group_a', label: 'Group A' }, { value: 'group_b', label: 'Group B' }, { value: 'other', label: 'Other' }]
 
   function load() {
     setLoading(true)
@@ -2636,7 +2636,7 @@ function VpnMappingsTab() {
     try {
       const m = await api.createVpnMapping(form)
       setMappings(prev => [...prev, m])
-      setForm({ site_name: '', group_name: 'medical', public_ip: '', cidr_or_ip: '', entry_type: 's2s' })
+      setForm({ site_name: '', group_name: 'group_a', public_ip: '', cidr_or_ip: '', entry_type: 's2s' })
       setShowAdd(false)
     } catch (e: any) {
       setError(e.message ?? 'Failed to save')
@@ -2700,7 +2700,7 @@ function VpnMappingsTab() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div>
               <label className="block text-xs text-gray-400 mb-1">Site Name</label>
-              <input placeholder="e.g. Site-B" value={form.site_name}
+              <input placeholder="e.g. Site A" value={form.site_name}
                 onChange={e => setForm(f => ({ ...f, site_name: e.target.value }))}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
