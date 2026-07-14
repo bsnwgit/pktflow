@@ -60,7 +60,7 @@ class Settings(BaseSettings):
 
     # ── Server ────────────────────────────────────────────────────────────────
     host: str = Field(default=_yaml_cfg.get("host", "0.0.0.0"))
-    port: int = Field(default=_yaml_cfg.get("port", 80))
+    port: int = Field(default=_yaml_cfg.get("port", 8766))
     workers: int = Field(default=_yaml_cfg.get("workers", 2))
     debug: bool = Field(default=_yaml_cfg.get("debug", False))
 
@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
 
-    # ── First-run admin user seed (Docker / fresh install) ────────────────────
+    # ── First-run admin user seed (fresh install) ────────────────────────────
     # If no users exist in the database, pktFlow creates an admin account using
     # these credentials on startup. Leave blank to skip seeding.
     admin_user: str = Field(default=_yaml_cfg.get("admin_user", ""))
