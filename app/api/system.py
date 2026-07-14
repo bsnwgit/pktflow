@@ -28,6 +28,18 @@ log = logging.getLogger("pktflow.system")
 router = APIRouter()
 
 
+def _install_dir() -> Path:
+    """Resolve the pktFlow install directory from $PKTFLOW_INSTALL_DIR /
+    $PKTFLOW_CONFIG, falling back to the current working directory."""
+    env_dir = os.environ.get("PKTFLOW_INSTALL_DIR")
+    if env_dir:
+        return Path(env_dir)
+    env_cfg = os.environ.get("PKTFLOW_CONFIG")
+    if env_cfg:
+        return Path(env_cfg).parent
+    return Path.cwd()
+
+
 async def _delayed_restart(delay: float = 1.5) -> None:
     """Wait briefly, then signal systemd to restart this service."""
     await asyncio.sleep(delay)
@@ -166,7 +178,7 @@ async def export_bundle():
                 shutil.copy2(str(db), str(tmp_path / "pktflow.db"))
 
             # ── config.yaml ──────────────────────────────────────────────────
-            for candidate in [Path("config.yaml"), Path("/mnt/software/pktflow/config.yaml")]:
+            for candidate in [Path("config.yaml"), _install_dir() / "config.yaml"]:
                 if candidate.exists():
                     shutil.copy2(str(candidate), str(tmp_path / "config.yaml"))
                     break
@@ -215,8 +227,8 @@ Generated: {ts}
 ## Restore procedure (fresh install)
 1. Deploy pktFlow to the new server per the README.
 2. Stop the service:     sudo systemctl stop pktflow
-3. Copy pktflow.db    →  /mnt/software/pktflow/pktflow.db
-4. Copy config.yaml   →  /mnt/software/pktflow/config.yaml
+3. Copy pktflow.db    →  <install dir>/pktflow.db
+4. Copy config.yaml   →  <install dir>/config.yaml
 5. Start the service:    sudo systemctl start pktflow
 
 ## Restore ClickHouse flow history (if flows.csv.gz is present)
@@ -297,7 +309,7 @@ async def import_bundle(file: UploadFile = File(...)):
 
             # ── config.yaml ───────────────────────────────────────────────────
             cfg_src = tmp_path / "config.yaml"
-            cfg_dest = Path("/mnt/software/pktflow/config.yaml")
+            cfg_dest = _install_dir() / "config.yaml"
             if cfg_src.exists():
                 shutil.copy2(str(cfg_src), str(cfg_dest))
                 result["config"] = "restored (restart required)"
@@ -406,7 +418,7 @@ async def test_connection() -> dict:
 
 # ── SSL certificate management ─────────────────────────────────────────────────
 
-_SSL_DIR   = Path("/mnt/software/pktflow/ssl")
+_SSL_DIR   = _install_dir() / "ssl"
 _CERT_FILE = _SSL_DIR / "server.crt"
 _KEY_FILE  = _SSL_DIR / "server.key"
 

@@ -1,18 +1,22 @@
 #!/bin/bash
 # pktFlow install script
-# Run as ec2-user on the O2 server (172.23.80.5)
 # Usage: bash install.sh
+# Override defaults with env vars, e.g.:
+#   PKTFLOW_INSTALL_DIR=/opt/pktflow PKTFLOW_SERVICE_USER=pktflow bash install.sh
 
 set -euo pipefail
 
-INSTALL_DIR="/mnt/software/pktflow"
-LOG_DIR="/mnt/software/logs"
+INSTALL_DIR="${PKTFLOW_INSTALL_DIR:-/opt/pktflow}"
+LOG_DIR="${PKTFLOW_LOG_DIR:-$INSTALL_DIR/logs}"
+SERVICE_USER="${PKTFLOW_SERVICE_USER:-$(whoami)}"
+SERVICE_GROUP="${PKTFLOW_SERVICE_GROUP:-$SERVICE_USER}"
 VENV="$INSTALL_DIR/venv"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 
 echo "=== pktFlow Installer ==="
 echo "Install dir: $INSTALL_DIR"
+echo "Service user: $SERVICE_USER"
 echo ""
 
 # ── 1. Create directories ─────────────────────────────────────────────────────
@@ -77,6 +81,7 @@ if [ ! -f "$INSTALL_DIR/config.yaml" ]; then
     # Generate a random secret key
     SECRET=$(openssl rand -hex 32)
     sed -i "s/CHANGE_ME_generate_with_openssl_rand_hex_32/$SECRET/" "$INSTALL_DIR/config.yaml"
+    sed -i "s#/opt/pktflow#$INSTALL_DIR#g" "$INSTALL_DIR/config.yaml"
     echo "  Config created at $INSTALL_DIR/config.yaml"
     echo "  !! Review and update cors_origins before production use !!"
 else
@@ -120,7 +125,12 @@ PYEOF
 
 # ── 8. Install systemd service ────────────────────────────────────────────────
 echo "[8/8] Installing systemd service..."
-sudo cp "$REPO_DIR/pktflow.service" /etc/systemd/system/pktflow.service
+sed \
+    -e "s#__INSTALL_DIR__#$INSTALL_DIR#g" \
+    -e "s#__LOG_DIR__#$LOG_DIR#g" \
+    -e "s#__SERVICE_USER__#$SERVICE_USER#g" \
+    -e "s#__SERVICE_GROUP__#$SERVICE_GROUP#g" \
+    "$REPO_DIR/pktflow.service" | sudo tee /etc/systemd/system/pktflow.service > /dev/null
 sudo systemctl daemon-reload
 sudo systemctl enable pktflow
 sudo systemctl start pktflow
