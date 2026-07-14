@@ -1,18 +1,22 @@
+# Template — install.sh substitutes __INSTALL_DIR__ / __LOG_DIR__ /
+# __SERVICE_USER__ / __SERVICE_GROUP__ before installing to systemd.
+# For a manual install, replace these placeholders yourself.
 [Unit]
 Description=pktFlow NetFlow Visualization Platform
-Documentation=https://github.com/vynedental/pktflow
+Documentation=https://github.com/bsnwgit/pktflow
 After=network.target
 
 [Service]
 Type=simple
-User=ec2-user
-Group=ec2-user
-WorkingDirectory=/mnt/software/pktflow
+User=__SERVICE_USER__
+Group=__SERVICE_GROUP__
+WorkingDirectory=__INSTALL_DIR__
 
-Environment=PKTFLOW_CONFIG=/mnt/software/pktflow/config.yaml
+Environment=PKTFLOW_CONFIG=__INSTALL_DIR__/config.yaml
+Environment=PKTFLOW_INSTALL_DIR=__INSTALL_DIR__
 
 # DuckDB requires single worker (one write connection allowed)
-ExecStart=/mnt/software/pktflow/venv/bin/uvicorn app.main:app \
+ExecStart=__INSTALL_DIR__/venv/bin/uvicorn app.main:app \
     --host 0.0.0.0 \
     --port 8080 \
     --workers 1 \
@@ -24,8 +28,8 @@ RestartSec=5
 StartLimitInterval=60
 StartLimitBurst=5
 
-StandardOutput=append:/mnt/software/logs/pktflow.log
-StandardError=append:/mnt/software/logs/pktflow.log
+StandardOutput=append:__LOG_DIR__/pktflow.log
+StandardError=append:__LOG_DIR__/pktflow.log
 
 NoNewPrivileges=yes
 PrivateTmp=yes

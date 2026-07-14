@@ -3,7 +3,7 @@ pktFlow configuration.
 
 Priority order (highest → lowest):
   1. Environment variables  (PKTFLOW_*)
-  2. config.yaml in CWD or /mnt/software/pktflow/
+  2. config.yaml in CWD, $PKTFLOW_INSTALL_DIR, /data, /opt/pktflow, or ~/.pktflow
   3. Defaults defined here
 
 Runtime settings (storage backend, retention days, ingest token, etc.) are
@@ -29,9 +29,12 @@ def _load_yaml() -> dict:
         Path("config.yaml"),
         Path("/data/config.yaml"),
         Path("/opt/pktflow/config.yaml"),
-        Path("/mnt/software/pktflow/config.yaml"),
         Path.home() / ".pktflow" / "config.yaml",
     ]
+    install_dir = os.environ.get("PKTFLOW_INSTALL_DIR")
+    if install_dir:
+        candidates.insert(0, Path(install_dir) / "config.yaml")
+
     env_path = os.environ.get("PKTFLOW_CONFIG")
     if env_path:
         candidates.insert(0, Path(env_path))
