@@ -87,12 +87,36 @@ class ClickHouseBackend(StorageBackend):
         if not schema_path.exists():
             log.warning("schema.sql not found — skipping schema init")
             return
+        # Create the database using a connection that doesn't name a database —
+        # clickhouse-driver validates the database at connect time (part of the
+        # native protocol handshake), so self._get_client() (which always passes
+        # database=settings.clickhouse_database) fails outright with "Database
+        # ... does not exist" on a genuinely fresh ClickHouse server, before this
+        # very statement ever gets a chance to run.
+        bootstrap_client = Client(
+            host=settings.clickhouse_host,
+            port=settings.clickhouse_port,
+            user=settings.clickhouse_user,
+            password=settings.clickhouse_password,
+            connect_timeout=10,
+            settings={"use_numpy": False},
+        )
+        try:
+            bootstrap_client.execute(f"CREATE DATABASE IF NOT EXISTS {settings.clickhouse_database}")
+        finally:
+            bootstrap_client.disconnect()
+
         client = self._get_client()
-        # Create database if needed
-        client.execute(f"CREATE DATABASE IF NOT EXISTS {settings.clickhouse_database}")
-        # Execute schema statements one at a time (skip comments and empty lines)
+        # Execute schema statements one at a time. Strip full-line comments
+        # *before* splitting on ";" — a semicolon inside a comment (e.g. "--
+        # update with ALTER TABLE flows MODIFY TTL;") would otherwise be
+        # treated as a statement boundary and merge with the next real
+        # statement into invalid SQL.
         sql = schema_path.read_text()
-        statements = [s.strip() for s in sql.split(";") if s.strip() and not s.strip().startswith("--")]
+        sql_no_comments = "\n".join(
+            line for line in sql.splitlines() if not line.strip().startswith("--")
+        )
+        statements = [s.strip() for s in sql_no_comments.split(";") if s.strip()]
         for stmt in statements:
             try:
                 client.execute(stmt)

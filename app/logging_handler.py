@@ -42,7 +42,7 @@ class SQLiteLogHandler(logging.Handler):
         batch_size: int = 50,
         flush_interval: float = 2.0,
     ) -> None:
-        super().__init__(level=logging.WARNING)
+        super().__init__(level=logging.INFO)
         self.db_path = str(db_path)
         self.max_records = max_records
         self.batch_size = batch_size
