@@ -8,7 +8,7 @@ Vector sink config (vector.toml):
   [sinks.pktflow]
   type = "http"
   inputs = ["add_site"]
-  uri = "http://10.20.30.5:8080/api/ingest/flows"
+  uri = "http://<pktflow-server>:8080/api/ingest/flows"
   encoding.codec = "json"
   auth.strategy = "bearer"
   auth.token = "<token_from_settings>"
