@@ -51,9 +51,15 @@ async def _delayed_restart(delay: float = 1.5) -> None:
         stderr=subprocess.DEVNULL,
     )
     if proc.returncode != 0:
-        # Kill the master process; systemd Restart= will revive it.
-        # os.getppid() targets the uvicorn master, not just this worker.
-        os.kill(os.getppid(), signal.SIGTERM)
+        # Signal ourselves; systemd (Restart=always) will revive it.
+        # Deliberately NOT os.getppid(): with --workers 1, uvicorn is a
+        # single process with no separate master/worker split, and systemd
+        # (Type=simple) execs it directly — so its parent is systemd/PID 1
+        # itself, which a non-root process cannot signal
+        # (PermissionError: [Errno 1] Operation not permitted). Confirmed
+        # by reproduction: this previously left the service silently dead
+        # instead of restarting whenever passwordless sudo wasn't set up.
+        os.kill(os.getpid(), signal.SIGTERM)
 
 
 @router.post("/cleanup", dependencies=[Depends(require_admin)])
