@@ -73,7 +73,7 @@ DEFAULTS: dict[str, Any] = {
 
     # General
     "app_name": "pktFlow",
-    "base_url": "http://10.20.30.5:8766",
+    "base_url": "http://localhost:8766",
     "timezone": "UTC",
 
     # AI assistant (Phase 5)
@@ -95,7 +95,7 @@ DEFAULTS: dict[str, Any] = {
     "backup_enabled": False,
     "backup_interval_hours": 24,
     "backup_rotation_count": 5,
-    "backup_path": "/mnt/software/pktflow_backups",
+    "backup_path": "/opt/pktflow/backups",
     "backup_include_clickhouse": True,
 
     # Live updates (WebSocket)
