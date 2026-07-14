@@ -65,11 +65,15 @@ async def lifespan(app: FastAPI):
     await cleanup.start()
     log.info("Alert cleanup started")
 
-    # Start backup scheduler
-    from app.backup import BackupScheduler
-    backup_scheduler = BackupScheduler()
-    await backup_scheduler.start()
-    log.info("Backup scheduler started")
+    # Start backup scheduler (optional — app/backup.py is not part of every install)
+    backup_scheduler = None
+    try:
+        from app.backup import BackupScheduler
+        backup_scheduler = BackupScheduler()
+        await backup_scheduler.start()
+        log.info("Backup scheduler started")
+    except ImportError as _e:
+        log.warning("Backup scheduler not started: %s", _e)
 
     # Start UDP NetFlow listener if ingest_method is "udp" or "both"
     udp_listener = None
@@ -101,7 +105,8 @@ async def lifespan(app: FastAPI):
     await buffer.stop()
     await engine.stop()
     await cleanup.stop()
-    await backup_scheduler.stop()
+    if backup_scheduler:
+        await backup_scheduler.stop()
     storage = get_storage()
     if hasattr(storage, "close"):
         await storage.close()
