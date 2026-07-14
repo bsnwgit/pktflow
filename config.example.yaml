@@ -1,17 +1,17 @@
 # pktFlow configuration
 # Copy to config.yaml alongside the app, or set PKTFLOW_CONFIG=/path/to/config.yaml
 #
-# When running via Docker Compose, all of these are set through environment
-# variables (PKTFLOW_*) in docker-compose.yml / .env — you do not need this file.
+# All of these can also be set via PKTFLOW_* environment variables instead of
+# editing this file (e.g. PKTFLOW_SECRET_KEY, PKTFLOW_DB_PATH).
 #
-# For bare-metal installs: copy to config.yaml and edit before starting the service.
+# Copy to config.yaml and edit before starting the service.
 # Most runtime settings (storage backend, retention, notifications, etc.) are
 # managed via the Settings page in the UI and stored in SQLite.
 # This file only covers infrastructure/startup settings.
 
 # ── Server ────────────────────────────────────────────────────────────────────
 host: "0.0.0.0"
-port: 80
+port: 8766
 workers: 2
 debug: false
 

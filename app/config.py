@@ -3,7 +3,7 @@ pktFlow configuration.
 
 Priority order (highest → lowest):
   1. Environment variables  (PKTFLOW_*)
-  2. config.yaml in CWD or /mnt/software/pktflow/
+  2. config.yaml in CWD, $PKTFLOW_INSTALL_DIR, /data, /opt/pktflow, or ~/.pktflow
   3. Defaults defined here
 
 Runtime settings (storage backend, retention days, ingest token, etc.) are
@@ -29,9 +29,12 @@ def _load_yaml() -> dict:
         Path("config.yaml"),
         Path("/data/config.yaml"),
         Path("/opt/pktflow/config.yaml"),
-        Path("/mnt/software/pktflow/config.yaml"),
         Path.home() / ".pktflow" / "config.yaml",
     ]
+    install_dir = os.environ.get("PKTFLOW_INSTALL_DIR")
+    if install_dir:
+        candidates.insert(0, Path(install_dir) / "config.yaml")
+
     env_path = os.environ.get("PKTFLOW_CONFIG")
     if env_path:
         candidates.insert(0, Path(env_path))
@@ -57,7 +60,7 @@ class Settings(BaseSettings):
 
     # ── Server ────────────────────────────────────────────────────────────────
     host: str = Field(default=_yaml_cfg.get("host", "0.0.0.0"))
-    port: int = Field(default=_yaml_cfg.get("port", 80))
+    port: int = Field(default=_yaml_cfg.get("port", 8766))
     workers: int = Field(default=_yaml_cfg.get("workers", 2))
     debug: bool = Field(default=_yaml_cfg.get("debug", False))
 
@@ -86,7 +89,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
 
-    # ── First-run admin user seed (Docker / fresh install) ────────────────────
+    # ── First-run admin user seed (fresh install) ────────────────────────────
     # If no users exist in the database, pktFlow creates an admin account using
     # these credentials on startup. Leave blank to skip seeding.
     admin_user: str = Field(default=_yaml_cfg.get("admin_user", ""))
