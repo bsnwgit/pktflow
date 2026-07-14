@@ -26,7 +26,7 @@ echo "Service user: $SERVICE_USER"
 echo ""
 
 # ── 1. System packages ────────────────────────────────────────────────────────
-echo "[1/9] Installing system packages..."
+echo "[1/10] Installing system packages..."
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
     python3 python3-venv python3-pip \
@@ -34,7 +34,7 @@ sudo apt-get install -y --no-install-recommends \
     curl ca-certificates gnupg apt-transport-https
 
 # ── 2. Create directories ─────────────────────────────────────────────────────
-echo "[2/9] Creating directories..."
+echo "[2/10] Creating directories..."
 BACKUP_DIR="$INSTALL_DIR/backups"
 sudo mkdir -p "$INSTALL_DIR"
 sudo mkdir -p "$LOG_DIR"
@@ -44,7 +44,7 @@ sudo mkdir -p "$BACKUP_DIR"
 sudo chown "$(whoami):$(whoami)" "$INSTALL_DIR" "$LOG_DIR" "$BACKUP_DIR"
 
 # ── 3. Install ClickHouse ─────────────────────────────────────────────────────
-echo "[3/9] Checking ClickHouse..."
+echo "[3/10] Checking ClickHouse..."
 if ! command -v clickhouse-server &>/dev/null; then
     echo "  Installing ClickHouse..."
     curl -fsSL https://packages.clickhouse.com/rpm/lts/repodata/repomd.xml.key \
@@ -72,18 +72,18 @@ for i in {1..10}; do
 done
 
 # ── 4. Initialize ClickHouse schema ──────────────────────────────────────────
-echo "[4/9] Initializing ClickHouse schema..."
+echo "[4/10] Initializing ClickHouse schema..."
 clickhouse-client --multiquery < "$REPO_DIR/clickhouse/schema.sql" && echo "  Schema applied."
 
 # ── 5. Python virtualenv ──────────────────────────────────────────────────────
-echo "[5/9] Setting up Python virtualenv..."
+echo "[5/10] Setting up Python virtualenv..."
 python3 -m venv "$VENV"
 "$VENV/bin/pip" install --quiet --upgrade pip
 "$VENV/bin/pip" install --quiet -r "$REPO_DIR/requirements.txt"
 echo "  Python dependencies installed."
 
 # ── 6. Copy app files ─────────────────────────────────────────────────────────
-echo "[6/9] Copying application files..."
+echo "[6/10] Copying application files..."
 if [ "$REPO_DIR" = "$INSTALL_DIR" ]; then
     echo "  Install dir is the repo checkout itself — nothing to copy."
 else
@@ -94,7 +94,7 @@ else
 fi
 
 # ── 7. Config file ────────────────────────────────────────────────────────────
-echo "[7/9] Setting up config..."
+echo "[7/10] Setting up config..."
 if [ ! -f "$INSTALL_DIR/config.yaml" ]; then
     cp "$REPO_DIR/config.example.yaml" "$INSTALL_DIR/config.yaml"
     # Generate a random secret key
@@ -108,7 +108,7 @@ else
 fi
 
 # ── 8. Generate ingest token + create admin user ──────────────────────────────
-echo "[8/9] Initializing database and admin user..."
+echo "[8/10] Initializing database and admin user..."
 INGEST_TOKEN=$(openssl rand -hex 24)
 ADMIN_PASS=$(openssl rand -base64 12 | tr -d '/+=' | head -c 16)
 
@@ -142,8 +142,30 @@ async def setup():
 asyncio.run(setup())
 PYEOF
 
-# ── 9. Install systemd service ────────────────────────────────────────────────
-echo "[9/9] Installing systemd service..."
+# ── 9. Build frontend ─────────────────────────────────────────────────────────
+# Not installing Node.js itself here (see README Requirements — version
+# management is left to the operator), but if it's already present (as the
+# Quick Start instructs installing beforehand), just build it — there's no
+# reason to leave this as a manual step when we can.
+echo "[9/10] Building frontend..."
+FRONTEND_BUILT=0
+if command -v npm &>/dev/null; then
+    ( cd "$REPO_DIR/frontend" && npm install --no-audit --no-fund && npm run build )
+    if [ "$REPO_DIR/frontend/dist" != "$INSTALL_DIR/frontend/dist" ]; then
+        mkdir -p "$INSTALL_DIR/frontend"
+        rm -rf "$INSTALL_DIR/frontend/dist"
+        cp -r "$REPO_DIR/frontend/dist" "$INSTALL_DIR/frontend/dist"
+    fi
+    FRONTEND_BUILT=1
+    echo "  Frontend built and deployed."
+else
+    echo "  npm not found — skipping (Node.js 20.x is required; see README Requirements)."
+    echo "  The web UI will return \"Not Found\" until you build it manually — see the"
+    echo "  banner at the end of this script for the exact commands."
+fi
+
+# ── 10. Install systemd service ───────────────────────────────────────────────
+echo "[10/10] Installing systemd service..."
 # Re-own the install/log dirs to the service user before starting the service.
 sudo chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR" "$LOG_DIR"
 sed \
@@ -170,6 +192,16 @@ echo "║                                                          ║"
 echo "║  SAVE THESE CREDENTIALS — they won't be shown again!     ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
+if [ "$FRONTEND_BUILT" -eq 0 ]; then
+    echo "!! Frontend was NOT built (npm not found) — the web UI will show"
+    echo "!! {\"detail\":\"Not Found\"} until you run:"
+    echo "!!   cd $REPO_DIR/frontend && npm install && npm run build"
+    if [ "$REPO_DIR/frontend/dist" != "$INSTALL_DIR/frontend/dist" ]; then
+        echo "!!   mkdir -p $INSTALL_DIR/frontend && cp -r $REPO_DIR/frontend/dist $INSTALL_DIR/frontend/dist"
+    fi
+    echo "!!   sudo systemctl restart pktflow"
+    echo ""
+fi
 echo "Next steps:"
 echo "  1. Update vector.toml on each collector (see VECTOR_MIGRATION.md)"
 echo "  2. Log into pktFlow and review Settings"
