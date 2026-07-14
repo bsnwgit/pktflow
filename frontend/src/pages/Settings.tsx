@@ -915,7 +915,7 @@ export default function Settings() {
       {/* Ingest */}
       {tab === 'ingest' && (
         <Section title="Ingest" onSave={ingestSave.save} saving={ingestSave.saving} saved={ingestSave.saved} error={ingestSave.error}>
-          <Field label="Ingest method" hint="HTTP POST is recommended; requires no firewall changes">
+          <Field label="Ingest method" hint="HTTP POST is recommended; requires no firewall changes. A service restart is required after changing this setting — the UDP listener only starts/stops at process startup.">
             <SelectInput
               value={str('ingest_method', 'http')}
               onChange={v => set('ingest_method', v)}
@@ -938,7 +938,7 @@ export default function Settings() {
           <Field label="HTTP port" hint="Port pktFlow listens on">
             <NumberInput value={num('ingest_http_port', 8766)} onChange={v => set('ingest_http_port', v)} min={1} max={65535} />
           </Field>
-          <Field label="UDP NetFlow port">
+          <Field label="UDP NetFlow port" hint="Requires a service restart to take effect">
             <NumberInput value={num('ingest_udp_port_netflow', 2055)} onChange={v => set('ingest_udp_port_netflow', v)} min={1} max={65535} />
           </Field>
           <Field label="UDP sFlow port">
@@ -1451,6 +1451,65 @@ function fmtRelative(ts: string | null | undefined): string {
   return `${Math.floor(secs / 86400)}d ago`
 }
 
+// Defined at module scope (not inside DevicesTab) so its identity is stable
+// across DevicesTab re-renders — the periodic device-summary/list polling
+// updates DevicesTab's state every 15–30s, and a component defined inside a
+// re-rendering parent gets a new function identity on every render, which
+// makes React unmount + remount it (wiping whatever the user had typed).
+function DeviceForm({ d, saving, error, onSave, onCancel }: {
+  d: Device
+  saving: boolean
+  error: string
+  onSave: (d: Device) => void
+  onCancel: () => void
+}) {
+  const [form, setForm] = useState<Device>(d)
+  const f = <K extends keyof Device>(k: K, v: Device[K]) => setForm(x => ({ ...x, [k]: v }))
+  return (
+    <tr>
+      <td colSpan={8} className="px-4 py-4 bg-gray-800/50">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+          {([['IP', 'ip', '192.168.1.1'], ['Name', 'name', 'Core Switch'], ['Site', 'site', 'site-a']] as const).map(([label, key, ph]) => (
+            <div key={key}>
+              <label className="block text-xs text-white mb-1">{label}</label>
+              <input
+                value={form[key] as string}
+                onChange={e => f(key, e.target.value)}
+                placeholder={ph}
+                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          ))}
+          <div className="flex items-end gap-4">
+            <div>
+              <label className="block text-xs text-white mb-1">Allowed</label>
+              <Toggle value={form.allowed} onChange={v => f('allowed', v)} />
+            </div>
+          </div>
+        </div>
+        <div className="mb-3">
+          <label className="block text-xs text-white mb-1">Notes</label>
+          <input
+            value={form.notes}
+            onChange={e => f('notes', e.target.value)}
+            placeholder="Optional notes"
+            className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+        {error && <p className="text-xs text-red-400 mb-2">{error}</p>}
+        <div className="flex gap-2">
+          <button onClick={() => onSave(form)} disabled={saving} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs rounded px-3 py-1.5">
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button onClick={onCancel} className="text-white hover:text-white text-xs border border-gray-700 rounded px-3 py-1.5">
+            Cancel
+          </button>
+        </div>
+      </td>
+    </tr>
+  )
+}
+
 function DevicesTab() {
   const [devices, setDevices]     = useState<Device[]>([])
   const [summaries, setSummaries] = useState<DeviceSummary[]>([])
@@ -1613,53 +1672,7 @@ function DevicesTab() {
   // Join: managed devices + live summaries keyed by IP
   const summaryMap = Object.fromEntries(summaries.map(s => [s.sampler_ip, s]))
 
-  const DeviceForm = ({ d }: { d: Device }) => {
-    const [form, setForm] = useState<Device>(d)
-    const f = <K extends keyof Device>(k: K, v: Device[K]) => setForm(x => ({ ...x, [k]: v }))
-    return (
-      <tr>
-        <td colSpan={8} className="px-4 py-4 bg-gray-800/50">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-            {([['IP', 'ip', '192.168.1.1'], ['Name', 'name', 'Core Switch'], ['Site', 'site', 'site-a']] as const).map(([label, key, ph]) => (
-              <div key={key}>
-                <label className="block text-xs text-white mb-1">{label}</label>
-                <input
-                  value={form[key] as string}
-                  onChange={e => f(key, e.target.value)}
-                  placeholder={ph}
-                  className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-            ))}
-            <div className="flex items-end gap-4">
-              <div>
-                <label className="block text-xs text-white mb-1">Allowed</label>
-                <Toggle value={form.allowed} onChange={v => f('allowed', v)} />
-              </div>
-            </div>
-          </div>
-          <div className="mb-3">
-            <label className="block text-xs text-white mb-1">Notes</label>
-            <input
-              value={form.notes}
-              onChange={e => f('notes', e.target.value)}
-              placeholder="Optional notes"
-              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-          {error && <p className="text-xs text-red-400 mb-2">{error}</p>}
-          <div className="flex gap-2">
-            <button onClick={() => save(form)} disabled={saving} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs rounded px-3 py-1.5">
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-            <button onClick={() => { setEditing(null); setAdding(false) }} className="text-white hover:text-white text-xs border border-gray-700 rounded px-3 py-1.5">
-              Cancel
-            </button>
-          </div>
-        </td>
-      </tr>
-    )
-  }
+  const cancelEdit = () => { setEditing(null); setAdding(false) }
 
   return (
     <div>
@@ -1802,7 +1815,7 @@ function DevicesTab() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800/50">
-            {adding && <DeviceForm d={EMPTY} />}
+            {adding && <DeviceForm key="add" d={EMPTY} saving={saving} error={error} onSave={save} onCancel={cancelEdit} />}
             {(deviceFilter.trim()
               ? devices.filter(d => {
                   const q = deviceFilter.toLowerCase()
@@ -1813,7 +1826,7 @@ function DevicesTab() {
               const s = summaryMap[d.ip]
               const status = samplerStatus(s?.last_seen)
               return editing?.id === d.id ? (
-                <DeviceForm key={`edit-${d.id}`} d={d} />
+                <DeviceForm key={`edit-${d.id}`} d={d} saving={saving} error={error} onSave={save} onCancel={cancelEdit} />
               ) : (
                 <tr key={d.id} className="hover:bg-gray-800/30 transition-colors">
                   <td className="px-4 py-3">
