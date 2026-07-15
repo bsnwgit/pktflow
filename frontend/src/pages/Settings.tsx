@@ -1757,6 +1757,11 @@ function DevicesTab() {
         </div>
       )}
 
+      <p className="text-xs text-gray-500 mb-3">
+        Gateway for what's allowed to persist — a sampler can be sending flows on the wire, but
+        nothing is stored unless its IP is listed here and marked Allowed.
+      </p>
+
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <p className="text-xs text-gray-500">Live stats refresh every 15s</p>
         <div className="flex items-center gap-2">
