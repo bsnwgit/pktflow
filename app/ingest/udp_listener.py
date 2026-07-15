@@ -76,8 +76,17 @@ def _decode_v9_flows(
         log.info("UDP parse error from %s: %s", src_ip, exc)
         return []
 
+    # Settings -> Devices is the gateway for what's allowed to persist — a
+    # sampler can be sending flows on the wire, but nothing is stored unless
+    # its IP is registered there and marked Allowed.
+    device = _device_cache.get(src_ip)
+    if device is None:
+        from app.alerts.engine import AlertEngine
+        AlertEngine.notify_unknown_sampler(src_ip)
+        return []
+
     now = datetime.now(tz=timezone.utc)
-    name, site = _device_cache.get(src_ip, ("", "unknown"))
+    name, site = device
 
     # The netflow library supports two slightly different API shapes across
     # versions.  Handle both defensively.
