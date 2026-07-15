@@ -135,9 +135,18 @@ def normalize_goflow2_record(raw: dict[str, Any]) -> Optional[FlowRecord]:
         if sampler_ip == "0.0.0.0":
             return None
 
+        # Settings -> Devices is the gateway for what's allowed to persist —
+        # a sampler can be sending flows on the wire, but nothing is stored
+        # unless its IP is registered there and marked Allowed.
+        device = _device_cache.get(sampler_ip)
+        if device is None:
+            from app.alerts.engine import AlertEngine
+            AlertEngine.notify_unknown_sampler(sampler_ip)
+            return None
+
         # Site from Vector transform takes priority, then device cache
         site_from_vector = str(_get(raw, "site", default="") or "")
-        name, site = _device_cache.get(sampler_ip, ("", site_from_vector))
+        name, site = device
         if not site:
             site = site_from_vector
 
