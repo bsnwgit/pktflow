@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api, DeviceSummary, User, UserIn, SslStatus, VpnMapping, VpnMappingIn, SiteGroup, SiteGroupIn, LineStyle, LineStyleIn, TrafficType, TrafficTypeIn } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import { useAuth } from '../store/auth'
@@ -469,7 +470,12 @@ function PktHubTokenDisplay() {
 export default function Settings() {
   const { user: me }          = useAuth()
   const isAdmin               = me?.role === 'admin'
-  const [tab, setTab]         = useState<TabId>('general')
+  const [searchParams]        = useSearchParams()
+  const [tab, setTab]         = useState<TabId>((searchParams.get('tab') as TabId) || 'general')
+  // Deep-link from an "Unknown sampler" alert event — pre-fills the
+  // add-device form on the Devices tab; the user still decides the rest of
+  // the fields and clicks Save themselves.
+  const registerIp            = searchParams.get('register_ip') || ''
   const [settings, setSettings] = useState<Settings>({})
   const [loading, setLoading] = useState(true)
   // Tracks whether the user has made unsaved edits.
@@ -1169,7 +1175,7 @@ export default function Settings() {
       )}
 
       {/* Devices tab */}
-      {tab === 'devices' && <DevicesTab />}
+      {tab === 'devices' && <DevicesTab prefillIp={registerIp} />}
 
       {/* Geo Map tab — admin only */}
       {tab === 'vpnmappings' && isAdmin && <GeoMapTab />}
@@ -1510,7 +1516,7 @@ function DeviceForm({ d, saving, error, onSave, onCancel }: {
   )
 }
 
-function DevicesTab() {
+function DevicesTab({ prefillIp = '' }: { prefillIp?: string }) {
   const [devices, setDevices]     = useState<Device[]>([])
   const [summaries, setSummaries] = useState<DeviceSummary[]>([])
   const [editing, setEditing]     = useState<Device | null>(null)
@@ -1528,6 +1534,16 @@ function DevicesTab() {
   const [dismissedExpanded, setDismissedExpanded] = useState(false)
 
   const EMPTY: Device = { id: 0, ip: '', name: '', site: '', notes: '', allowed: true }
+
+  // Deep-linked from an "Unknown sampler" alert event — open the add form
+  // with just the IP filled in; the user decides everything else.
+  useEffect(() => {
+    if (prefillIp) {
+      setEditing(null)
+      setAdding(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillIp])
 
   const loadDevices   = async () => { try { setDevices(await api.getDevices()) } catch {} }
   const loadSummaries = async () => { try { setSummaries(await api.getDeviceSummaries()) } catch {} }
@@ -1757,6 +1773,11 @@ function DevicesTab() {
         </div>
       )}
 
+      <p className="text-xs text-gray-500 mb-3">
+        Gateway for what's allowed to persist — a sampler can be sending flows on the wire, but
+        nothing is stored unless its IP is listed here and marked Allowed.
+      </p>
+
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <p className="text-xs text-gray-500">Live stats refresh every 15s</p>
         <div className="flex items-center gap-2">
@@ -1815,7 +1836,7 @@ function DevicesTab() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800/50">
-            {adding && <DeviceForm key="add" d={EMPTY} saving={saving} error={error} onSave={save} onCancel={cancelEdit} />}
+            {adding && <DeviceForm key="add" d={prefillIp ? { ...EMPTY, ip: prefillIp } : EMPTY} saving={saving} error={error} onSave={save} onCancel={cancelEdit} />}
             {(deviceFilter.trim()
               ? devices.filter(d => {
                   const q = deviceFilter.toLowerCase()

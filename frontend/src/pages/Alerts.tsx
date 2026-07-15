@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api, AlertRule, AlertEvent, getToken } from '../api/client'
 import { useWebSocket, type WsMessage, type AlertFiredPayload } from '../hooks/useWebSocket'
 
@@ -41,7 +41,7 @@ const RULE_TYPES: Array<{ value: string; label: string; group: string; hint: str
   { value: 'protocol_anomaly',   label: 'Protocol anomaly',      group: 'Security',       hint: 'Fire when unexpected protocol appears on a well-known port' },
   // Infrastructure
   { value: 'data_gap',           label: 'Data gap',              group: 'Infrastructure', hint: 'Fire when a known sampler stops sending flows' },
-  { value: 'new_host',           label: 'New host',              group: 'Infrastructure', hint: 'Fire when an unrecognized device sends NetFlow data' },
+  { value: 'new_host',           label: 'Unknown sampler detected', group: 'Infrastructure', hint: 'Fires when a host not in the device registry sends NetFlow data' },
   { value: 'ingest_rate_low',    label: 'Ingest rate low',       group: 'Infrastructure', hint: 'Fire when the overall ingest rate drops below a minimum' },
   { value: 'clickhouse_size',    label: 'ClickHouse table size', group: 'Infrastructure', hint: 'Fire when a ClickHouse table exceeds a storage threshold' },
 ]
@@ -62,7 +62,7 @@ const RULE_DEFAULTS: Record<string, { name: string; description: string }> = {
   internal_spread:    { name: 'Internal spread detected',  description: 'Alert when a source IP reaches an unusual number of distinct destinations' },
   protocol_anomaly:   { name: 'Protocol anomaly',          description: 'Alert when unexpected protocol traffic is seen on a well-known port' },
   data_gap:           { name: 'Collector data gap',        description: 'Alert when a known sampler stops sending flows for a set period' },
-  new_host:           { name: 'Unknown sampler detected',  description: 'Alert when an unrecognized host sends NetFlow data' },
+  new_host:           { name: 'Unknown sampler detected',  description: 'Fires when a host not in the device registry sends NetFlow data' },
   ingest_rate_low:    { name: 'Ingest rate too low',       description: 'Alert when the overall flow ingest rate drops below a minimum' },
   clickhouse_size:    { name: 'ClickHouse table too large', description: 'Alert when a ClickHouse table exceeds a storage size threshold' },
 }
@@ -560,6 +560,15 @@ function EventCard({ event, onAck }: { event: AlertEvent; onAck: (id: number) =>
   const isResolved  = Boolean(event.resolved_at) && !isAcked
   const hasDetails  = Object.keys(event.details).length > 0
 
+  // "Unknown sampler <ip> sent NetFlow data — not in device registry"
+  // (see app/alerts/engine.py _check_unknown_samplers) — offer a direct
+  // link to register it, pre-filled with just the IP. The user still fills
+  // in and saves the rest themselves.
+  const unknownIp = event.message.startsWith('Unknown sampler ')
+    && typeof event.details.sampler_ip === 'string'
+    ? event.details.sampler_ip as string
+    : null
+
   return (
     <div className={`bg-gray-900 border rounded-xl p-4 transition-opacity ${
       isAcked ? 'opacity-40 border-gray-800' : isResolved ? 'opacity-70 border-gray-700' : 'border-gray-700'
@@ -579,6 +588,14 @@ function EventCard({ event, onAck }: { event: AlertEvent; onAck: (id: number) =>
             <p className="text-sm text-white mt-0.5">{event.message}</p>
             {isResolved && (
               <p className="text-xs text-green-500/70 mt-0.5">Resolved {fmtTime(event.resolved_at!)}</p>
+            )}
+            {unknownIp && (
+              <Link
+                to={`/settings?tab=devices&register_ip=${encodeURIComponent(unknownIp)}`}
+                className="inline-block mt-1 text-xs text-blue-400 hover:text-blue-300 underline"
+              >
+                Register device {unknownIp} →
+              </Link>
             )}
           </div>
         </div>
