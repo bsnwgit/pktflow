@@ -75,6 +75,7 @@ All settings in `config.example.yaml` can also be passed as `PKTFLOW_*` environm
 - **Auto-resolve** — open alert events self-close when the condition clears on the next evaluation cycle
 - **ACK support** — analysts can acknowledge alerts without closing them
 - **Alert cleanup** — configurable retention period; old events are purged on a schedule
+- **Bulk rule provisioning** — Export CSV / Import CSV / template-download on the Rules tab; `conditions` round-trips as a JSON object string (shape depends on `rule_type`), `channels` as a comma-separated column
 
 ### Authentication & Users
 - **Local auth** — JWT + bcrypt, configurable token lifetime
