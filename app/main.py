@@ -48,6 +48,26 @@ async def lifespan(app: FastAPI):
     await init_storage()
     log.info(f"Flow storage ready: {get_storage().__class__.__name__}")
 
+    # Load the device registry into the in-memory ingest allowlist cache.
+    # normalizer._device_cache starts empty on every process start and was
+    # previously only ever populated reactively (by app/api/devices.py after
+    # a create/update/delete through the UI) — meaning every restart silently
+    # dropped all flow data as "unregistered" until someone happened to edit
+    # a device afterward, even though the SQLite devices table was correct
+    # the whole time. This mirrors app/api/devices.py's _do_refresh() query.
+    try:
+        import aiosqlite as _aiosqlite2
+        from app.ingest.normalizer import refresh_device_cache
+        _db_path2 = Path(__file__).parent.parent / "pktflow.db"
+        async with _aiosqlite2.connect(str(_db_path2)) as _db2:
+            _db2.row_factory = _aiosqlite2.Row
+            async with _db2.execute("SELECT ip, name, site FROM devices WHERE allowed = 1") as _cur2:
+                _device_rows = [dict(r) for r in await _cur2.fetchall()]
+        refresh_device_cache(_device_rows)
+        log.info("Device registry cache loaded (%d allowed devices)", len(_device_rows))
+    except Exception as _e:
+        log.warning("Device registry cache not loaded at startup: %s", _e)
+
     # Start ingest buffer flush scheduler
     buffer = IngestBuffer.get_instance()
     await buffer.start()
