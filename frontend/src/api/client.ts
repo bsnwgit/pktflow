@@ -98,8 +98,6 @@ export const api = {
     request<TopTalker[]>(`/flows/top-talkers?${new URLSearchParams(params as any)}`),
   searchFlows: (params: SearchParams) =>
     request<FlowRecord[]>(`/flows/search?${new URLSearchParams(params as any)}`),
-  getConversation: (conversationId: number, windowMin = 60) =>
-    request<FlowRecord[]>(`/flows/conversation/${conversationId}?window_min=${windowMin}`),
   getLastSeen: () => request<Record<string, string>>('/flows/last-seen'),
   getTopology: (params: TopologyParams) =>
     request<TopologyResponse>(`/flows/topology?${new URLSearchParams(params as any)}`),
@@ -270,14 +268,27 @@ export const api = {
     return res.json()
   },
 
-  getVpnMappings: () =>
-    request<VpnMapping[]>('/vpn-mappings/'),
-  createVpnMapping: (body: VpnMappingIn) =>
-    request<VpnMapping>('/vpn-mappings/', { method: 'POST', body: JSON.stringify(body) }),
-  updateVpnMapping: (id: number, body: VpnMappingIn) =>
-    request<VpnMapping>(`/vpn-mappings/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-  deleteVpnMapping: (id: number) =>
-    request(`/vpn-mappings/${id}`, { method: 'DELETE' }),
+  getAddressMappings: () =>
+    request<AddressMapping[]>('/address-mappings/'),
+  createAddressMapping: (body: AddressMappingIn) =>
+    request<AddressMapping>('/address-mappings/', { method: 'POST', body: JSON.stringify(body) }),
+  updateAddressMapping: (id: number, body: AddressMappingIn) =>
+    request<AddressMapping>(`/address-mappings/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  reorderAddressMappings: (ids: number[]) =>
+    request<AddressMapping[]>('/address-mappings/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
+  deleteAddressMapping: (id: number) =>
+    request(`/address-mappings/${id}`, { method: 'DELETE' }),
+
+  getTrafficRules: () =>
+    request<TrafficRule[]>('/traffic-rules/'),
+  createTrafficRule: (body: TrafficRuleIn) =>
+    request<TrafficRule>('/traffic-rules/', { method: 'POST', body: JSON.stringify(body) }),
+  updateTrafficRule: (id: number, body: TrafficRuleIn) =>
+    request<TrafficRule>(`/traffic-rules/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  reorderTrafficRules: (ids: number[]) =>
+    request<TrafficRule[]>('/traffic-rules/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
+  deleteTrafficRule: (id: number) =>
+    request(`/traffic-rules/${id}`, { method: 'DELETE' }),
 
   // ── Geo Map config ─────────────────────────────────────────────────────────
   getSiteGroups: () =>
@@ -297,15 +308,6 @@ export const api = {
     request<LineStyle>(`/geo-config/line-styles/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteLineStyle: (id: number) =>
     request(`/geo-config/line-styles/${id}`, { method: 'DELETE' }),
-
-  getTrafficTypes: () =>
-    request<TrafficType[]>('/geo-config/traffic-types'),
-  createTrafficType: (body: TrafficTypeIn) =>
-    request<TrafficType>('/geo-config/traffic-types', { method: 'POST', body: JSON.stringify(body) }),
-  updateTrafficType: (id: number, body: TrafficTypeIn) =>
-    request<TrafficType>(`/geo-config/traffic-types/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-  deleteTrafficType: (id: number) =>
-    request(`/geo-config/traffic-types/${id}`, { method: 'DELETE' }),
 
   getLogs: (params: LogQueryParams) =>
     request<LogResponse>(`/logs?${new URLSearchParams(params as any)}`),
@@ -368,8 +370,6 @@ export interface FlowRecord {
   src_as?: number
   dst_as?: number
   flow_dir?: number
-  conversation_id?: number
-  flow_role?: number  // 0=unknown, 1=initiator, 2=responder
 }
 
 export interface Device {
@@ -494,54 +494,77 @@ export interface GeoLocation {
   ip: string; lat: number; lng: number
   city: string; country: string; country_code: string
   bytes: number; flows: number
-  site_name?: string   // set when the IP is VPN-mapped (e.g. "Site A", "Cloud AWS")
-  group?: string       // site group name (configured in Settings → Geo Map → Site Groups), or "" when VPN-mapped
+  site_name?: string   // set when the IP matched an Address Mapping (e.g. "Site A", "Cloud AWS")
+  group?: string       // site group name (configured in Settings → Geo Map → Site Groups), or "" when unmapped
 }
 export interface GeoArc {
   src_ip: string; src_lat: number; src_lng: number
   dst_ip: string; dst_lat: number; dst_lng: number
   bytes: number; flows: number
-  arc_type?: 'gp' | 's2s' | 'wan'  // set by backend; defaults to 'wan' if absent
+  color: string           // resolved line color, set by backend (gray default when unmapped)
+  dash:  string            // resolved stroke-dasharray, '' = solid
+  label: string | null     // name of the Traffic Rule that assigned this style, null when unmatched (default gray)
 }
 export interface GeoDataResponse {
   locations: GeoLocation[]
   arcs: GeoArc[]
 }
 
-export interface VpnMapping {
-  id:         number
-  site_name:  string
-  group_name: string
-  public_ip:  string
-  cidr_or_ip: string
-  entry_type: string   // references traffic_types.name
-  created_at: string
+export interface AddressMapping {
+  id:            number
+  name:          string
+  group_name:    string
+  category:      'wan' | 'vpn'   // display badge only, no effect on matching
+  private_cidr:  string
+  public_cidr:   string
+  priority:      number          // lower wins on conflict; managed via reorderAddressMappings, not edited directly
+  created_at:    string
 }
-export interface VpnMappingIn {
-  site_name:  string
-  group_name: string
-  public_ip:  string
-  cidr_or_ip: string
-  entry_type: string
+export interface AddressMappingIn {
+  name:          string
+  group_name:    string
+  category:      'wan' | 'vpn'
+  private_cidr:  string
+  public_cidr:   string
+}
+
+export interface TrafficRule {
+  id:                  number
+  name:                string
+  address_mapping_id:  number | null   // null = applies to any address mapping
+  dst_cidrs:           string | null   // comma-separated IPs/CIDRs, e.g. "1.1.1.1,9.9.9.9"
+  dst_ports:           string | null   // comma-separated ports/ranges, e.g. "53,8000-9000"
+  line_style_id:       number | null
+  priority:            number          // lower wins; managed via reorderTrafficRules, not edited directly
+  created_at:          string
+}
+export interface TrafficRuleIn {
+  name:               string
+  address_mapping_id: number | null
+  dst_cidrs:          string | null
+  dst_ports:          string | null
+  line_style_id:      number | null
 }
 
 export interface SiteGroup {
-  id:           number
-  name:         string
-  display_name: string
-  fill_color:   string
-  stroke_color: string
-  badge_bg:     string
-  badge_text:   string
-  created_at:   string
+  id:             number
+  name:           string
+  display_name:   string
+  fill_color:     string
+  stroke_color:   string
+  badge_bg:       string
+  badge_text:     string
+  show_in_legend: boolean
+  created_at:     string
 }
 export interface SiteGroupIn {
-  name:         string
-  display_name: string
-  fill_color:   string
-  stroke_color: string
-  badge_bg:     string
-  badge_text:   string
+  name:           string
+  display_name:   string
+  fill_color:     string
+  stroke_color:   string
+  badge_bg:       string
+  badge_text:     string
+  show_in_legend: boolean
 }
 
 export interface LineStyle {
@@ -559,22 +582,6 @@ export interface LineStyleIn {
   dash_pattern: string
 }
 
-export interface TrafficType {
-  id:            number
-  name:          string
-  label:         string
-  line_style_id: number | null
-  is_default:    number           // 0 or 1
-  created_at:    string
-  line_color:    string | null    // joined from line_styles
-  line_dash:     string | null    // joined from line_styles
-}
-export interface TrafficTypeIn {
-  name:          string
-  label:         string
-  line_style_id: number | null
-  is_default:    boolean
-}
 
 export type TopologyParams = { window?: string; sampler_ip?: string; min_bytes?: string; limit?: string }
 export type TimeSeriesParams = { sampler_ip?: string; window?: string; dst_port?: string; protocol?: string; site?: string }

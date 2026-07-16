@@ -1,8 +1,8 @@
 """
-Geo Map configuration — CRUD endpoints for the three configurable tables:
+Geo Map configuration — CRUD endpoints for the two configurable catalogs:
   site_groups    — circle marker colours and badge styles keyed by group name
-  line_styles    — arc line style catalog (colour + dash pattern)
-  traffic_types  — named traffic classifications that reference a line style
+  line_styles    — arc line style catalog (colour + dash pattern), picked
+                   directly by Address Mappings and Traffic Rules
 
 All authenticated users can read (GET).
 Only admins can write (POST, PUT, DELETE).
@@ -12,7 +12,6 @@ from __future__ import annotations
 import aiosqlite
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
 
 from app.database import DB_PATH
 from app.dependencies import CurrentUser, AdminUser
@@ -23,12 +22,13 @@ router = APIRouter()
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class SiteGroupIn(BaseModel):
-    name:         str
-    display_name: str
-    fill_color:   str
-    stroke_color: str
-    badge_bg:     str = 'bg-gray-700'
-    badge_text:   str = 'text-gray-300'
+    name:           str
+    display_name:   str
+    fill_color:     str
+    stroke_color:   str
+    badge_bg:       str = '#374151'
+    badge_text:     str = '#d1d5db'
+    show_in_legend: bool = True
 
 
 class SiteGroup(SiteGroupIn):
@@ -46,25 +46,6 @@ class LineStyleIn(BaseModel):
 class LineStyle(LineStyleIn):
     id:         int
     created_at: str
-
-
-class TrafficTypeIn(BaseModel):
-    name:          str
-    label:         str
-    line_style_id: Optional[int] = None
-    is_default:    bool = False
-
-
-class TrafficType(BaseModel):
-    id:            int
-    name:          str
-    label:         str
-    line_style_id: Optional[int]
-    is_default:    int          # 0 or 1 — kept as int for SQLite compat
-    created_at:    str
-    # Flattened from joined line_styles row
-    line_color:    Optional[str] = None
-    line_dash:     Optional[str] = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -95,10 +76,10 @@ async def create_site_group(_: AdminUser, body: SiteGroupIn):
         try:
             await db.execute(
                 """INSERT INTO site_groups
-                   (name, display_name, fill_color, stroke_color, badge_bg, badge_text)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   (name, display_name, fill_color, stroke_color, badge_bg, badge_text, show_in_legend)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (body.name, body.display_name, body.fill_color,
-                 body.stroke_color, body.badge_bg, body.badge_text),
+                 body.stroke_color, body.badge_bg, body.badge_text, 1 if body.show_in_legend else 0),
             )
             await db.commit()
             async with db.execute(
@@ -118,10 +99,10 @@ async def update_site_group(_: AdminUser, id: int, body: SiteGroupIn):
         try:
             await db.execute(
                 """UPDATE site_groups
-                   SET name=?, display_name=?, fill_color=?, stroke_color=?, badge_bg=?, badge_text=?
+                   SET name=?, display_name=?, fill_color=?, stroke_color=?, badge_bg=?, badge_text=?, show_in_legend=?
                    WHERE id=?""",
                 (body.name, body.display_name, body.fill_color,
-                 body.stroke_color, body.badge_bg, body.badge_text, id),
+                 body.stroke_color, body.badge_bg, body.badge_text, 1 if body.show_in_legend else 0, id),
             )
             await db.commit()
             row = await _get_one(db, "site_groups", id)
@@ -191,76 +172,5 @@ async def delete_line_style(_: AdminUser, id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await _get_one(db, "line_styles", id)
         await db.execute("DELETE FROM line_styles WHERE id = ?", (id,))
-        await db.commit()
-    return None
-
-
-# ── Traffic Types ─────────────────────────────────────────────────────────────
-
-@router.get("/traffic-types", response_model=list[TrafficType])
-async def list_traffic_types(_: CurrentUser):
-    """Return all traffic types with their line style colours flattened in."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            """SELECT t.*, ls.color_hex AS line_color, ls.dash_pattern AS line_dash
-               FROM traffic_types t
-               LEFT JOIN line_styles ls ON ls.id = t.line_style_id
-               ORDER BY t.is_default ASC, t.name"""
-        ) as cur:
-            rows = await cur.fetchall()
-    return [dict(r) for r in rows]
-
-
-@router.post("/traffic-types", response_model=TrafficType, status_code=201)
-async def create_traffic_type(_: AdminUser, body: TrafficTypeIn):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        try:
-            await db.execute(
-                "INSERT INTO traffic_types (name, label, line_style_id, is_default) VALUES (?, ?, ?, ?)",
-                (body.name, body.label, body.line_style_id, 1 if body.is_default else 0),
-            )
-            await db.commit()
-            async with db.execute(
-                """SELECT t.*, ls.color_hex AS line_color, ls.dash_pattern AS line_dash
-                   FROM traffic_types t
-                   LEFT JOIN line_styles ls ON ls.id = t.line_style_id
-                   WHERE t.name = ?""", (body.name,)
-            ) as cur:
-                row = await cur.fetchone()
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-    return dict(row)
-
-
-@router.put("/traffic-types/{id}", response_model=TrafficType)
-async def update_traffic_type(_: AdminUser, id: int, body: TrafficTypeIn):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        await _get_one(db, "traffic_types", id)
-        try:
-            await db.execute(
-                "UPDATE traffic_types SET name=?, label=?, line_style_id=?, is_default=? WHERE id=?",
-                (body.name, body.label, body.line_style_id, 1 if body.is_default else 0, id),
-            )
-            await db.commit()
-            async with db.execute(
-                """SELECT t.*, ls.color_hex AS line_color, ls.dash_pattern AS line_dash
-                   FROM traffic_types t
-                   LEFT JOIN line_styles ls ON ls.id = t.line_style_id
-                   WHERE t.id = ?""", (id,)
-            ) as cur:
-                row = await cur.fetchone()
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-    return dict(row)
-
-
-@router.delete("/traffic-types/{id}", status_code=204)
-async def delete_traffic_type(_: AdminUser, id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await _get_one(db, "traffic_types", id)
-        await db.execute("DELETE FROM traffic_types WHERE id = ?", (id,))
         await db.commit()
     return None
