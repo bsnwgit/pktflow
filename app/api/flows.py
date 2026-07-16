@@ -179,6 +179,38 @@ async def search_flows(
     )
 
 
+@router.get("/search/count")
+async def count_flows(
+    _: CurrentUser,
+    src_ip: Optional[str] = Query(None),
+    dst_ip: Optional[str] = Query(None),
+    src_port: Optional[int] = Query(None, ge=0, le=65535),
+    dst_port: Optional[int] = Query(None, ge=0, le=65535),
+    protocol: Optional[int] = Query(None, ge=0, le=255),
+    sampler_ip: Optional[str] = Query(None),
+    window: str = Query("1h"),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None),
+) -> dict:
+    """Total matching rows for the current /search filters, for page-number pagination."""
+    if start and end:
+        s, e = start, end
+    else:
+        s, e = _parse_window(window)
+
+    total = await get_storage().count_flows(
+        src_ip=src_ip,
+        dst_ip=dst_ip,
+        src_port=src_port,
+        dst_port=dst_port,
+        protocol=protocol,
+        sampler_ip=sampler_ip,
+        start=s,
+        end=e,
+    )
+    return {"total": total}
+
+
 # ── Sampler last-seen (for data-gap alerting and UI status dots) ───────────────
 
 @router.get("/last-seen")
