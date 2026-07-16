@@ -482,6 +482,43 @@ class DuckDBBackend(StorageBackend):
             for r in rows
         ]
 
+    async def count_flows(
+        self,
+        src_ip: Optional[str] = None,
+        dst_ip: Optional[str] = None,
+        src_port: Optional[int] = None,
+        dst_port: Optional[int] = None,
+        protocol: Optional[int] = None,
+        sampler_ip: Optional[str] = None,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+    ) -> int:
+        def _query():
+            conditions: list[str] = []
+            params: list = []
+            if start:
+                conditions.append("timestamp >= ?"); params.append(start)
+            if end:
+                conditions.append("timestamp <= ?"); params.append(end)
+            if src_ip:
+                conditions.append("src_ip = ?"); params.append(src_ip)
+            if dst_ip:
+                conditions.append("dst_ip = ?"); params.append(dst_ip)
+            if src_port is not None:
+                conditions.append("src_port = ?"); params.append(src_port)
+            if dst_port is not None:
+                conditions.append("dst_port = ?"); params.append(dst_port)
+            if protocol is not None:
+                conditions.append("protocol = ?"); params.append(protocol)
+            if sampler_ip:
+                conditions.append("sampler_ip = ?"); params.append(sampler_ip)
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+            with self._read_pool.acquire() as conn:
+                return conn.execute(f"SELECT COUNT(*) FROM flows {where}", params).fetchall()
+
+        rows = await self._read(_query) or []
+        return int(rows[0][0]) if rows else 0
+
     # ── Rates ─────────────────────────────────────────────────────────────────
 
     async def get_flows_per_sec(self) -> float:

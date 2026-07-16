@@ -69,6 +69,20 @@ class StorageBackend(ABC):
         """Filtered flow search for the Flow Explorer."""
 
     @abstractmethod
+    async def count_flows(
+        self,
+        src_ip: Optional[str] = None,
+        dst_ip: Optional[str] = None,
+        src_port: Optional[int] = None,
+        dst_port: Optional[int] = None,
+        protocol: Optional[int] = None,
+        sampler_ip: Optional[str] = None,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+    ) -> int:
+        """Total matching rows for the same filters as search_flows, for pagination."""
+
+    @abstractmethod
     async def get_flows_per_sec(self) -> float:
         """Current sustained ingest rate (last 60 seconds)."""
 
