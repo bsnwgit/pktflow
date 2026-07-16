@@ -150,6 +150,32 @@ async def update_device(
     return dict(row)
 
 
+@router.get("/export")
+async def export_devices(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)):
+    """Export the device registry as a CSV file download."""
+    from fastapi.responses import StreamingResponse
+
+    async with db.execute(
+        "SELECT ip, name, site, notes, allowed FROM devices ORDER BY site, name"
+    ) as cur:
+        rows = await cur.fetchall()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["ip", "name", "site", "notes", "allowed"])
+    for r in rows:
+        writer.writerow([
+            r["ip"], r["name"], r["site"] or "", r["notes"] or "",
+            "true" if r["allowed"] else "false",
+        ])
+    buf.seek(0)
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="pktflow-devices.csv"'},
+    )
+
+
 @router.post("/import", dependencies=[Depends(AdminUser)])
 async def import_devices_csv(
     file: UploadFile = File(...),
