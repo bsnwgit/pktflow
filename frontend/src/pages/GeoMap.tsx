@@ -6,10 +6,9 @@
  *   GeoMapCard   → inline card for the Analytics page
  *   default      → full-screen standalone pop-out at /geomap
  *
- * Arc line styles by type:
- *   gp  — GlobalProtect VPN  → green  (#10b981), dash-dash-dot
- *   s2s — Site-to-Site VPN   → blue   (#3b82f6), dashed
- *   wan — Regular WAN traffic → red    (#ef4444), solid
+ * Arc line color/dash is resolved server-side (Settings → Geo Map → Address
+ * Mappings / Traffic Rules, each picking a Line Style directly) and comes
+ * back on each arc already resolved — no client-side type lookup needed.
  *
  * Circle marker colours by group (configured in Settings → Geo Map → Site Groups):
  *   group_a → purple  (#a78bfa)
@@ -22,52 +21,32 @@ import 'leaflet/dist/leaflet.css'
 import * as d3 from 'd3'
 import { Maximize2, RefreshCw, X, MapPin } from 'lucide-react'
 import { api, setToken, getToken, getTokenRole } from '../api/client'
-import type { GeoDataResponse, SiteGroup, TrafficType } from '../api/client'
+import { useAutoRefresh } from '../store/autoRefresh'
+import type { GeoDataResponse, SiteGroup } from '../api/client'
 
 // ── Geo config (dynamic — fetched from API, falls back to hardcoded defaults) ──
+// Line style info no longer lives here — arcs already carry their resolved
+// color/dash/label from the backend (see GeoArc), so the legend reads
+// straight off geoData.arcs instead of a separately-fetched catalog.
 interface GeoConfig {
-  arcStyles:    Record<string, { color: string; dash: string; label: string }>
   groupColors:  Record<string, string>
   groupStrokes: Record<string, string>
   defaultFill:  string
   defaultStroke: string
   siteGroups:   SiteGroup[]
-  trafficTypes: TrafficType[]
 }
 
 const FALLBACK_CONFIG: GeoConfig = {
-  arcStyles: {
-    gp:  { color: '#10b981', dash: '8,3,8,3,2,3', label: 'GlobalProtect VPN' },
-    s2s: { color: '#3b82f6', dash: '10,5',         label: 'Site-to-Site VPN'  },
-    wan: { color: '#ef4444', dash: '',             label: 'WAN Traffic'       },
-  },
   groupColors:  { group_a: '#a78bfa', group_b: '#34d399' },
   groupStrokes: { group_a: '#c4b5fd', group_b: '#6ee7b7' },
   defaultFill:  '#ef4444',
   defaultStroke: '#fca5a5',
   siteGroups:   [],
-  trafficTypes: [],
 }
 
-function buildConfig(trafficTypes: TrafficType[], siteGroups: SiteGroup[]): GeoConfig {
-  const arcStyles: Record<string, { color: string; dash: string; label: string }> = {}
-  let   defaultFill   = '#60a5fa'
-  let   defaultStroke = '#93c5fd'
-
-  for (const t of trafficTypes) {
-    arcStyles[t.name] = {
-      color: t.line_color ?? '#6b7280',
-      dash:  t.line_dash  ?? '',
-      label: t.label,
-    }
-  }
-  // Ensure there is always a 'wan' key (used as fallback for unmatched arcs)
-  if (!arcStyles['wan']) {
-    const def = trafficTypes.find(t => t.is_default)
-    arcStyles['wan'] = def
-      ? { color: def.line_color ?? '#ef4444', dash: def.line_dash ?? '', label: def.label }
-      : FALLBACK_CONFIG.arcStyles['wan']
-  }
+function buildConfig(siteGroups: SiteGroup[]): GeoConfig {
+  let defaultFill   = '#60a5fa'
+  let defaultStroke = '#93c5fd'
 
   const groupColors:  Record<string, string> = {}
   const groupStrokes: Record<string, string> = {}
@@ -76,37 +55,77 @@ function buildConfig(trafficTypes: TrafficType[], siteGroups: SiteGroup[]): GeoC
     groupStrokes[g.name] = g.stroke_color
   }
 
-  // External (non-VPN) marker colour: use the 'wan' arc colour as a hint,
-  // or fall back to red if no wan arc style is configured
+  // External marker colour: fall back to red if no 'external' group is configured
   const extGroup = siteGroups.find(g => g.name === 'external') ?? null
   if (extGroup) {
     defaultFill   = extGroup.fill_color
     defaultStroke = extGroup.stroke_color
   }
 
-  return { arcStyles, groupColors, groupStrokes, defaultFill, defaultStroke, siteGroups, trafficTypes }
+  return { groupColors, groupStrokes, defaultFill, defaultStroke, siteGroups }
 }
 
-// Module-level cache so config is fetched once per page load
-let _configCache: GeoConfig | null = null
-let _configPromise: Promise<GeoConfig> | null = null
-
-function fetchGeoConfig(): Promise<GeoConfig> {
-  if (_configCache) return Promise.resolve(_configCache)
-  if (!_configPromise) {
-    _configPromise = Promise.all([api.getTrafficTypes(), api.getSiteGroups()])
-      .then(([tt, sg]) => { _configCache = buildConfig(tt, sg); return _configCache })
-      .catch(() => { _configCache = FALLBACK_CONFIG; return _configCache })
-  }
-  return _configPromise
-}
-
+// Fetched fresh on every mount and on every auto-refresh tick — a prior
+// version cached this at module scope for the whole browser session, which
+// meant editing Site Groups (e.g. unchecking "show in legend") in Settings
+// never showed up on the Geo Map without a hard page reload.
 function useGeoConfig(): GeoConfig | null {
-  const [config, setConfig] = useState<GeoConfig | null>(_configCache)
+  const [config, setConfig] = useState<GeoConfig | null>(null)
+  const { tick } = useAutoRefresh()
   useEffect(() => {
-    if (!_configCache) { fetchGeoConfig().then(setConfig) }
-  }, [])
+    api.getSiteGroups()
+      .then(sg => setConfig(buildConfig(sg)))
+      .catch(() => setConfig(FALLBACK_CONFIG))
+  }, [tick])
   return config
+}
+
+// ── Legend HTML ───────────────────────────────────────────────────────────
+// Line entries are keyed by the Traffic Rule name that produced each arc
+// (arc.label, set server-side), not the underlying Line Style's own label —
+// so the legend reads "DNS - Cloudflare/Quad9" instead of a generic
+// "Dashed Blue". Arcs with no matching rule (the neutral default gray for
+// unmapped public<->public traffic) have no label and are omitted.
+function buildLegendHTML(geoData: GeoDataResponse, cfg: GeoConfig): string {
+  const heading = (t: string) =>
+    `<div style="color:#9ca3af;font-weight:600;margin-bottom:3px;font-size:10px;text-transform:uppercase;letter-spacing:.05em">${t}</div>`
+
+  const seenLabels = new Set<string>()
+  const usedArcs: { color: string; dash: string; label: string }[] = []
+  for (const arc of geoData.arcs) {
+    if (!arc.label || seenLabels.has(arc.label)) continue
+    seenLabels.add(arc.label)
+    usedArcs.push({ color: arc.color, dash: arc.dash, label: arc.label })
+  }
+
+  const arcEntries = usedArcs.map(a => {
+    const da = a.dash ? ` stroke-dasharray="${a.dash}"` : ''
+    return `<div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
+      <svg width="26" height="7"><line x1="0" y1="3.5" x2="26" y2="3.5" stroke="${a.color}" stroke-width="2"${da}/></svg>
+      ${a.label}
+    </div>`
+  }).join('')
+
+  const legendGroups = cfg.siteGroups.filter(g => g.show_in_legend)
+  const siteEntries = cfg.siteGroups.length
+    ? legendGroups.map((g, i) =>
+        `<div style="display:flex;align-items:center;gap:7px;${i < legendGroups.length - 1 ? 'margin-bottom:2px' : ''}">
+          <div style="width:10px;height:10px;border-radius:50%;background:${g.fill_color};border:1.5px solid ${g.stroke_color};flex-shrink:0"></div>
+          ${g.display_name}
+        </div>`
+      ).join('')
+    : `<div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
+        <div style="width:10px;height:10px;border-radius:50%;background:#a78bfa;flex-shrink:0"></div>Group A
+      </div>
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
+        <div style="width:10px;height:10px;border-radius:50%;background:#34d399;flex-shrink:0"></div>Group B
+      </div>
+      <div style="display:flex;align-items:center;gap:7px">
+        <div style="width:10px;height:10px;border-radius:50%;background:#ef4444;flex-shrink:0"></div>External
+      </div>`
+
+  return (arcEntries ? heading('Line Styles') + `<div style="margin-bottom:6px">${arcEntries}</div>` : '') +
+    (siteEntries ? heading('Sites') + siteEntries : '')
 }
 
 // ── Formatters ─────────────────────────────────────────────────────────────
@@ -122,10 +141,11 @@ function fmtNum(n: number) {
 
 // ── LeafletGeoMap — core map component ────────────────────────────────────
 function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: GeoConfig }) {
-  const divRef     = useRef<HTMLDivElement>(null)
-  const mapRef     = useRef<L.Map | null>(null)
-  const markersRef = useRef<L.CircleMarker[]>([])
-  const configRef  = useRef(config)
+  const divRef      = useRef<HTMLDivElement>(null)
+  const mapRef      = useRef<L.Map | null>(null)
+  const markersRef  = useRef<L.CircleMarker[]>([])
+  const legendDivRef = useRef<HTMLDivElement | null>(null)
+  const configRef   = useRef(config)
   useEffect(() => { configRef.current = config }, [config])
 
   // Initialise Leaflet once
@@ -133,19 +153,26 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
     if (!divRef.current || mapRef.current) return
     const cfg = configRef.current
 
+    const worldBounds = L.latLngBounds([-90, -180], [90, 180])
+
     const map = L.map(divRef.current, {
-      center: [20, 0], zoom: 2,
+      center: [20, 0], zoom: 2, minZoom: 2,
       zoomControl: true, attributionControl: false,
+      worldCopyJump: false,
+      maxBounds: worldBounds, maxBoundsViscosity: 1.0,
     })
 
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       subdomains: 'abcd', maxZoom: 19,
+      noWrap: true, bounds: worldBounds,
     }).addTo(map)
 
     // D3 arc overlay pane
     L.svg({ pane: 'overlayPane' }).addTo(map)
 
-    // ── Dynamic legend (Leaflet control) ──────────────────────────────────
+    // ── Dynamic legend (Leaflet control) ────────────────────────────────────
+    // Content is rebuilt whenever geoData changes (see the effect below) so
+    // the Line Styles section only ever lists styles currently on screen.
     const legend = new L.Control({ position: 'bottomleft' })
     legend.onAdd = () => {
       const div = L.DomUtil.create('div')
@@ -154,51 +181,8 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
         padding:8px 11px;font-size:11px;line-height:1.7;color:#d1d5db;
         pointer-events:none;user-select:none;
       `
-      const c = configRef.current
-      const heading = (t: string) =>
-        `<div style="color:#9ca3af;font-weight:600;margin-bottom:3px;font-size:10px;text-transform:uppercase;letter-spacing:.05em">${t}</div>`
-
-      // Traffic types section
-      const arcEntries = c.trafficTypes.length
-        ? c.trafficTypes.map(t => {
-            const da = t.line_dash ? ` stroke-dasharray="${t.line_dash}"` : ''
-            return `<div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
-              <svg width="26" height="7"><line x1="0" y1="3.5" x2="26" y2="3.5" stroke="${t.line_color ?? '#6b7280'}" stroke-width="2"${da}/></svg>
-              ${t.label}
-            </div>`
-          }).join('')
-        : Object.entries(c.arcStyles).map(([, s]) => {
-            const da = s.dash ? ` stroke-dasharray="${s.dash}"` : ''
-            return `<div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
-              <svg width="26" height="7"><line x1="0" y1="3.5" x2="26" y2="3.5" stroke="${s.color}" stroke-width="2"${da}/></svg>
-              ${s.label}
-            </div>`
-          }).join('')
-
-      // Site groups section
-      const siteEntries = c.siteGroups.length
-        ? c.siteGroups.map((g, i) =>
-            `<div style="display:flex;align-items:center;gap:7px;${i < c.siteGroups.length - 1 ? 'margin-bottom:2px' : ''}">
-              <div style="width:10px;height:10px;border-radius:50%;background:${g.fill_color};border:1.5px solid ${g.stroke_color};flex-shrink:0"></div>
-              ${g.display_name}
-            </div>`
-          ).join('')
-        : `<div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
-            <div style="width:10px;height:10px;border-radius:50%;background:#a78bfa;flex-shrink:0"></div>Group A
-          </div>
-          <div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
-            <div style="width:10px;height:10px;border-radius:50%;background:#34d399;flex-shrink:0"></div>Group B
-          </div>
-          <div style="display:flex;align-items:center;gap:7px">
-            <div style="width:10px;height:10px;border-radius:50%;background:#ef4444;flex-shrink:0"></div>External
-          </div>`
-
-      div.innerHTML =
-        heading('Traffic Type') +
-        `<div style="margin-bottom:6px">${arcEntries}</div>` +
-        heading('Sites') +
-        siteEntries
-
+      div.innerHTML = buildLegendHTML(geoData, configRef.current)
+      legendDivRef.current = div
       return div
     }
     legend.addTo(map)
@@ -219,6 +203,8 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
 
     // Clear previous arc layer
     d3.select(map.getPanes().overlayPane).select('svg').select('.geo-arcs').remove()
+
+    if (legendDivRef.current) legendDivRef.current.innerHTML = buildLegendHTML(geoData, configRef.current)
 
     if (!geoData.locations.length) return
 
@@ -297,15 +283,15 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
       })
 
       // 1st pass — visible styled arcs (pointer-events off; hit area handles them)
+      // color/dash come resolved directly from the backend (Address Mappings /
+      // Traffic Rules each pick a Line Style) — no client-side lookup needed.
       const visibleNodes = pathDs.map((d, i) => {
-        const arc   = geoData.arcs[i]
-        const cfg   = configRef.current
-        const style = cfg.arcStyles[arc.arc_type ?? 'wan'] ?? cfg.arcStyles['wan'] ?? FALLBACK_CONFIG.arcStyles['wan']
-        const node  = arcG.append('path')
+        const arc  = geoData.arcs[i]
+        const node = arcG.append('path')
           .attr('d', d)
-          .attr('stroke', style.color)
+          .attr('stroke', arc.color)
           .attr('stroke-width', widthScale(arc.bytes))
-          .attr('stroke-dasharray', style.dash || null)
+          .attr('stroke-dasharray', arc.dash || null)
           .attr('fill', 'none')
           .attr('opacity', 0.6)
           .attr('stroke-linecap', 'round')
@@ -318,10 +304,7 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
       pathDs.forEach((d, i) => {
         const arc   = geoData.arcs[i]
         const vis   = visibleNodes[i]
-        const cfg   = configRef.current
-        const style = cfg.arcStyles[arc.arc_type ?? 'wan'] ?? cfg.arcStyles['wan'] ?? FALLBACK_CONFIG.arcStyles['wan']
         const baseW = widthScale(arc.bytes)
-        const typeLabel = style.label
 
         arcG.append('path')
           .attr('d', d)
@@ -341,8 +324,8 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
           })
           .append('title')
             .text(
+              (arc.label ? `${arc.label}\n` : '') +
               `${arc.src_ip} → ${arc.dst_ip}\n` +
-              `${typeLabel}\n` +
               `${fmt(arc.bytes)} · ${fmtNum(arc.flows)} flows\n` +
               `Click to explore flows`
             )
@@ -376,6 +359,7 @@ export function GeoPage() {
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState(false)
   const config = useGeoConfig()
+  const { tick } = useAutoRefresh()
 
   const load = useCallback(() => {
     setLoading(true); setError(false)
@@ -386,6 +370,7 @@ export function GeoPage() {
   }, [timeWindow])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => { if (tick > 0) load() }, [tick])
 
   function popOut() {
     const tok  = getToken()
@@ -394,7 +379,7 @@ export function GeoPage() {
       sessionStorage.setItem('pf_pop_token', tok)
       sessionStorage.setItem('pf_pop_role',  role)
     }
-    window.location.href = `/geomap?window=${timeWindow}`
+    window.open(`/geomap?window=${timeWindow}`, '_blank')
   }
 
   const hasData = geoData && geoData.locations.length > 0
@@ -450,6 +435,7 @@ export function GeoMapCard({ timeWindow }: { timeWindow: string }) {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(false)
   const config = useGeoConfig()
+  const { tick } = useAutoRefresh()
 
   const load = useCallback(() => {
     setLoading(true); setError(false)
@@ -460,6 +446,7 @@ export function GeoMapCard({ timeWindow }: { timeWindow: string }) {
   }, [timeWindow])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => { if (tick > 0) load() }, [tick])
 
   function popOut() {
     const tok  = getToken()
@@ -468,7 +455,7 @@ export function GeoMapCard({ timeWindow }: { timeWindow: string }) {
       sessionStorage.setItem('pf_pop_token', tok)
       sessionStorage.setItem('pf_pop_role',  role)
     }
-    window.location.href = `/geomap?window=${timeWindow}`
+    window.open(`/geomap?window=${timeWindow}`, '_blank')
   }
 
   const hasData = geoData && geoData.locations.length > 0
@@ -531,7 +518,7 @@ export default function GeoMapPage() {
     setReady(true)
   }, [])
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!ready) return
     setLoading(true)
     api.getGeoData(timeWindow)
@@ -539,6 +526,17 @@ export default function GeoMapPage() {
       .catch(() => setError(true))
       .finally(() => setLoading(false))
   }, [ready, timeWindow])
+
+  useEffect(() => { load() }, [load])
+
+  // This window is a separate page load — it has no access to the main app's
+  // AutoRefreshProvider context, so it keeps itself fresh on a fixed interval
+  // instead (the pop-out has no settings UI to configure one anyway).
+  useEffect(() => {
+    if (!ready) return
+    const id = setInterval(load, 30_000)
+    return () => clearInterval(id)
+  }, [ready, load])
 
   const hasData = geoData && geoData.locations.length > 0
 
@@ -553,14 +551,25 @@ export default function GeoMapPage() {
           <span style={{ color: '#3b82f6' }}>◉</span>
           pktFlow — Traffic Geo Map ({timeWindow})
         </span>
-        <button
-          onClick={() => window.close()}
-          style={{ color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
-          onMouseEnter={e => (e.currentTarget.style.color = '#f9fafb')}
-          onMouseLeave={e => (e.currentTarget.style.color = '#6b7280')}
-        >
-          <X size={14} /> Close
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          {loading && <span style={{ color: '#9ca3af', fontSize: 11 }}>Refreshing…</span>}
+          <button
+            onClick={load} title="Refresh"
+            style={{ color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#f9fafb')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#6b7280')}
+          >
+            <RefreshCw size={14} /> Refresh
+          </button>
+          <button
+            onClick={() => window.close()}
+            style={{ color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#f9fafb')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#6b7280')}
+          >
+            <X size={14} /> Close
+          </button>
+        </div>
       </div>
 
       {/* Map fills remainder */}
