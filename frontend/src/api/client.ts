@@ -239,6 +239,20 @@ export const api = {
     return res.json()
   },
 
+  exportDevicesCsv: async (): Promise<void> => {
+    const headers: Record<string, string> = {}
+    if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+    const res = await fetch('/api/devices/export', { headers })
+    if (!res.ok) throw new Error(`Export failed: ${res.status}`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'pktflow-devices.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  },
+
   importDevicesCsv: async (file: File): Promise<{ created: number; updated: number; skipped: number; errors: Array<{ row: number; reason: string }> }> => {
     const formData = new FormData()
     formData.append('file', file)
@@ -596,6 +610,7 @@ export type LogQueryParams = {
   logger?: string
   search?: string
   since?: string
+  until?: string
   limit?: string
   offset?: string
 }
