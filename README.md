@@ -90,7 +90,9 @@ All configuration is managed via the Settings UI (no file edits required after i
 - **Lucidchart** — topology export directly to a Lucidchart document via API token
 
 ### Infrastructure
-- **Device registry** — name, IP, site per sampler; CSV import; live stats per device; **acts as an ingest allowlist, not just labeling** — flows from a sampler IP not present and enabled in the registry are dropped before storage, not just missing metadata
+- **Device registry** — name, IP, site per sampler; CSV import/export + downloadable template; live stats per device; **acts as an ingest allowlist, not just labeling** — flows from a sampler IP not present and enabled in the registry are dropped before storage, not just missing metadata
+- **Application Logs** — search + level filter, plus a time-range dropdown (1h/6h/24h/7d/30d/All time/Custom range) for narrowing down a large log history; custom range validates the end is after the start and disallows future times
+- Alert-event and last-login timestamps are normalized to UTC before parsing so they display correctly regardless of the browser's local timezone
 - **Unknown samplers** — IPs sending flows but not in the registry raise an alert (with a one-click link to pre-fill registration) and appear in Settings → Devices with dismiss support; their flows are not persisted until registered
 - **Data retention** — configurable TTL for ClickHouse flows (default 90 days); manual cleanup trigger
 - **Backup** — one-click or scheduled local backup (SQLite DB + ClickHouse flows export) with configurable rotation count
