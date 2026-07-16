@@ -76,6 +76,8 @@ All settings in `config.example.yaml` can also be passed as `PKTFLOW_*` environm
 - **ACK support** — analysts can acknowledge alerts without closing them
 - **Alert cleanup** — configurable retention period; old events are purged on a schedule
 - **Bulk rule provisioning** — Export CSV / Import CSV / template-download on the Rules tab; `conditions` round-trips as a JSON object string (shape depends on `rule_type`), `channels` as a comma-separated column
+- **Investigate button** — every active/history alert card deep-links straight to Flow Explorer, pre-filtered to the alert's time window plus whatever sampler/src IP/dst port/protocol its details carry
+- **Active/History time-range filter** — both alert tabs share the same search + severity + time-range filter bar as Application Logs (below)
 
 ### Authentication & Users
 - **Local auth** — JWT + bcrypt, configurable token lifetime
@@ -91,8 +93,8 @@ All configuration is managed via the Settings UI (no file edits required after i
 - **Lucidchart** — topology export directly to a Lucidchart document via API token
 
 ### Infrastructure
-- **Device registry** — name, IP, site per sampler; CSV import/export + downloadable template; live stats per device; **acts as an ingest allowlist, not just labeling** — flows from a sampler IP not present and enabled in the registry are dropped before storage, not just missing metadata
-- **Application Logs** — search + level filter, plus a time-range dropdown (1h/6h/24h/7d/30d/All time/Custom range) for narrowing down a large log history; custom range validates the end is after the start and disallows future times
+- **Device registry** — name, IP, site per sampler; CSV import/export + downloadable template; live stats per device; **acts as an ingest allowlist, not just labeling** — flows from a sampler IP not present and enabled in the registry are dropped before storage, not just missing metadata. The allowlist is an in-memory cache (`app/ingest/normalizer.py`'s `_device_cache`) that's now warmed from the registry at process startup (`app/main.py` lifespan) — previously it was only ever populated reactively by device create/edit/delete through the UI, so **every service restart silently dropped all incoming flow data** as "unregistered" until someone happened to edit a device afterward, even though the registry itself was correct the whole time
+- **Application Logs** — search + level filter, plus a time-range dropdown (1h/6h/24h/7d/30d/All time/Custom range) for narrowing down a large log history; custom range validates the end is after the start and disallows future times. The table paginates server-side (50 rows/page) with a sliding page-number bar above it — Next/Prev move the visible window of 5 page numbers along with you, plus `1 ..` / `.. N` shortcuts to jump straight to the first/last page
 - Alert-event and last-login timestamps are normalized to UTC before parsing so they display correctly regardless of the browser's local timezone
 - **Unknown samplers** — IPs sending flows but not in the registry raise an alert (with a one-click link to pre-fill registration) and appear in Settings → Devices with dismiss support; their flows are not persisted until registered
 - **Data retention** — configurable TTL for ClickHouse flows (default 90 days); manual cleanup trigger
