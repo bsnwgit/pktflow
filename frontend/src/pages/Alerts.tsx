@@ -3,6 +3,150 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api, AlertRule, AlertEvent, getToken } from '../api/client'
 import { useWebSocket, type WsMessage, type AlertFiredPayload } from '../hooks/useWebSocket'
 
+// ── Time range ────────────────────────────────────────────────────────────────
+
+const TIME_RANGES = [
+  { value: '1h',     label: '1h' },
+  { value: '6h',     label: '6h' },
+  { value: '24h',    label: '24h' },
+  { value: '7d',     label: '7d' },
+  { value: '30d',    label: '30d' },
+  { value: 'all',    label: 'All time' },
+  { value: 'custom', label: 'Custom range…' },
+] as const
+type TimeRange = typeof TIME_RANGES[number]['value']
+
+const TIME_RANGE_MS: Record<Exclude<TimeRange, 'all' | 'custom'>, number> = {
+  '1h':  60 * 60 * 1000,
+  '6h':  6 * 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+  '7d':  7 * 24 * 60 * 60 * 1000,
+  '30d': 30 * 24 * 60 * 60 * 1000,
+}
+
+interface TimeWindow {
+  since?: string
+  until?: string
+}
+
+// datetime-local values are local wall-clock time with no timezone info, so
+// format from local (not UTC) date components — a plain toISOString() would
+// shift the displayed clock time by the browser's UTC offset.
+function toLocalInputValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+function todayStart(): string {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return toLocalInputValue(d)
+}
+function todayEnd(): string {
+  const d = new Date()
+  d.setHours(23, 59, 0, 0)
+  return toLocalInputValue(d)
+}
+/** Never allow a future moment — clamp back to right now instead. */
+function clampFuture(value: string): string {
+  if (!value) return value
+  const now = new Date()
+  return new Date(value).getTime() > now.getTime() ? toLocalInputValue(now) : value
+}
+
+/**
+ * Preset + custom date/time range picker. Owns its own preset/from/to UI state
+ * and reports the resolved {since, until} ISO bounds up to the parent.
+ *
+ * Validation: neither side can be in the future (clamped back to now), and
+ * "to" must be after "from" — an invalid range shows an inline error and does
+ * not get applied, leaving the last valid window.
+ */
+function TimeRangeControl({ onChange }: { onChange: (window: TimeWindow) => void }) {
+  const [preset, setPreset]         = useState<TimeRange>('all')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo]     = useState('')
+  const [rangeError, setRangeError] = useState('')
+
+  const emit = (p: TimeRange, from: string, to: string) => {
+    if (p === 'custom') {
+      onChange({
+        since: from ? new Date(from).toISOString() : undefined,
+        until: to ? new Date(to).toISOString() : undefined,
+      })
+    } else if (p === 'all') {
+      onChange({})
+    } else {
+      onChange({ since: new Date(Date.now() - TIME_RANGE_MS[p]).toISOString() })
+    }
+  }
+
+  const applyCustom = (from: string, to: string) => {
+    if (from && to && new Date(to).getTime() < new Date(from).getTime()) {
+      setRangeError('End date/time must be after the start date/time.')
+      return
+    }
+    setRangeError('')
+    emit('custom', from, to)
+  }
+
+  const nowLocal = toLocalInputValue(new Date())
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <select
+        value={preset}
+        onChange={e => {
+          const p = e.target.value as TimeRange
+          setPreset(p)
+          setRangeError('')
+          if (p === 'custom') {
+            // Default to today's full day (12:00 AM – 11:59 PM), clamped to
+            // "now" since the end can't be in the future.
+            const from = customFrom || todayStart()
+            const to   = clampFuture(customTo || todayEnd())
+            setCustomFrom(from)
+            setCustomTo(to)
+            applyCustom(from, to)
+          } else {
+            emit(p, customFrom, customTo)
+          }
+        }}
+        className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+      >
+        {TIME_RANGES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+      </select>
+      {preset === 'custom' && (
+        <>
+          <input
+            type="datetime-local"
+            value={customFrom}
+            max={nowLocal}
+            onChange={e => {
+              const v = clampFuture(e.target.value)
+              setCustomFrom(v)
+              applyCustom(v, customTo)
+            }}
+            className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <span className="text-xs text-gray-500">to</span>
+          <input
+            type="datetime-local"
+            value={customTo}
+            max={nowLocal}
+            onChange={e => {
+              const v = clampFuture(e.target.value)
+              setCustomTo(v)
+              applyCustom(customFrom, v)
+            }}
+            className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          {rangeError && <span className="text-xs text-red-400">{rangeError}</span>}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtTime(ts: string): string {
@@ -897,8 +1041,10 @@ export default function Alerts() {
   const [error, setError]           = useState('')
   const [activeFilter, setActiveFilter]     = useState('')
   const [activeSevFilter, setActiveSevFilter] = useState('')
+  const [activeWindow, setActiveWindow]     = useState<TimeWindow>({})
   const [historyFilter, setHistoryFilter]   = useState('')
   const [historySevFilter, setHistorySevFilter] = useState('')
+  const [historyWindow, setHistoryWindow]   = useState<TimeWindow>({})
   const [rulesFilter, setRulesFilter]       = useState('')
   const [rulesTopicFilter, setRulesTopicFilter] = useState('')
   const [rulesSortKey, setRulesSortKey]     = useState<keyof AlertRule | 'topic' | null>(null)
@@ -907,6 +1053,25 @@ export default function Alerts() {
   const [rulesExporting, setRulesExporting]     = useState(false)
   const [rulesImportResult, setRulesImportResult] = useState<{ created: number; skipped: number; errors: string[] } | null>(null)
   const rulesImportFileRef = useRef<HTMLInputElement>(null)
+
+  const loadEvents = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [active, all] = await Promise.all([
+        api.getAlertEvents(true, activeWindow.since, activeWindow.until),
+        api.getAlertEvents(false, historyWindow.since, historyWindow.until),
+      ])
+      setEvents(active)
+      setHistory(all.filter(e => e.acked_at !== null))
+    } finally {
+      setLoading(false)
+    }
+  }, [activeWindow, historyWindow])
+
+  const loadRules = async () => {
+    const data = await api.getAlertRules()
+    setRules(data)
+  }
 
   // Live alert toast — fires whenever the engine triggers an alert
   const handleWsMessage = useCallback((msg: WsMessage) => {
@@ -917,7 +1082,7 @@ export default function Alerts() {
       }, 8000)
       loadEvents()
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadEvents])
 
   useWebSocket(handleWsMessage)
 
@@ -926,29 +1091,10 @@ export default function Alerts() {
     else { setRulesSortKey(key); setRulesSortDir('asc') }
   }
 
-  const loadEvents = async () => {
-    setLoading(true)
-    try {
-      const [active, all] = await Promise.all([
-        api.getAlertEvents(true),
-        api.getAlertEvents(false),
-      ])
-      setEvents(active)
-      setHistory(all.filter(e => e.acked_at !== null))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const loadRules = async () => {
-    const data = await api.getAlertRules()
-    setRules(data)
-  }
-
   useEffect(() => {
     loadEvents()
     loadRules()
-  }, [])
+  }, [loadEvents])
 
   const handleAck = async (id: number) => {
     await api.ackEvent(id)
@@ -1199,6 +1345,7 @@ export default function Alerts() {
               <option value="info">Info</option>
             </select>
             {activeSevFilter && <button onClick={() => setActiveSevFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+            <TimeRangeControl onChange={setActiveWindow} />
           </div>
           {loading && <p className="text-sm text-white">Loading…</p>}
           {!loading && events.length === 0 && (
@@ -1241,6 +1388,7 @@ export default function Alerts() {
               <option value="info">Info</option>
             </select>
             {historySevFilter && <button onClick={() => setHistorySevFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+            <TimeRangeControl onChange={setHistoryWindow} />
           </div>
           {history.length === 0 && !loading && (
             <div className="flex flex-col items-center justify-center h-32 text-white">
