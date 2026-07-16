@@ -298,36 +298,7 @@ class ClickHouseBackend(StorageBackend):
                 tcp_flags=r[11], tos=r[12],
                 input_if=r[13], output_if=r[14],
                 next_hop=str(r[15]), src_as=r[16], dst_as=r[17], flow_dir=r[18],
-                conversation_id=int(r[19]), flow_role=int(r[20]),
-            )
-            for r in rows
-        ]
-
-    async def get_conversation_flows(self, conversation_id: int, window_min: int = 60) -> list[FlowSearchResult]:
-        """Return all flows belonging to a conversation (both legs) within the last window_min minutes."""
-        query = f"""
-            SELECT timestamp, sampler_ip, sampler_name, src_ip, dst_ip,
-                   src_port, dst_port, protocol, bytes, packets, duration_ms,
-                   tcp_flags, tos, input_if, output_if, next_hop, src_as, dst_as, flow_dir,
-                   conversation_id, flow_role
-            FROM {settings.clickhouse_database}.flows
-            WHERE conversation_id = %(cid)s
-              AND conversation_id != 0
-              AND timestamp >= now() - INTERVAL %(window_min)s MINUTE
-            ORDER BY timestamp DESC
-            LIMIT 200
-        """
-        rows = await asyncio.to_thread(self._execute, query, {"cid": conversation_id, "window_min": window_min})
-        return [
-            FlowSearchResult(
-                timestamp=r[0], sampler_ip=str(r[1]), sampler_name=r[2],
-                src_ip=str(r[3]), dst_ip=str(r[4]),
-                src_port=r[5], dst_port=r[6], protocol=r[7],
-                bytes=r[8], packets=r[9], duration_ms=r[10],
-                tcp_flags=r[11], tos=r[12],
-                input_if=r[13], output_if=r[14],
-                next_hop=str(r[15]), src_as=r[16], dst_as=r[17], flow_dir=r[18],
-                conversation_id=int(r[19]), flow_role=int(r[20]),
+                conversation_id=str(r[19]), flow_role=int(r[20]),
             )
             for r in rows
         ]
@@ -406,7 +377,7 @@ class ClickHouseBackend(StorageBackend):
             denom = max(min(bytes_fwd, bytes_rev), 1)
             ratio = round(max(bytes_fwd, bytes_rev) / denom, 1)
             results.append({
-                "conversation_id": int(r[0]),
+                "conversation_id": str(r[0]),  # UInt64 — string to avoid JS Number precision loss
                 "ip_a": str(r[1]), "ip_b": str(r[2]),
                 "port_a": int(r[3]), "port_b": int(r[4]),
                 "protocol": int(r[5]),
@@ -1200,7 +1171,9 @@ class ClickHouseBackend(StorageBackend):
         limit: int = 80,
         sampler_ip: Optional[str] = None,
     ) -> list[dict]:
-        """Top src→dst IP pairs by bytes, for geo mapping."""
+        """Top src→dst→dst_port triples by bytes, for geo mapping. dst_port is included
+        (rather than collapsed) so Traffic Rules can classify arcs by destination port;
+        callers that don't care about port re-aggregate by (src, dst) themselves."""
         conditions = [
             "timestamp >= %(start)s",
             "timestamp < %(end)s",
@@ -1214,17 +1187,18 @@ class ClickHouseBackend(StorageBackend):
             SELECT
                 IPv4NumToString(src_ip) AS src,
                 IPv4NumToString(dst_ip) AS dst,
+                dst_port,
                 sum(bytes) AS bytes,
                 count() AS flows
             FROM {settings.clickhouse_database}.flows
             WHERE {where}
-            GROUP BY src, dst
+            GROUP BY src, dst, dst_port
             ORDER BY bytes DESC
             LIMIT %(limit)s
         """
         rows = await asyncio.to_thread(self._execute, query, params)
         return [
-            {"src_ip": r[0], "dst_ip": r[1], "bytes": int(r[2]), "flows": int(r[3])}
+            {"src_ip": r[0], "dst_ip": r[1], "dst_port": int(r[2]), "bytes": int(r[3]), "flows": int(r[4])}
             for r in rows
         ]
 

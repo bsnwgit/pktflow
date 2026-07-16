@@ -709,9 +709,6 @@ class DuckDBBackend(StorageBackend):
     async def get_top_ports_for_ip(self, src_ip, window_min, sampler_ip=None, limit=10) -> list:
         raise NotImplementedError("get_top_ports_for_ip not implemented for DuckDB")
 
-    async def get_conversation_flows(self, conversation_id: int, window_min: int = 60) -> list:
-        raise NotImplementedError("get_conversation_flows not implemented for DuckDB")
-
     async def get_response_rate_for_ip(self, src_ip: str, window_min: int) -> tuple:
         raise NotImplementedError("get_response_rate_for_ip not implemented for DuckDB")
 

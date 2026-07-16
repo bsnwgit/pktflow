@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { api, DeviceSummary, User, UserIn, SslStatus, VpnMapping, VpnMappingIn, SiteGroup, SiteGroupIn, LineStyle, LineStyleIn, TrafficType, TrafficTypeIn } from '../api/client'
+import { api, DeviceSummary, User, UserIn, SslStatus, AddressMapping, AddressMappingIn, TrafficRule, TrafficRuleIn, SiteGroup, SiteGroupIn, LineStyle, LineStyleIn } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import { useAuth } from '../store/auth'
 
@@ -2067,7 +2067,7 @@ function SiteGroupsSection({ isAdmin }: { isAdmin: boolean }) {
   const [loading,  setLoading]  = useState(true)
   const [showAdd,  setShowAdd]  = useState(false)
   const [editId,   setEditId]   = useState<number | null>(null)
-  const blank: SiteGroupIn = { name: '', display_name: '', fill_color: '#60a5fa', stroke_color: '#93c5fd', badge_bg: 'bg-gray-700', badge_text: 'text-gray-300' }
+  const blank: SiteGroupIn = { name: '', display_name: '', fill_color: '#60a5fa', stroke_color: '#93c5fd', badge_bg: '#374151', badge_text: '#d1d5db', show_in_legend: true }
   const [form,     setForm]     = useState<SiteGroupIn>(blank)
   const [editForm, setEditForm] = useState<SiteGroupIn>(blank)
   const [saving,   setSaving]   = useState(false)
@@ -2128,6 +2128,7 @@ function SiteGroupsSection({ isAdmin }: { isAdmin: boolean }) {
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Display Name</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Map Color</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Badge</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">In Legend</th>
                 {isAdmin && <th className="pl-2 pr-6 py-2.5 w-20" />}
               </tr>
             </thead>
@@ -2147,12 +2148,16 @@ function SiteGroupsSection({ isAdmin }: { isAdmin: boolean }) {
                     </div>
                   </td>
                   <td className="px-2 py-2">
-                    <div className="flex gap-1.5">
-                      <input value={editForm.badge_bg} onChange={e => setEditForm(f => ({ ...f, badge_bg: e.target.value }))}
-                        placeholder="bg-gray-700" className={`${inp} w-32 text-xs font-mono`} />
-                      <input value={editForm.badge_text} onChange={e => setEditForm(f => ({ ...f, badge_text: e.target.value }))}
-                        placeholder="text-gray-300" className={`${inp} w-32 text-xs font-mono`} />
+                    <div className="flex items-center gap-1.5">
+                      <input type="color" value={editForm.badge_bg} onChange={e => setEditForm(f => ({ ...f, badge_bg: e.target.value }))}
+                        className="w-8 h-8 rounded cursor-pointer bg-transparent border-0 p-0" title="Badge background color" />
+                      <input type="color" value={editForm.badge_text} onChange={e => setEditForm(f => ({ ...f, badge_text: e.target.value }))}
+                        className="w-8 h-8 rounded cursor-pointer bg-transparent border-0 p-0" title="Badge text color" />
                     </div>
+                  </td>
+                  <td className="px-2 py-2">
+                    <input type="checkbox" checked={editForm.show_in_legend} onChange={e => setEditForm(f => ({ ...f, show_in_legend: e.target.checked }))}
+                      className="w-4 h-4 rounded border-gray-600" />
                   </td>
                   <td className="pl-2 pr-6 py-2">
                     {error && <p className="text-xs text-red-400 mb-1">{error}</p>}
@@ -2178,14 +2183,19 @@ function SiteGroupsSection({ isAdmin }: { isAdmin: boolean }) {
                     </div>
                   </td>
                   <td className="px-4 py-2.5">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${g.badge_bg} ${g.badge_text}`}>
+                    <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: g.badge_bg, color: g.badge_text }}>
                       {g.display_name}
                     </span>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {g.show_in_legend
+                      ? <span className="text-green-400 text-sm" title="Shown in Geo Map legend">✓</span>
+                      : <span className="text-gray-600 text-sm" title="Hidden from Geo Map legend">—</span>}
                   </td>
                   {isAdmin && (
                     <td className="pl-2 pr-6 py-2.5">
                       <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => { setEditId(g.id); setEditForm({ name: g.name, display_name: g.display_name, fill_color: g.fill_color, stroke_color: g.stroke_color, badge_bg: g.badge_bg, badge_text: g.badge_text }); setError('') }}
+                        <button onClick={() => { setEditId(g.id); setEditForm({ name: g.name, display_name: g.display_name, fill_color: g.fill_color, stroke_color: g.stroke_color, badge_bg: g.badge_bg, badge_text: g.badge_text, show_in_legend: g.show_in_legend }); setError('') }}
                           className="text-gray-500 hover:text-blue-400 transition-colors">
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
                         </button>
@@ -2235,14 +2245,25 @@ function SiteGroupsSection({ isAdmin }: { isAdmin: boolean }) {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Badge BG (Tailwind class)</label>
-              <input placeholder="bg-gray-700" value={form.badge_bg} onChange={e => setForm(f => ({ ...f, badge_bg: e.target.value }))}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <label className="block text-xs text-gray-400 mb-1">Badge Background Color</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={form.badge_bg} onChange={e => setForm(f => ({ ...f, badge_bg: e.target.value }))}
+                  className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
+                <span className="text-xs text-gray-400 font-mono">{form.badge_bg}</span>
+              </div>
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Badge Text (Tailwind class)</label>
-              <input placeholder="text-gray-300" value={form.badge_text} onChange={e => setForm(f => ({ ...f, badge_text: e.target.value }))}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <label className="block text-xs text-gray-400 mb-1">Badge Text Color</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={form.badge_text} onChange={e => setForm(f => ({ ...f, badge_text: e.target.value }))}
+                  className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
+                <span className="text-xs text-gray-400 font-mono">{form.badge_text}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 pt-5">
+              <input type="checkbox" id="sg_legend" checked={form.show_in_legend} onChange={e => setForm(f => ({ ...f, show_in_legend: e.target.checked }))}
+                className="w-4 h-4 rounded border-gray-600" />
+              <label htmlFor="sg_legend" className="text-sm text-gray-300">Show in Geo Map legend</label>
             </div>
           </div>
           {error && <p className="text-xs text-red-400">{error}</p>}
@@ -2429,188 +2450,6 @@ function LineStylesSection({ isAdmin }: { isAdmin: boolean }) {
   )
 }
 
-// ── Traffic Types Section ─────────────────────────────────────────────────────
-function TrafficTypesSection({ isAdmin }: { isAdmin: boolean }) {
-  const [types,      setTypes]      = useState<TrafficType[]>([])
-  const [lineStyles, setLineStyles] = useState<LineStyle[]>([])
-  const [loading,    setLoading]    = useState(true)
-  const [showAdd,    setShowAdd]    = useState(false)
-  const [editId,     setEditId]     = useState<number | null>(null)
-  const blank: TrafficTypeIn = { name: '', label: '', line_style_id: null, is_default: false }
-  const [form,       setForm]       = useState<TrafficTypeIn>(blank)
-  const [editForm,   setEditForm]   = useState<TrafficTypeIn>(blank)
-  const [saving,     setSaving]     = useState(false)
-  const [error,      setError]      = useState('')
-
-  useEffect(() => {
-    Promise.all([api.getTrafficTypes(), api.getLineStyles()])
-      .then(([t, ls]) => { setTypes(t); setLineStyles(ls) })
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
-
-  async function handleAdd() {
-    if (!form.name.trim() || !form.label.trim()) { setError('Name and Label are required'); return }
-    setSaving(true); setError('')
-    try {
-      const t = await api.createTrafficType(form)
-      setTypes(prev => [...prev, t])
-      setForm(blank); setShowAdd(false)
-    } catch (e: any) { setError(e.message ?? 'Failed') } finally { setSaving(false) }
-  }
-  async function handleUpdate() {
-    setSaving(true); setError('')
-    try {
-      const updated = await api.updateTrafficType(editId!, editForm)
-      setTypes(prev => prev.map(t => t.id === editId ? updated : t))
-      setEditId(null)
-    } catch (e: any) { setError(e.message ?? 'Failed') } finally { setSaving(false) }
-  }
-  async function handleDelete(id: number) {
-    try {
-      await api.deleteTrafficType(id)
-      setTypes(prev => prev.filter(t => t.id !== id))
-    } catch {}
-  }
-
-  const inp = 'bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500'
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-semibold text-white">Traffic Types</p>
-          <p className="text-xs text-gray-400 mt-0.5">Define traffic classifications. Each type maps to a line style and is assigned to VPN mappings.</p>
-        </div>
-        {isAdmin && !showAdd && !editId && (
-          <button onClick={() => setShowAdd(true)}
-            className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
-            + Add Type
-          </button>
-        )}
-      </div>
-
-      {loading ? <p className="text-xs text-gray-500 py-4 text-center">Loading…</p> : (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-800">
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Key</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Label</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Line Style</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Default</th>
-                {isAdmin && <th className="pl-2 pr-6 py-2.5 w-20" />}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-800">
-              {types.map(t => editId === t.id ? (
-                <tr key={t.id} className="bg-gray-800/60">
-                  <td className="px-2 py-2"><input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} className={`${inp} w-24 font-mono text-xs`} /></td>
-                  <td className="px-2 py-2"><input value={editForm.label} onChange={e => setEditForm(f => ({ ...f, label: e.target.value }))} className={`${inp} w-36`} /></td>
-                  <td className="px-2 py-2">
-                    <select value={editForm.line_style_id ?? ''} onChange={e => setEditForm(f => ({ ...f, line_style_id: e.target.value ? Number(e.target.value) : null }))} className={`${inp} w-44`}>
-                      <option value="">— none —</option>
-                      {lineStyles.map(ls => <option key={ls.id} value={ls.id}>{ls.label}</option>)}
-                    </select>
-                  </td>
-                  <td className="px-2 py-2">
-                    <input type="checkbox" checked={editForm.is_default} onChange={e => setEditForm(f => ({ ...f, is_default: e.target.checked }))}
-                      className="w-4 h-4 rounded border-gray-600" />
-                  </td>
-                  <td className="pl-2 pr-6 py-2">
-                    {error && <p className="text-xs text-red-400 mb-1">{error}</p>}
-                    <div className="flex gap-2 justify-end">
-                      <button onClick={handleUpdate} disabled={saving}
-                        className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50">
-                        {saving ? '…' : 'Save'}
-                      </button>
-                      <button onClick={() => { setEditId(null); setError('') }}
-                        className="px-2 py-1 text-xs text-gray-400 hover:text-white">Cancel</button>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                <tr key={t.id} className="group hover:bg-gray-800/50 transition-colors">
-                  <td className="px-4 py-2.5 font-mono text-xs text-gray-300">{t.name}</td>
-                  <td className="px-4 py-2.5 text-white">{t.label}</td>
-                  <td className="px-4 py-2.5">
-                    {t.line_color ? (
-                      <div className="flex items-center gap-2">
-                        <LineSvg color={t.line_color} dash={t.line_dash ?? ''} />
-                        <span className="text-xs text-gray-400">{lineStyles.find(ls => ls.id === t.line_style_id)?.label ?? '—'}</span>
-                      </div>
-                    ) : <span className="text-xs text-gray-500">—</span>}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {t.is_default ? (
-                      <span className="px-1.5 py-0.5 rounded text-xs bg-amber-800 text-amber-200 font-medium">WAN fallback</span>
-                    ) : (
-                      <span className="text-xs text-gray-600">—</span>
-                    )}
-                  </td>
-                  {isAdmin && (
-                    <td className="pl-2 pr-6 py-2.5">
-                      <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => { setEditId(t.id); setEditForm({ name: t.name, label: t.label, line_style_id: t.line_style_id, is_default: !!t.is_default }); setError('') }}
-                          className="text-gray-500 hover:text-blue-400 transition-colors">
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
-                        </button>
-                        <button onClick={() => handleDelete(t.id)} className="text-gray-500 hover:text-red-400 transition-colors">
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                        </button>
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {showAdd && isAdmin && (
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
-          <p className="text-sm font-medium text-white">New Traffic Type</p>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Key (stored)</label>
-              <input placeholder="e.g. ipsec" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Label</label>
-              <input placeholder="e.g. IPSec VPN" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Line Style</label>
-              <select value={form.line_style_id ?? ''} onChange={e => setForm(f => ({ ...f, line_style_id: e.target.value ? Number(e.target.value) : null }))}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="">— none —</option>
-                {lineStyles.map(ls => <option key={ls.id} value={ls.id}>{ls.label}</option>)}
-              </select>
-            </div>
-            <div className="flex items-center gap-2 pt-5">
-              <input type="checkbox" id="tt_default" checked={form.is_default} onChange={e => setForm(f => ({ ...f, is_default: e.target.checked }))}
-                className="w-4 h-4 rounded border-gray-600" />
-              <label htmlFor="tt_default" className="text-sm text-gray-300">WAN fallback (default)</label>
-            </div>
-          </div>
-          {error && <p className="text-xs text-red-400">{error}</p>}
-          <div className="flex gap-3">
-            <button onClick={handleAdd} disabled={saving}
-              className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg disabled:opacity-50">
-              {saving ? 'Saving…' : 'Add Type'}
-            </button>
-            <button onClick={() => { setShowAdd(false); setError('') }}
-              className="px-4 py-2 text-sm text-gray-400 hover:text-white">Cancel</button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Geo Map Tab (wrapper) ─────────────────────────────────────────────────────
 function GeoMapTab() {
   const { user: _me } = useAuth()
@@ -2619,44 +2458,90 @@ function GeoMapTab() {
     <div className="space-y-10">
       <SiteGroupsSection isAdmin={isAdmin} />
       <div className="border-t border-gray-800" />
-      <VpnMappingsTab />
+      <AddressMappingsSection isAdmin={isAdmin} />
       <div className="border-t border-gray-800" />
-      <TrafficTypesSection isAdmin={isAdmin} />
+      <TrafficRulesSection isAdmin={isAdmin} />
       <div className="border-t border-gray-800" />
       <LineStylesSection isAdmin={isAdmin} />
     </div>
   )
 }
 
-// ── VPN Mappings Tab ──────────────────────────────────────────────────────────
-const VPN_GROUP_BADGE: Record<string, string> = {
+// ── Address Mappings Section ──────────────────────────────────────────────────
+// Merges what used to be two separate boxes (VPN Site Mappings + WAN
+// Addresses) — both mapped a private CIDR/IP to a representative external
+// CIDR/IP for geolocation, differing only in label. `category` keeps that as
+// a cosmetic badge. Order (drag-and-drop) sets `priority`: when both ends of
+// a flow match a different entry, whichever is higher in this list wins.
+const ADDRESS_GROUP_BADGE: Record<string, string> = {
   group_a: 'bg-violet-800 text-violet-200',
   group_b: 'bg-emerald-800 text-emerald-200',
   other:   'bg-gray-700 text-gray-300',
 }
-const VPN_TYPE_BADGE: Record<string, string> = {
-  gp:  'bg-emerald-700 text-emerald-100',
-  s2s: 'bg-blue-700 text-blue-100',
+const CATEGORY_BADGE: Record<string, string> = {
+  wan: 'bg-red-900 text-red-200',
+  vpn: 'bg-blue-900 text-blue-200',
 }
 
-function VpnMappingsTab() {
-  const { user: _me2 } = useAuth()
-  const isAdmin = _me2?.role === 'admin'
-  const [mappings,   setMappings]   = useState<VpnMapping[]>([])
+const DragHandle = () => (
+  <svg className="w-4 h-4 text-gray-600 cursor-grab active:cursor-grabbing flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+    <circle cx="9" cy="6" r="1.5" /><circle cx="15" cy="6" r="1.5" />
+    <circle cx="9" cy="12" r="1.5" /><circle cx="15" cy="12" r="1.5" />
+    <circle cx="9" cy="18" r="1.5" /><circle cx="15" cy="18" r="1.5" />
+  </svg>
+)
+
+function HelpButton({ title, children }: { title: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} title="How this works"
+        className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-blue-500 text-blue-400 hover:text-white hover:border-blue-400 hover:bg-blue-500 text-[10px] font-semibold leading-none transition-colors flex-shrink-0">
+        ?
+      </button>
+      {open && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setOpen(false)}>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-xl p-6 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white">{title}</h2>
+              <button onClick={() => setOpen(false)} className="text-gray-500 hover:text-white text-lg leading-none">×</button>
+            </div>
+            <div className="text-sm text-gray-400 space-y-3">
+              {children}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+function LineStylePreview({ lineStyles, id }: { lineStyles: LineStyle[]; id: number | null }) {
+  if (!id) return <span className="text-xs text-gray-500">—</span>
+  const ls = lineStyles.find(l => l.id === id)
+  if (!ls) return <span className="text-xs text-gray-500">—</span>
+  return (
+    <div className="flex items-center gap-2">
+      <svg width="26" height="7"><line x1="0" y1="3.5" x2="26" y2="3.5" stroke={ls.color_hex} strokeWidth="2" strokeDasharray={ls.dash_pattern || undefined} /></svg>
+      <span className="text-xs text-gray-400">{ls.label}</span>
+    </div>
+  )
+}
+
+function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
+  const [mappings,   setMappings]   = useState<AddressMapping[]>([])
   const [loading,    setLoading]    = useState(true)
   const [showAdd,    setShowAdd]    = useState(false)
   const [editingId,  setEditingId]  = useState<number | null>(null)
-  const [editForm,   setEditForm]   = useState<VpnMappingIn>({ site_name: '', group_name: 'group_a', public_ip: '', cidr_or_ip: '', entry_type: 's2s' })
-  const [form,       setForm]       = useState<VpnMappingIn>({ site_name: '', group_name: 'group_a', public_ip: '', cidr_or_ip: '', entry_type: 's2s' })
+  const blank: AddressMappingIn = { name: '', group_name: 'other', category: 'wan', private_cidr: '', public_cidr: '' }
+  const [editForm,   setEditForm]   = useState<AddressMappingIn>(blank)
+  const [form,       setForm]       = useState<AddressMappingIn>(blank)
   const [saving,       setSaving]       = useState(false)
   const [editSaving,   setEditSaving]   = useState(false)
   const [error,        setError]        = useState('')
   const [editError,    setEditError]    = useState('')
-  const [trafficTypes, setTrafficTypes] = useState<TrafficType[]>([])
   const [siteGroups,   setSiteGroups]   = useState<SiteGroup[]>([])
-  const trafficTypeOptions = trafficTypes.length
-    ? trafficTypes.map(t => ({ value: t.name, label: t.label }))
-    : [{ value: 's2s', label: 'S2S — Site-to-Site VPN' }, { value: 'gp', label: 'GP — GlobalProtect' }]
+  const dragId = useRef<number | null>(null)
   const siteGroupOptions = siteGroups.length
     ? siteGroups.map(g => ({ value: g.name, label: g.display_name }))
     : [{ value: 'group_a', label: 'Group A' }, { value: 'group_b', label: 'Group B' }, { value: 'other', label: 'Other' }]
@@ -2664,44 +2549,47 @@ function VpnMappingsTab() {
   function load() {
     setLoading(true)
     Promise.all([
-      api.getVpnMappings(),
-      api.getTrafficTypes(),
+      api.getAddressMappings(),
       api.getSiteGroups(),
-    ]).then(([m, t, g]) => { setMappings(m); setTrafficTypes(t); setSiteGroups(g) })
+    ]).then(([m, g]) => { setMappings(m); setSiteGroups(g) })
       .catch(() => {})
       .finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [])
 
+  function refreshSiteGroups() {
+    api.getSiteGroups().then(setSiteGroups).catch(() => {})
+  }
+
   async function handleAdd() {
-    if (!form.site_name.trim() || !form.public_ip.trim() || !form.cidr_or_ip.trim()) {
-      setError('All fields are required'); return
+    if (!form.name.trim() || !form.private_cidr.trim() || !form.public_cidr.trim()) {
+      setError('Name, Private CIDR/IP, and Public/External CIDR/IP are required'); return
     }
     setSaving(true); setError('')
     try {
-      const m = await api.createVpnMapping(form)
+      const m = await api.createAddressMapping(form)
       setMappings(prev => [...prev, m])
-      setForm({ site_name: '', group_name: 'group_a', public_ip: '', cidr_or_ip: '', entry_type: 's2s' })
+      setForm(blank)
       setShowAdd(false)
     } catch (e: any) {
       setError(e.message ?? 'Failed to save')
     } finally { setSaving(false) }
   }
 
-  function startEdit(m: VpnMapping) {
+  function startEdit(m: AddressMapping) {
     setEditingId(m.id)
-    setEditForm({ site_name: m.site_name, group_name: m.group_name, public_ip: m.public_ip, cidr_or_ip: m.cidr_or_ip, entry_type: m.entry_type })
+    setEditForm({ name: m.name, group_name: m.group_name, category: m.category, private_cidr: m.private_cidr, public_cidr: m.public_cidr })
     setEditError('')
   }
   function cancelEdit() { setEditingId(null); setEditError('') }
 
   async function handleUpdate() {
-    if (!editForm.site_name.trim() || !editForm.public_ip.trim() || !editForm.cidr_or_ip.trim()) {
-      setEditError('All fields are required'); return
+    if (!editForm.name.trim() || !editForm.private_cidr.trim() || !editForm.public_cidr.trim()) {
+      setEditError('Name, Private CIDR/IP, and Public/External CIDR/IP are required'); return
     }
     setEditSaving(true); setEditError('')
     try {
-      const updated = await api.updateVpnMapping(editingId!, editForm)
+      const updated = await api.updateAddressMapping(editingId!, editForm)
       setMappings(prev => prev.map(m => m.id === editingId ? updated : m))
       setEditingId(null)
     } catch (e: any) {
@@ -2711,22 +2599,42 @@ function VpnMappingsTab() {
 
   async function handleDelete(id: number) {
     try {
-      await api.deleteVpnMapping(id)
+      await api.deleteAddressMapping(id)
       setMappings(prev => prev.filter(m => m.id !== id))
     } catch {}
   }
 
-  // Shared input/select class
+  function handleDragStart(id: number) { dragId.current = id }
+  async function handleDrop(targetId: number) {
+    const dragged = dragId.current
+    dragId.current = null
+    if (dragged === null || dragged === targetId) return
+    const current = mappings.map(m => m.id)
+    const from = current.indexOf(dragged)
+    const to   = current.indexOf(targetId)
+    if (from === -1 || to === -1) return
+    const reordered = [...current]
+    reordered.splice(from, 1)
+    reordered.splice(to, 0, dragged)
+    setMappings(prev => reordered.map(id => prev.find(m => m.id === id)!))
+    try {
+      const updated = await api.reorderAddressMappings(reordered)
+      setMappings(updated)
+    } catch { load() }
+  }
+
   const inp = 'w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500'
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-white">VPN Site Mappings</h2>
-          <p className="text-sm text-gray-400 mt-0.5">
-            Map RFC-1918 CIDRs or IPs to a public firewall IP so the Geo Map plots VPN traffic at the correct location.
-          </p>
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold text-white">Address Mappings</h2>
+          <HelpButton title="Address Mappings — How It Works">
+            <p>Tells the Geo Map "this private range is really at this location" — nothing more. This section has <span className="text-gray-300 font-medium">no effect on line colors or styling</span>; that all happens in Traffic Rules below, which references these entries by name.</p>
+            <p><span className="text-gray-300 font-medium">Private CIDR/IP is required</span> — it's the only thing that makes an entry match real traffic (a flow's private-side IP falling inside it). <span className="text-gray-300 font-medium">Public/External CIDR or IP</span> is what gets geolocated to place it on the map: a single firewall IP for a site (e.g. <code className="text-gray-400">10.10.0.0/16</code> → <code className="text-gray-400">23.92.28.254/32</code>), or a whole block if a site's traffic egresses from a range (e.g. a VPN exit node's <code className="text-gray-400">/24</code>). If you're trying to classify traffic to some external service instead of mapping one of your own ranges, you want a Traffic Rule, not an entry here — see the "Any" option there.</p>
+            <p>Drag rows to reorder. Order only matters for the rare case where <span className="text-gray-300 font-medium">both ends</span> of a flow match a different entry here (e.g. two of your own sites talking site-to-site) — whichever entry is higher in this list is the one whose Traffic Rules get checked for that arc's style.</p>
+          </HelpButton>
         </div>
         {isAdmin && !showAdd && (
           <button
@@ -2741,38 +2649,40 @@ function VpnMappingsTab() {
       {/* Add form */}
       {showAdd && isAdmin && (
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
-          <h3 className="text-sm font-medium text-white">New VPN Mapping</h3>
+          <h3 className="text-sm font-medium text-white">New Address Mapping</h3>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Site Name</label>
-              <input placeholder="e.g. Site A" value={form.site_name}
-                onChange={e => setForm(f => ({ ...f, site_name: e.target.value }))}
+              <label className="block text-xs text-gray-400 mb-1">Name</label>
+              <input placeholder="e.g. Site A" value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Group</label>
+              <label className="block text-xs text-gray-400 mb-1">Site</label>
               <select value={form.group_name} onChange={e => setForm(f => ({ ...f, group_name: e.target.value }))}
+                onFocus={refreshSiteGroups}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                 {siteGroupOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Type</label>
-              <select value={form.entry_type} onChange={e => setForm(f => ({ ...f, entry_type: e.target.value }))}
+              <label className="block text-xs text-gray-400 mb-1">Category</label>
+              <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value as 'wan' | 'vpn' }))}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                {trafficTypeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                <option value="wan">WAN</option>
+                <option value="vpn">VPN</option>
               </select>
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Public Firewall IP</label>
-              <input placeholder="e.g. 23.92.28.254" value={form.public_ip}
-                onChange={e => setForm(f => ({ ...f, public_ip: e.target.value }))}
+              <label className="block text-xs text-gray-400 mb-1">Private CIDR or IP</label>
+              <input placeholder="e.g. 10.42.0.0/16" value={form.private_cidr}
+                onChange={e => setForm(f => ({ ...f, private_cidr: e.target.value }))}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Private CIDR or IP</label>
-              <input placeholder="e.g. 10.42.0.0/16" value={form.cidr_or_ip}
-                onChange={e => setForm(f => ({ ...f, cidr_or_ip: e.target.value }))}
+              <label className="block text-xs text-gray-400 mb-1">Public/External CIDR or IP</label>
+              <input placeholder="e.g. 23.92.28.254/32" value={form.public_cidr}
+                onChange={e => setForm(f => ({ ...f, public_cidr: e.target.value }))}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
@@ -2795,19 +2705,20 @@ function VpnMappingsTab() {
         <p className="text-sm text-gray-500 text-center py-8">Loading…</p>
       ) : mappings.length === 0 ? (
         <div className="text-center py-12 text-gray-500">
-          <p className="text-sm">No VPN mappings configured.</p>
-          <p className="text-xs mt-1">Add a mapping to plot VPN traffic at the correct location on the Geo Map.</p>
+          <p className="text-sm">No address mappings configured.</p>
+          <p className="text-xs mt-1">Add one to plot that traffic at the correct location on the Geo Map.</p>
         </div>
       ) : (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800">
+                {isAdmin && <th className="w-8" />}
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Name</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Site</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Group</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Public IP</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Category</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Private CIDR / IP</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Type</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Public / External</th>
                 {isAdmin && <th className="pl-2 pr-6 py-3 w-20 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Actions</th>}
               </tr>
             </thead>
@@ -2815,17 +2726,303 @@ function VpnMappingsTab() {
               {mappings.map(m => editingId === m.id ? (
                 /* ── Edit row ── */
                 <tr key={m.id} className="bg-gray-800/60">
-                  <td className="px-2 py-2"><input value={editForm.site_name} onChange={e => setEditForm(f => ({ ...f, site_name: e.target.value }))} className={inp} /></td>
+                  {isAdmin && <td />}
+                  <td className="px-2 py-2"><input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} className={inp} /></td>
                   <td className="px-2 py-2">
-                    <select value={editForm.group_name} onChange={e => setEditForm(f => ({ ...f, group_name: e.target.value }))} className={inp}>
+                    <select value={editForm.group_name} onChange={e => setEditForm(f => ({ ...f, group_name: e.target.value }))} onFocus={refreshSiteGroups} className={inp}>
                       {siteGroupOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </td>
-                  <td className="px-2 py-2"><input value={editForm.public_ip} onChange={e => setEditForm(f => ({ ...f, public_ip: e.target.value }))} className={`${inp} font-mono`} /></td>
-                  <td className="px-2 py-2"><input value={editForm.cidr_or_ip} onChange={e => setEditForm(f => ({ ...f, cidr_or_ip: e.target.value }))} className={`${inp} font-mono`} /></td>
                   <td className="px-2 py-2">
-                    <select value={editForm.entry_type} onChange={e => setEditForm(f => ({ ...f, entry_type: e.target.value }))} className={inp}>
-                      {trafficTypeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    <select value={editForm.category} onChange={e => setEditForm(f => ({ ...f, category: e.target.value as 'wan' | 'vpn' }))} className={inp}>
+                      <option value="wan">WAN</option>
+                      <option value="vpn">VPN</option>
+                    </select>
+                  </td>
+                  <td className="px-2 py-2"><input value={editForm.private_cidr} onChange={e => setEditForm(f => ({ ...f, private_cidr: e.target.value }))} className={`${inp} font-mono`} /></td>
+                  <td className="px-2 py-2"><input value={editForm.public_cidr} onChange={e => setEditForm(f => ({ ...f, public_cidr: e.target.value }))} className={`${inp} font-mono`} /></td>
+                  <td className="pl-2 pr-6 py-2">
+                    {editError && <p className="text-xs text-red-400 mb-1">{editError}</p>}
+                    <div className="flex items-center gap-2 justify-end">
+                      <button onClick={handleUpdate} disabled={editSaving}
+                        className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors disabled:opacity-50">
+                        {editSaving ? '…' : 'Save'}
+                      </button>
+                      <button onClick={cancelEdit} className="px-3 py-1 text-xs text-gray-400 hover:text-white transition-colors">
+                        Cancel
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                /* ── Display row ── */
+                <tr key={m.id}
+                  draggable={isAdmin}
+                  onDragStart={() => handleDragStart(m.id)}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={() => handleDrop(m.id)}
+                  className="group hover:bg-gray-800/50 transition-colors">
+                  {isAdmin && <td className="pl-3"><DragHandle /></td>}
+                  <td className="px-4 py-3 text-white font-medium">{m.name}</td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${ADDRESS_GROUP_BADGE[m.group_name] ?? ADDRESS_GROUP_BADGE.other}`}>
+                      {m.group_name.charAt(0).toUpperCase() + m.group_name.slice(1)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${CATEGORY_BADGE[m.category]}`}>
+                      {m.category.toUpperCase()}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-gray-300">{m.private_cidr}</td>
+                  <td className="px-4 py-3 font-mono text-gray-300">{m.public_cidr}</td>
+                  {isAdmin && (
+                    <td className="pl-2 pr-6 py-3">
+                      <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => startEdit(m)} title="Edit mapping"
+                          className="text-gray-500 hover:text-blue-400 transition-colors">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                          </svg>
+                        </button>
+                        <button onClick={() => handleDelete(m.id)} title="Delete mapping"
+                          className="text-gray-500 hover:text-red-400 transition-colors">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Traffic Rules Section ─────────────────────────────────────────────────────
+function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
+  const [rules,      setRules]      = useState<TrafficRule[]>([])
+  const [mappings,   setMappings]   = useState<AddressMapping[]>([])
+  const [lineStyles, setLineStyles] = useState<LineStyle[]>([])
+  const [loading,    setLoading]    = useState(true)
+  const [showAdd,    setShowAdd]    = useState(false)
+  const [editingId,  setEditingId]  = useState<number | null>(null)
+  const blank: TrafficRuleIn = { name: '', address_mapping_id: null, dst_cidrs: '', dst_ports: '', line_style_id: null }
+  const [editForm,   setEditForm]   = useState<TrafficRuleIn>(blank)
+  const [form,       setForm]       = useState<TrafficRuleIn>(blank)
+  const [saving,       setSaving]       = useState(false)
+  const [editSaving,   setEditSaving]   = useState(false)
+  const [error,        setError]        = useState('')
+  const [editError,    setEditError]    = useState('')
+  const dragId = useRef<number | null>(null)
+
+  function load() {
+    setLoading(true)
+    Promise.all([
+      api.getTrafficRules(),
+      api.getAddressMappings(),
+      api.getLineStyles(),
+    ]).then(([r, m, ls]) => { setRules(r); setMappings(m); setLineStyles(ls) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { load() }, [])
+
+  function refreshMappings() {
+    api.getAddressMappings().then(setMappings).catch(() => {})
+  }
+
+  async function handleAdd() {
+    if (!form.name.trim() || (form.address_mapping_id == null && !form.dst_cidrs?.trim() && !form.dst_ports?.trim())) {
+      setError('Name is required, and at least one of Address Mapping, Destination IPs/CIDRs, or Destination Ports'); return
+    }
+    setSaving(true); setError('')
+    try {
+      const body = { ...form, dst_cidrs: form.dst_cidrs?.trim() || null, dst_ports: form.dst_ports?.trim() || null }
+      const r = await api.createTrafficRule(body)
+      setRules(prev => [...prev, r])
+      setForm(blank)
+      setShowAdd(false)
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to save')
+    } finally { setSaving(false) }
+  }
+
+  function startEdit(r: TrafficRule) {
+    setEditingId(r.id)
+    setEditForm({ name: r.name, address_mapping_id: r.address_mapping_id, dst_cidrs: r.dst_cidrs ?? '', dst_ports: r.dst_ports ?? '', line_style_id: r.line_style_id })
+    setEditError('')
+  }
+  function cancelEdit() { setEditingId(null); setEditError('') }
+
+  async function handleUpdate() {
+    if (!editForm.name.trim() || (editForm.address_mapping_id == null && !editForm.dst_cidrs?.trim() && !editForm.dst_ports?.trim())) {
+      setEditError('Name is required, and at least one of Address Mapping, Destination IPs/CIDRs, or Destination Ports'); return
+    }
+    setEditSaving(true); setEditError('')
+    try {
+      const body = { ...editForm, dst_cidrs: editForm.dst_cidrs?.trim() || null, dst_ports: editForm.dst_ports?.trim() || null }
+      const updated = await api.updateTrafficRule(editingId!, body)
+      setRules(prev => prev.map(r => r.id === editingId ? updated : r))
+      setEditingId(null)
+    } catch (e: any) {
+      setEditError(e.message ?? 'Failed to update')
+    } finally { setEditSaving(false) }
+  }
+
+  async function handleDelete(id: number) {
+    try {
+      await api.deleteTrafficRule(id)
+      setRules(prev => prev.filter(r => r.id !== id))
+    } catch {}
+  }
+
+  function handleDragStart(id: number) { dragId.current = id }
+  async function handleDrop(targetId: number) {
+    const dragged = dragId.current
+    dragId.current = null
+    if (dragged === null || dragged === targetId) return
+    const current = rules.map(r => r.id)
+    const from = current.indexOf(dragged)
+    const to   = current.indexOf(targetId)
+    if (from === -1 || to === -1) return
+    const reordered = [...current]
+    reordered.splice(from, 1)
+    reordered.splice(to, 0, dragged)
+    setRules(prev => reordered.map(id => prev.find(r => r.id === id)!))
+    try {
+      const updated = await api.reorderTrafficRules(reordered)
+      setRules(updated)
+    } catch { load() }
+  }
+
+  const inp = 'w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500'
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold text-white">Traffic Rules</h2>
+          <HelpButton title="Traffic Rules — How It Works">
+            <p>This is the <span className="text-gray-300 font-medium">only</span> place a line color/style gets chosen for the Geo Map. Address Mappings above just supplies locations — a rule decides what a matching flow looks like.</p>
+            <p><span className="text-gray-300 font-medium">Matching is top-to-bottom, first hit wins.</span> Each rule can filter on any combination of: which Address Mapping the traffic belongs to ("Any" = every mapping), Destination IPs/CIDRs, and Destination Ports. At least one filter is required. Rules are checked in the order shown below — as soon as one matches, its Line Style is used and nothing else is checked.</p>
+            <p><span className="text-gray-300 font-medium">Multiple values:</span> list several IPs/CIDRs or ports/ranges in one rule by separating them with commas — a destination matching <span className="text-gray-300">any</span> listed value counts as a match. Destinations: <code className="text-gray-400">1.1.1.1, 9.9.9.9</code>. Ports: <code className="text-gray-400">53, 8000-9000</code> (ranges use a dash and are inclusive on both ends).</p>
+            <p><span className="text-gray-300 font-medium">Examples:</span> Address Mapping = "Site A", Destinations = <code className="text-gray-400">1.1.1.1, 9.9.9.9</code>, Ports = blank → "Site A's traffic to Cloudflare or Quad9 DNS, any port." Address Mapping = "Any", Destinations = blank, Ports = <code className="text-gray-400">53</code> → "any DNS traffic, from anywhere I've mapped, to anywhere." Address Mapping = "Site A", Destinations = blank, Ports = blank → "everything else from Site A" — a catch-all/default for that one mapping.</p>
+            <p><span className="text-amber-500 font-medium">Ordering matters most for catch-alls:</span> a rule with no Destination or Port filter matches everything for that Address Mapping, so it will shadow any more specific rule listed below it. Always drag your specific rules (like the DNS example) above a catch-all for the same mapping, or the catch-all wins first and the specific one never gets reached.</p>
+            <p>Traffic that matches no rule at all falls back to a plain gray line.</p>
+          </HelpButton>
+        </div>
+        {isAdmin && !showAdd && (
+          <button
+            onClick={() => setShowAdd(true)}
+            className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors"
+          >
+            + Add Rule
+          </button>
+        )}
+      </div>
+
+      {/* Add form */}
+      {showAdd && isAdmin && (
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+          <h3 className="text-sm font-medium text-white">New Traffic Rule</h3>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Name</label>
+              <input placeholder="e.g. DNS - Cloudflare/Quad9" value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Address Mapping</label>
+              <select value={form.address_mapping_id ?? ''} onChange={e => setForm(f => ({ ...f, address_mapping_id: e.target.value ? Number(e.target.value) : null }))}
+                onFocus={refreshMappings}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">Any</option>
+                {mappings.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Line Style</label>
+              <select value={form.line_style_id ?? ''} onChange={e => setForm(f => ({ ...f, line_style_id: e.target.value ? Number(e.target.value) : null }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">— none —</option>
+                {lineStyles.map(ls => <option key={ls.id} value={ls.id}>{ls.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Destination IPs/CIDRs (optional, comma-separated)</label>
+              <input placeholder="e.g. 1.1.1.1, 9.9.9.9" value={form.dst_cidrs ?? ''}
+                onChange={e => setForm(f => ({ ...f, dst_cidrs: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Destination Ports (optional, comma-separated, ranges OK)</label>
+              <input placeholder="e.g. 53, 8000-9000" value={form.dst_ports ?? ''}
+                onChange={e => setForm(f => ({ ...f, dst_ports: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+          <p className="text-xs text-gray-500">At least one filter is required. List multiple values separated by commas (e.g. "1.1.1.1, 9.9.9.9" or "53, 8000-9000"). Leave Destination IPs blank to match any destination on that port; leave Ports blank to match any port; leave both blank (with an Address Mapping picked) to make this the default/catch-all for that mapping — put it below any more specific rules for the same mapping.</p>
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          <div className="flex gap-3 pt-1">
+            <button onClick={handleAdd} disabled={saving}
+              className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors disabled:opacity-50">
+              {saving ? 'Saving…' : 'Add Rule'}
+            </button>
+            <button onClick={() => { setShowAdd(false); setError('') }}
+              className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Rules table */}
+      {loading ? (
+        <p className="text-sm text-gray-500 text-center py-8">Loading…</p>
+      ) : rules.length === 0 ? (
+        <div className="text-center py-12 text-gray-500">
+          <p className="text-sm">No traffic rules configured.</p>
+          <p className="text-xs mt-1">Add one to give specific destinations/ports their own line on the Geo Map.</p>
+        </div>
+      ) : (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-800">
+                {isAdmin && <th className="w-8" />}
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Name</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Address Mapping</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Destinations</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Ports</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Line Style</th>
+                {isAdmin && <th className="pl-2 pr-6 py-3 w-20 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Actions</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800">
+              {rules.map(r => editingId === r.id ? (
+                /* ── Edit row ── */
+                <tr key={r.id} className="bg-gray-800/60">
+                  {isAdmin && <td />}
+                  <td className="px-2 py-2"><input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} className={inp} /></td>
+                  <td className="px-2 py-2">
+                    <select value={editForm.address_mapping_id ?? ''} onChange={e => setEditForm(f => ({ ...f, address_mapping_id: e.target.value ? Number(e.target.value) : null }))} onFocus={refreshMappings} className={inp}>
+                      <option value="">Any</option>
+                      {mappings.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-2 py-2"><input value={editForm.dst_cidrs ?? ''} onChange={e => setEditForm(f => ({ ...f, dst_cidrs: e.target.value }))} className={`${inp} font-mono`} /></td>
+                  <td className="px-2 py-2"><input value={editForm.dst_ports ?? ''} onChange={e => setEditForm(f => ({ ...f, dst_ports: e.target.value }))} className={`${inp} font-mono`} /></td>
+                  <td className="px-2 py-2">
+                    <select value={editForm.line_style_id ?? ''} onChange={e => setEditForm(f => ({ ...f, line_style_id: e.target.value ? Number(e.target.value) : null }))} className={inp}>
+                      <option value="">— none —</option>
+                      {lineStyles.map(ls => <option key={ls.id} value={ls.id}>{ls.label}</option>)}
                     </select>
                   </td>
                   <td className="pl-2 pr-6 py-2">
@@ -2843,32 +3040,30 @@ function VpnMappingsTab() {
                 </tr>
               ) : (
                 /* ── Display row ── */
-                <tr key={m.id} className="group hover:bg-gray-800/50 transition-colors">
-                  <td className="px-4 py-3 text-white font-medium">{m.site_name}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${VPN_GROUP_BADGE[m.group_name] ?? VPN_GROUP_BADGE.other}`}>
-                      {m.group_name.charAt(0).toUpperCase() + m.group_name.slice(1)}
-                    </span>
+                <tr key={r.id}
+                  draggable={isAdmin}
+                  onDragStart={() => handleDragStart(r.id)}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={() => handleDrop(r.id)}
+                  className="group hover:bg-gray-800/50 transition-colors">
+                  {isAdmin && <td className="pl-3"><DragHandle /></td>}
+                  <td className="px-4 py-3 text-white font-medium">{r.name}</td>
+                  <td className="px-4 py-3 text-gray-300">
+                    {r.address_mapping_id ? (mappings.find(m => m.id === r.address_mapping_id)?.name ?? `#${r.address_mapping_id}`) : <span className="text-gray-500">Any</span>}
                   </td>
-                  <td className="px-4 py-3 font-mono text-gray-300">{m.public_ip}</td>
-                  <td className="px-4 py-3 font-mono text-gray-300">{m.cidr_or_ip}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${VPN_TYPE_BADGE[m.entry_type] ?? 'bg-gray-700 text-gray-300'}`}>
-                      {m.entry_type.toUpperCase()}
-                    </span>
-                  </td>
+                  <td className="px-4 py-3 font-mono text-gray-300">{r.dst_cidrs || <span className="text-gray-500 font-sans">Any</span>}</td>
+                  <td className="px-4 py-3 font-mono text-gray-300">{r.dst_ports || <span className="text-gray-500 font-sans">Any</span>}</td>
+                  <td className="px-4 py-3"><LineStylePreview lineStyles={lineStyles} id={r.line_style_id} /></td>
                   {isAdmin && (
                     <td className="pl-2 pr-6 py-3">
                       <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                        {/* Edit */}
-                        <button onClick={() => startEdit(m)} title="Edit mapping"
+                        <button onClick={() => startEdit(r)} title="Edit rule"
                           className="text-gray-500 hover:text-blue-400 transition-colors">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
                           </svg>
                         </button>
-                        {/* Delete */}
-                        <button onClick={() => handleDelete(m.id)} title="Delete mapping"
+                        <button onClick={() => handleDelete(r.id)} title="Delete rule"
                           className="text-gray-500 hover:text-red-400 transition-colors">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
