@@ -303,6 +303,42 @@ class ClickHouseBackend(StorageBackend):
             for r in rows
         ]
 
+    async def count_flows(
+        self,
+        src_ip: Optional[str] = None,
+        dst_ip: Optional[str] = None,
+        src_port: Optional[int] = None,
+        dst_port: Optional[int] = None,
+        protocol: Optional[int] = None,
+        sampler_ip: Optional[str] = None,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+    ) -> int:
+        conditions = []
+        params: dict = {}
+
+        if start:
+            conditions.append("timestamp >= %(start)s"); params["start"] = start
+        if end:
+            conditions.append("timestamp <= %(end)s"); params["end"] = end
+        if src_ip:
+            conditions.append("src_ip = %(src_ip)s"); params["src_ip"] = src_ip
+        if dst_ip:
+            conditions.append("dst_ip = %(dst_ip)s"); params["dst_ip"] = dst_ip
+        if src_port is not None:
+            conditions.append("src_port = %(src_port)s"); params["src_port"] = src_port
+        if dst_port is not None:
+            conditions.append("dst_port = %(dst_port)s"); params["dst_port"] = dst_port
+        if protocol is not None:
+            conditions.append("protocol = %(protocol)s"); params["protocol"] = protocol
+        if sampler_ip:
+            conditions.append("sampler_ip = %(sampler_ip)s"); params["sampler_ip"] = sampler_ip
+
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        query = f"SELECT count() FROM {settings.clickhouse_database}.flows {where}"
+        rows = await asyncio.to_thread(self._execute, query, params)
+        return int(rows[0][0]) if rows else 0
+
     async def get_response_rate_for_ip(self, src_ip: str, window_min: int) -> tuple[int, int]:
         """
         For port scan enrichment: counts how many conversations initiated by src_ip

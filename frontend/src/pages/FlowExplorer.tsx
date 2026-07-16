@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api, downloadExport, FlowRecord, DeviceSummary } from '../api/client'
 import { protoLabel } from '../utils/protocols'
+import Pagination from '../components/Pagination'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -201,8 +202,10 @@ export default function FlowExplorer() {
 
   const [devices, setDevices]     = useState<DeviceSummary[]>([])
   const [flows, setFlows]         = useState<FlowRecord[]>([])
+  const [total, setTotal]         = useState(0)
   const [loading, setLoading]     = useState(false)
-  const [offset, setOffset]       = useState(0)
+  const [searched, setSearched]   = useState(false)
+  const [page, setPage]           = useState(1)
   const [selected, setSelected]   = useState<FlowRecord | null>(null)
   const [exportMsg, setExportMsg] = useState('')
 
@@ -258,11 +261,12 @@ export default function FlowExplorer() {
     api.getDeviceSummaries().then(setDevices)
   }, [])
 
-  const search = async (off = 0) => {
+  const search = async (toPage = 1) => {
     setLoading(true)
-    setOffset(off)
+    setSearched(true)
+    setPage(toPage)
     try {
-      const params: any = { limit: String(PAGE_SIZE), offset: String(off) }
+      const params: any = { limit: String(PAGE_SIZE), offset: String((toPage - 1) * PAGE_SIZE) }
       if (filters.src_ip)     params.src_ip     = filters.src_ip
       if (filters.dst_ip)     params.dst_ip     = filters.dst_ip
       if (filters.src_port)   params.src_port   = filters.src_port
@@ -277,8 +281,15 @@ export default function FlowExplorer() {
       } else {
         if (filters.window) params.window = filters.window
       }
-      const results = await api.searchFlows(params)
-      setFlows(off === 0 ? results : [...flows, ...results])
+      const countParams = { ...params }
+      delete countParams.limit
+      delete countParams.offset
+      const [results, countRes] = await Promise.all([
+        api.searchFlows(params),
+        api.countFlows(countParams),
+      ])
+      setFlows(results)
+      setTotal(countRes.total)
     } finally {
       setLoading(false)
     }
@@ -286,7 +297,7 @@ export default function FlowExplorer() {
 
   // Auto-search on mount if URL params were passed (drill-in from Alert / Device View / Port Inventory)
   useEffect(() => {
-    if (filters.src_ip || filters.dst_ip || filters.sampler_ip || filters.dst_port || timeFrom) search(0)
+    if (filters.src_ip || filters.dst_ip || filters.sampler_ip || filters.dst_port || timeFrom) search(1)
   }, [])
 
   const handleExploreIp = (ip: string) => {
@@ -354,7 +365,7 @@ export default function FlowExplorer() {
                 onChange={set(key as keyof Filters)}
                 placeholder={placeholder}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                onKeyDown={e => e.key === 'Enter' && search(0)}
+                onKeyDown={e => e.key === 'Enter' && search(1)}
               />
             </div>
           ))}
@@ -406,14 +417,14 @@ export default function FlowExplorer() {
 
         <div className="flex items-center gap-3 mt-3">
           <button
-            onClick={() => search(0)}
+            onClick={() => search(1)}
             disabled={loading}
             className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg px-5 py-2 transition-colors"
           >
             {loading ? 'Searching…' : 'Search'}
           </button>
           <button
-            onClick={() => { setFilters(EMPTY_FILTERS); setFlows([]); setTimeFrom(''); setTimeTo('') }}
+            onClick={() => { setFilters(EMPTY_FILTERS); setFlows([]); setTotal(0); setSearched(false); setTimeFrom(''); setTimeTo('') }}
             className="text-white hover:text-white text-sm border border-gray-700 rounded-lg px-4 py-2 transition-colors"
           >
             Clear
@@ -437,6 +448,13 @@ export default function FlowExplorer() {
         </div>
       </div>
 
+      {/* Page bar */}
+      {flows.length > 0 && (
+        <div className="flex justify-center">
+          <Pagination page={page} totalPages={Math.max(1, Math.ceil(total / PAGE_SIZE))} onChange={search} />
+        </div>
+      )}
+
       {/* Results */}
       {flows.length > 0 && (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
@@ -451,8 +469,7 @@ export default function FlowExplorer() {
             <p className="text-sm text-white ml-auto">
               <span className="text-white font-medium">{displayedFlows.length.toLocaleString()}</span>
               {displayedFlows.length !== flows.length && <span className="text-white"> of {flows.length.toLocaleString()}</span>}
-              {' flows'}
-              {flows.length === PAGE_SIZE && <span className="text-white"> (first page)</span>}
+              {' flows on this page'}
             </p>
           </div>
           <div className="overflow-x-auto">
@@ -500,22 +517,20 @@ export default function FlowExplorer() {
             </table>
           </div>
 
-          {/* Load more */}
-          {flows.length % PAGE_SIZE === 0 && (
-            <div className="px-4 py-3 border-t border-gray-800 text-center">
-              <button
-                onClick={() => search(offset + PAGE_SIZE)}
-                disabled={loading}
-                className="text-sm text-blue-400 hover:text-blue-300 disabled:opacity-50"
-              >
-                {loading ? 'Loading…' : 'Load next 100 flows'}
-              </button>
-            </div>
-          )}
+          {/* Footer */}
+          <div className="px-4 py-2 border-t border-gray-800 text-xs text-gray-500">
+            Showing {((page - 1) * PAGE_SIZE + 1).toLocaleString()}–{((page - 1) * PAGE_SIZE + flows.length).toLocaleString()} of {total.toLocaleString()} flows (newest first)
+          </div>
         </div>
       )}
 
-      {!loading && flows.length === 0 && (
+      {!loading && searched && flows.length === 0 && (
+        <div className="flex flex-col items-center justify-center h-40 text-white">
+          <p className="text-sm">No flows match your filters</p>
+        </div>
+      )}
+
+      {!loading && !searched && (
         <div className="flex flex-col items-center justify-center h-40 text-white">
           <p className="text-sm">Enter filters above and click Search</p>
         </div>

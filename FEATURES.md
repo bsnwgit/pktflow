@@ -34,9 +34,11 @@ The traffic geo-visualization system, rebuilt end-to-end this cycle around a sim
 - ✅ **Traffic Rules** — the single source of arc line styling. Each rule optionally matches an Address Mapping (or "Any"), a Destination CIDR/IP, and/or a Destination Port — at least one filter required. Matching is strictly top-to-bottom, first hit wins, via drag-and-drop ordering. A rule with only an Address Mapping set (no destination filter) acts as that mapping's default/catch-all style. Unmatched traffic falls back to a neutral gray line. This is what makes "traffic to 1.1.1.1/9.9.9.9" or "any traffic to port 53" stand out as its own line instead of blending into the general WAN color.
 - ✅ **Site Groups** — configurable circle-marker colors (fill/stroke) and Settings-page badge colors (background/text, both pickable via native color inputs), replacing the old hardcoded Tailwind-class badges.
 - ✅ **Line Styles** — the shared color + dash-pattern catalog that Traffic Rules picks from.
-- ✅ **Dynamic legend** — the Geo Map's own legend lists only the Line Styles actually in use by arcs currently on screen (matched by resolved color/dash), not the full catalog; site groups section is unchanged.
+- ✅ **Dynamic legend** — lists only the Traffic Rules actually in use by arcs currently on screen, labeled by the rule's own name (not a generic Line Style label); Sites section only shows groups with "show in legend" enabled.
 - ✅ **VPN site mapping (superseded)** — the original single-purpose "VPN Site Mappings" + "WAN Addresses" boxes and the "Traffic Type" indirection layer were merged/removed in favor of Address Mappings + Traffic Rules above; same underlying capability, one fewer layer of indirection.
-- ✅ Port-aware backend matching — the underlying flow-pairs query now includes destination port, so Traffic Rules can classify by port; same-destination traffic that resolves to the same style still collapses into one arc (no per-port clutter) unless a rule actually splits it out.
+- ✅ **Multi-value Traffic Rules** — a single rule can match a comma-separated list of destination CIDRs/IPs and/or ports/ranges, instead of needing one rule per value.
+- ✅ Port-aware backend matching — the underlying flow-pairs query includes destination port, so Traffic Rules can classify by port; same-destination traffic that resolves to the same style still collapses into one arc (no per-port clutter) unless a rule actually splits it out. Both legs of a bidirectional conversation resolve against the same canonical service port (the lower port seen across the pair) so a request leg and its response leg always merge into a single arc instead of drawing twice.
+- ✅ **Auto-refresh wired up** — main Geo Map page and card both re-poll on the app's auto-refresh tick; the `/geomap` pop-out (outside the main layout) has its own manual refresh button plus a 30s interval.
 
 ## Alerting
 
@@ -100,16 +102,9 @@ Click any IP address anywhere it appears in the UI (Flow Explorer, Device View, 
 
 Still open before starting: final provider choice for the "IP intelligence" piece (ipinfo.io vs. IPQualityScore vs. reusing ip-api.com), and whether the click-to-lookup entry point ships everywhere at once or starts narrower (Flow Explorer + Device View) with the rest as a fast follow.
 
-### Flow Explorer — conversation link — 🚧 not started
-
-Today's "Conversation" column (`FlowExplorer.tsx`) has a Convo button that opens a slide-in side panel showing the other flows sharing that `conversation_id` (via `api.getConversation`), when the backend has linked flows into a stream (`flow_role`: 1=initiator, 2=responder). What's wanted instead: a real link/filter — clicking it should filter the main table itself down to every flow in that conversation (all packets for that stream), not just show them in a separate side panel. Likely wants to be URL-driven (e.g. `?conversation_id=X`) so the filtered view is shareable/bookmarkable, matching how other Flow Explorer filters already work. Needs a decision on whether this replaces the side panel or sits alongside it.
-
 ### Geo Map — follow-up polish — 🚧 not started
 
-- **QA pass: confirm arcs actually render correctly** now that styling comes from Address Mappings + Traffic Rules — double-check lines are showing up on the map as expected across real traffic, not just the synthetic test cases run during development.
-- **Legend shows the Line Style's label, not the Traffic Rule's name** — the legend (`buildLegendHTML` in `GeoMap.tsx`) matches each on-screen arc's resolved color/dash back to a `line_styles` catalog entry and shows *that* label (e.g. "Dashed Blue"), not the name of the rule that assigned it (e.g. "DNS - Cloudflare/Quad9"). If two different rules share the same Line Style, the legend only shows one generic entry — the more specific rule name is lost. Needs a decision: show the rule name instead/as well, or accept that the legend is a style-catalog legend, not a rule legend.
-- **Site Groups — add a "show in legend" checkbox** — every site group currently always appears in the Geo Map legend's Sites section unconditionally. Add a per-group toggle so less-relevant groups (e.g. a generic "Other" fallback) can be hidden from the legend without deleting the group itself.
-- **Traffic Rules — allow multiple ports and IP addresses per rule** — today a rule has exactly one `dst_cidr` and one `dst_port`; the DNS example (1.1.1.1 *and* 9.9.9.9) currently needs two separate rules with the same Line Style. Let a single rule take a list of destination CIDRs/IPs and/or a list of ports (or a port range) instead of one each. Needs a decision on data shape (comma-separated field vs. a real child table) and how it affects the existing first-match-wins priority matching.
+- **General QA pass** — confirm arcs render correctly across real (not just synthetic) traffic now that styling comes from Address Mappings + Traffic Rules. The specific duplicate-arc bug (a bidirectional TCP conversation drawing as two lines because the response leg matched a different Traffic Rule than the request leg) is fixed and user-confirmed; this is now about broader spot-checking, not that specific case.
 
 ### Flow Explorer — proper pagination — 🚧 not started
 
