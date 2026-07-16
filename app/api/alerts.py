@@ -232,11 +232,27 @@ async def list_events(
     _: CurrentUser,
     limit: int = 100,
     unacked_only: bool = False,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
     db: aiosqlite.Connection = Depends(get_db),
 ):
     # unacked_only=True  → active tab: not yet user-acked (includes auto-resolved)
     # unacked_only=False → full history
-    where = "WHERE ae.acked_at IS NULL" if unacked_only else ""
+    clauses = []
+    params: list = []
+    if unacked_only:
+        clauses.append("ae.acked_at IS NULL")
+    if since:
+        # fired_at is stored via SQLite's own datetime('now') (space-separated,
+        # no 'Z'/fractional seconds) — wrap the incoming ISO string in datetime()
+        # too so the comparison is format-normalized on both sides.
+        clauses.append("ae.fired_at >= datetime(?)")
+        params.append(since)
+    if until:
+        clauses.append("ae.fired_at <= datetime(?)")
+        params.append(until)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(limit)
     async with db.execute(f"""
         SELECT ae.id, ae.rule_id, ae.severity, ae.message, ae.details,
                ae.fired_at, ae.acked_at, ae.acked_by,
@@ -247,7 +263,7 @@ async def list_events(
         {where}
         ORDER BY ae.fired_at DESC
         LIMIT ?
-    """, (limit,)) as cur:
+    """, params) as cur:
         rows = await cur.fetchall()
     result = []
     for r in rows:
