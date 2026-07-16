@@ -1526,6 +1526,7 @@ function DevicesTab({ prefillIp = '' }: { prefillIp?: string }) {
   const [csvImporting, setCsvImporting] = useState(false)
   const [csvResult, setCsvResult]       = useState<{ created: number; updated: number; skipped: number; errors: Array<{ row: number; reason: string }> } | null>(null)
   const [csvError, setCsvError]         = useState<string | null>(null)
+  const [csvExporting, setCsvExporting] = useState(false)
   const [deviceFilter, setDeviceFilter] = useState('')
   const [unknownSamplers, setUnknownSamplers] = useState<Array<{ sampler_ip: string; flows_per_sec: number; last_seen: string }>>([])
   const [dismissedSamplers, setDismissedSamplers] = useState<Array<{ sampler_ip: string; dismissed_at: string }>>([])
@@ -1674,6 +1675,13 @@ function DevicesTab({ prefillIp = '' }: { prefillIp?: string }) {
     }
   }
 
+  const handleCsvExport = async () => {
+    setCsvExporting(true)
+    try { await api.exportDevicesCsv() }
+    catch (err: any) { setCsvError(err.message || 'Export failed') }
+    finally { setCsvExporting(false) }
+  }
+
   const downloadTemplate = () => {
     const csv = 'ip,name,site,notes,allowed\n192.168.1.1,Core Switch,site-a,Main distribution switch,true\n10.0.0.1,Edge Router,site-b,,true\n'
     const blob = new Blob([csv], { type: 'text/csv' })
@@ -1788,6 +1796,9 @@ function DevicesTab({ prefillIp = '' }: { prefillIp?: string }) {
             className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-600 w-40 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
           {deviceFilter && <button onClick={() => setDeviceFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+          <button onClick={handleCsvExport} disabled={csvExporting} className="text-xs text-white hover:text-white border border-gray-700 hover:border-gray-500 rounded-lg px-3 py-2 transition-colors disabled:opacity-50">
+            {csvExporting ? 'Exporting…' : '↓ Export CSV'}
+          </button>
           <button onClick={downloadTemplate} className="text-xs text-white hover:text-white border border-gray-700 hover:border-gray-500 rounded-lg px-3 py-2 transition-colors">
             Download template
           </button>
@@ -3016,7 +3027,11 @@ function UsersTab() {
                     </span>
                   </td>
                   <td className="px-5 py-3.5 text-white text-xs">
-                    {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never'}
+                    {u.last_login
+                      // last_login is naive UTC (SQLite datetime('now'), no 'Z') —
+                      // normalize before parsing so it isn't misread as local time.
+                      ? new Date(u.last_login.includes('T') || u.last_login.endsWith('Z') ? u.last_login : u.last_login.replace(' ', 'T') + 'Z').toLocaleString()
+                      : 'Never'}
                   </td>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center justify-end gap-1">
