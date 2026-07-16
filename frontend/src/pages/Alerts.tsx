@@ -6,7 +6,12 @@ import { useWebSocket, type WsMessage, type AlertFiredPayload } from '../hooks/u
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtTime(ts: string): string {
-  return new Date(ts).toLocaleString([], {
+  // fired_at/acked_at/resolved_at are stored as naive UTC (SQLite's
+  // datetime('now'), no 'Z'/offset) — without forcing UTC interpretation here,
+  // the browser parses it as local time, which can shift the displayed date
+  // across midnight relative to the true local time.
+  const utc = ts.includes('T') || ts.endsWith('Z') ? ts : ts.replace(' ', 'T') + 'Z'
+  return new Date(utc).toLocaleString([], {
     month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   })
