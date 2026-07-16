@@ -17,11 +17,11 @@ A complete inventory of what pktFlow does today. Status tags: **✅ built & prod
 - ✅ **Real-time dashboard** — live flows/sec counter, WebSocket push with polling fallback.
 - ✅ **Analytics** — traffic timeseries (short-range REST + long-range hourly/daily rollups).
 - ✅ **Device View** — per-sampler traffic history, top talkers, protocol distribution.
-- ✅ **Flow Explorer** — search/filter by IP, port, protocol, time range; paginated; CSV/JSON export.
-- ✅ **Network Topology** — D3 force-directed graph, site clustering, export to PNG/SVG/JSON/DOT/Draw.io/Lucidchart. Node click → flow drill-down is 🚧 not built (hover only).
+- ✅ **Flow Explorer** — search/filter by IP, port, protocol, time range; server-side pagination with a sliding page-number bar (matching the Logs page); CSV/JSON export.
+- ✅ **Network Topology** — D3 force-directed graph, site clustering, export to PNG/SVG/JSON/DOT/Draw.io/Lucidchart. Node click opens a detail panel with "Flows from →" / "Flows to →" buttons that deep-link into Flow Explorer pre-filtered.
 - ✅ **Geo Map** — see dedicated section below; substantially rebuilt this cycle.
-- 🚧 **Traffic by Port page** — not built. Planned: port inventory, protocol mix, top ports, traffic-over-time chart.
-- 🚧 **Sankey flow diagram** — not built. Planned: `src_ip → dst_port → dst_ip` D3-sankey chart.
+- ✅ **Traffic by Port page** (`/ports`) — protocol mix (pie), top ports (bar), traffic-over-time (area, optionally pinned to a port), full port inventory table. Not currently linked from the sidebar nav — reachable by URL only.
+- ✅ **Sankey flow diagrams** — two implementations: a network-wide src→dst view in Analytics, and a per-device top-talkers flow map in Device View with click-to-drill-down into Flow Explorer.
 
 ## Geo Map
 
@@ -39,6 +39,7 @@ The traffic geo-visualization system, rebuilt end-to-end this cycle around a sim
 - ✅ **Multi-value Traffic Rules** — a single rule can match a comma-separated list of destination CIDRs/IPs and/or ports/ranges, instead of needing one rule per value.
 - ✅ Port-aware backend matching — the underlying flow-pairs query includes destination port, so Traffic Rules can classify by port; same-destination traffic that resolves to the same style still collapses into one arc (no per-port clutter) unless a rule actually splits it out. Both legs of a bidirectional conversation resolve against the same canonical service port (the lower port seen across the pair) so a request leg and its response leg always merge into a single arc instead of drawing twice.
 - ✅ **Auto-refresh wired up** — main Geo Map page and card both re-poll on the app's auto-refresh tick; the `/geomap` pop-out (outside the main layout) has its own manual refresh button plus a 30s interval.
+- ✅ **QA'd against real traffic** — arcs, legend, and styling verified against live data (not just synthetic test cases) since the Address Mappings + Traffic Rules rebuild; user-confirmed.
 
 ## Alerting
 
@@ -49,7 +50,7 @@ The traffic geo-visualization system, rebuilt end-to-end this cycle around a sim
 - ✅ **port_protocol** — fires when specific port/protocol/direction combinations appear in recent flows.
 - ✅ **Auto-resolve** — open alert events self-close when the condition clears on the next evaluation cycle.
 - ✅ **ACK support**, **alert cleanup** (retention-based purge), **bulk rule provisioning** (CSV export/import/template), **Investigate button** (deep-links to Flow Explorer pre-filtered to the alert's context), shared search/severity/time-range filter bar with Application Logs.
-- ⚠️ **Notification channels** — Slack, Email (SMTP), PagerDuty, and generic Webhook dispatch methods are fully implemented in `app/alerts/engine.py`, but none have been tested against a real live service yet. Settings UI has "Send Test" buttons with no backing endpoint.
+- ⚠️ **Notification channels** — Slack, Email (SMTP), PagerDuty, and generic Webhook dispatch methods are fully implemented in `app/alerts/engine.py`, plus a real `POST /api/settings/test-notification` backing the Settings UI's "Send Test" buttons (posts to Slack, sends SMTP, etc. — not a stub). Not yet confirmed fired against a real live service.
 
 ## Authentication & Users
 
@@ -57,7 +58,7 @@ The traffic geo-visualization system, rebuilt end-to-end this cycle around a sim
 - ✅ **SAML 2.0 (Okta)** — SP-initiated SSO, auto-provisions users on first login.
 - ✅ **Roles** — admin (full), analyst (read + export), viewer (read-only).
 - ✅ **User management** — admin create/reset-password/activate-deactivate.
-- 🚧 **Okta OIDC** — SAML works; OIDC (`app/auth/okta.py`) not implemented.
+- **Okta OIDC — deliberately dropped**, not pending. `app/auth/okta.py` is an intentional no-op ("OIDC removed — pktFlow uses SAML 2.0 only"); SAML covers Okta SSO.
 
 ## Settings & Configuration
 
@@ -67,13 +68,12 @@ All settings live in the Settings UI, stored in SQLite, no file edits required p
 - ✅ **Devices** — registry CRUD, CSV import/export + template, Unknown Samplers panel with dismiss support.
 - ✅ **Alerts** — retention window.
 - ✅ **Geo Map** — Site Groups, Address Mappings, Traffic Rules, Line Styles (see above).
-- ✅ **Storage** — backend selector (ClickHouse default; DuckDB is 🚧 broken — missing an abstract method, crashes on selection, defaults changed to avoid it), retention days, manual cleanup.
-- 🚧 **Storage "Test Connection" button** — UI exists, no backend endpoint.
+- ✅ **Storage** — backend selector (ClickHouse default; DuckDB was 🚧 broken — missing the `get_top_ports` abstract method, crashed on selection — now implemented and fixed), retention days, manual cleanup.
+- ✅ **Storage "Test Connection" button** — real backend at `POST /api/settings/test-connection`.
 - ✅ **Backup** — one-click or scheduled (SQLite backup API + optional ClickHouse CSV export), configurable rotation.
 - ✅ **SSL/TLS** — drag-and-drop PFX/P12 or separate PEM cert+key, auto-detected on startup.
 - ✅ **System** — Restart Service button (tries `sudo systemctl restart`, falls back to self-SIGTERM relying on `Restart=always`).
-- 🚧 **Migration mode / flow forwarding** — UI toggle exists, no backend logic reads it.
-- ⚠️ **AI Assistant** — `app/api/ai.py` fully implemented (calls Claude with flow context), frontend chat panel exists; requires the `anthropic` package in the venv and an API key in Settings, unverified in production.
+- ⚠️ **AI Assistant** — `app/api/ai.py` fully implemented (calls Claude with flow context), frontend chat panel exists, `anthropic` package is now a declared dependency in `requirements.txt`. Not yet confirmed used with a live API key in production.
 
 ## Integrations
 
@@ -102,14 +102,6 @@ Click any IP address anywhere it appears in the UI (Flow Explorer, Device View, 
 
 Still open before starting: final provider choice for the "IP intelligence" piece (ipinfo.io vs. IPQualityScore vs. reusing ip-api.com), and whether the click-to-lookup entry point ships everywhere at once or starts narrower (Flow Explorer + Device View) with the rest as a fast follow.
 
-### Geo Map — follow-up polish — 🚧 not started
-
-- **General QA pass** — confirm arcs render correctly across real (not just synthetic) traffic now that styling comes from Address Mappings + Traffic Rules. The specific duplicate-arc bug (a bidirectional TCP conversation drawing as two lines because the response leg matched a different Traffic Rule than the request leg) is fixed and user-confirmed; this is now about broader spot-checking, not that specific case.
-
-### Flow Explorer — proper pagination — 🚧 not started
-
-Flow Explorer currently only has a basic "load more" style Next button (`offset`/`PAGE_SIZE` in `FlowExplorer.tsx`) — no page numbers, no Prev. Bring it in line with the Application Logs page's pagination: a sliding page-number bar (5 visible page numbers that move with you), Next/Prev, `1 ..` / `.. N` jump-to-start/end shortcuts, positioned top-center above the table instead of the current bottom "Load More" link.
-
 ### App-wide contextual help — 🚧 not started
 
 Extend the `HelpButton` pattern built for Address Mappings / Traffic Rules (small blue "?" icon next to a section heading → modal with detailed explanation, source of truth instead of permanent inline text blocks) to the rest of the program. Every settings section / non-obvious feature gets the same treatment rather than sprinkling explanatory paragraphs directly in the UI. Needs a pass to identify which sections actually warrant one (anywhere users have asked "how does this work" is a good signal) and to write the explanatory content for each.
@@ -119,7 +111,7 @@ Extend the `HelpButton` pattern built for Address Mappings / Traffic Rules (smal
 - **Single worker required** for WebSocket correctness — do not scale `uvicorn --workers` above 1.
 - **`clickhouse-driver` is not thread-safe** — all calls serialized via `threading.Lock()`.
 - **Direct UDP ingest** depends on a workaround for a bug in the third-party `netflow` package's template cache (list vs dict) — re-verify if that dependency is ever upgraded.
-- **DuckDB storage backend** is selectable in the UI but will crash the app on restart if chosen — do not use until `get_top_ports` is implemented.
+- **DuckDB storage backend** is selectable in the UI; several alert-engine methods (baselines, elephant-flow/threshold/port-scan detail queries, etc.) deliberately raise `NotImplementedError` rather than being implemented, so those specific alert rule types won't work under DuckDB. Core query paths (search, top talkers/ports, protocol distribution, topology) are implemented.
 - **goflow2 orphan process** — rapid collector restarts can leave an old `goflow2` process holding the UDP port; check `pgrep -a goflow2` if flows stop after a restart.
 
 ---
