@@ -296,10 +296,6 @@ class StorageBackend(ABC):
         Sorted by flow_count descending. Returns [] when no data."""
 
     @abstractmethod
-    async def get_conversation_flows(self, conversation_id: int, window_min: int = 60) -> list:
-        """Return all flows (both legs) for a conversation within window_min minutes."""
-
-    @abstractmethod
     async def get_response_rate_for_ip(self, src_ip: str, window_min: int) -> tuple[int, int]:
         """Return (total_conversations, conversations_with_response) for a scanning IP."""
 
@@ -343,5 +339,6 @@ class StorageBackend(ABC):
         limit: int = 80,
         sampler_ip: Optional[str] = None,
     ) -> list[dict]:
-        """Top src→dst IP pairs by bytes for geo mapping. Returns [] by default."""
+        """Top src→dst→dst_port triples by bytes for geo mapping (dst_port included so
+        Traffic Rules can classify by destination port). Returns [] by default."""
         return []
