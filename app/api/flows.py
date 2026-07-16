@@ -179,18 +179,6 @@ async def search_flows(
     )
 
 
-# ── Conversation lookup ───────────────────────────────────────────────────────
-
-@router.get("/conversation/{conversation_id}", response_model=list[FlowSearchResult])
-async def get_conversation(_: CurrentUser, conversation_id: int,
-                           window_min: int = Query(60, ge=1, le=10080)):
-    """Return all legs of a conversation by its conversation_id.
-    window_min controls how far back to search (default 60 min, max 7 days)."""
-    if conversation_id == 0:
-        raise HTTPException(status_code=400, detail="conversation_id 0 is not valid (pre-migration flows have no conversation tracking)")
-    return await get_storage().get_conversation_flows(conversation_id, window_min)
-
-
 # ── Sampler last-seen (for data-gap alerting and UI status dots) ───────────────
 
 @router.get("/last-seen")
@@ -300,17 +288,18 @@ async def get_geo_data(
     sampler_ip: Optional[str] = Query(None),
 ):
     """
-    Geolocate the top IP pairs from flow data and return locations + typed arcs
+    Geolocate the top IP flows from flow data and return locations + colored arcs
     for the geo traffic map.
 
-    VPN-mapped private IPs (from vpn_mappings table) are substituted with their
-    firewall's public IP for geo lookup, so RFC-1918 traffic appears at the
-    correct physical site on the map.
-
-    Arc types:
-      gp  — GlobalProtect VPN traffic (green dash-dash-dot)
-      s2s — Site-to-site VPN traffic  (blue dashed)
-      wan — Regular public WAN traffic (solid red)
+    Private IPs are resolved against address_mappings (private CIDR -> a
+    representative public CIDR/IP) so RFC-1918 traffic appears at the correct
+    physical site instead of being dropped from the map — address_mappings
+    carries no line style of its own. traffic_rules is the only source of
+    visual styling: a rule scoped to that address mapping (with or without a
+    destination CIDR/IP and/or port filter) supplies the line style, first
+    match wins in priority order. When both ends of a flow match a different
+    address mapping, the one with the better (lower) priority is used to look
+    up rules. Flows matching no rule at all fall back to a neutral gray line.
 
     Uses ip-api.com batch (free, no key required).
     """
@@ -318,40 +307,117 @@ async def get_geo_data(
     from app.database import DB_PATH
 
     s, e = _parse_window(window)
-    pairs = await get_storage().get_top_ip_pairs(start=s, end=e, limit=80, sampler_ip=sampler_ip)
+    pairs = await get_storage().get_top_ip_pairs(start=s, end=e, limit=300, sampler_ip=sampler_ip)
 
-    # ── Load VPN mappings ──────────────────────────────────────────────────────
-    vpn_mappings_list: list[dict] = []
+    DEFAULT_LINE = {"color_hex": "#6b7280", "dash_pattern": ""}  # unmapped public<->public traffic
+
+    # ── Load address mappings, traffic rules, and the line style catalog ───────
+    address_mappings_list: list[dict] = []
+    traffic_rules_list: list[dict] = []
+    line_styles_map: dict[int, dict] = {}
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT * FROM vpn_mappings") as cur:
-                vpn_mappings_list = [dict(r) for r in await cur.fetchall()]
+            async with db.execute("SELECT * FROM address_mappings ORDER BY priority, id") as cur:
+                address_mappings_list = [dict(r) for r in await cur.fetchall()]
+            async with db.execute("SELECT * FROM traffic_rules ORDER BY priority, id") as cur:
+                traffic_rules_list = [dict(r) for r in await cur.fetchall()]
+            async with db.execute("SELECT * FROM line_styles") as cur:
+                line_styles_map = {r["id"]: dict(r) for r in await cur.fetchall()}
     except Exception:
-        pass  # table may not exist on older deploys — degrade gracefully
+        pass  # tables may not exist on older deploys — degrade gracefully
 
-    def _find_vpn_mapping(ip: str) -> Optional[dict]:
-        """Return the first vpn_mappings row whose cidr_or_ip covers ip."""
+    def _match_cidr_or_ip(ip: str, mappings: list[dict], key: str) -> Optional[dict]:
+        """Return the first row in `mappings` (already priority-ordered) whose
+        `key` field (CIDR or single IP) covers ip."""
         try:
             addr = ipaddress.ip_address(ip)
-            for m in vpn_mappings_list:
-                try:
-                    network = ipaddress.ip_network(m["cidr_or_ip"], strict=False)
-                    if addr in network:
-                        return m
-                except ValueError:
-                    # cidr_or_ip is a single host IP, not a CIDR
-                    if ip == m["cidr_or_ip"]:
-                        return m
         except ValueError:
-            pass
+            return None
+        for m in mappings:
+            try:
+                network = ipaddress.ip_network(m[key], strict=False)
+                if addr in network:
+                    return m
+            except ValueError:
+                # value is a single host IP, not a CIDR
+                if ip == m[key]:
+                    return m
         return None
+
+    def _cidr_to_query_ip(cidr_or_ip: str) -> str:
+        """Resolve a /32 or a broader CIDR block to a single representative IP for geolocation."""
+        try:
+            return str(ipaddress.ip_network(cidr_or_ip, strict=False).network_address)
+        except ValueError:
+            return cidr_or_ip
+
+    def _cidr_list_matches(ip: str, spec: str) -> bool:
+        """True if ip falls within any comma-separated CIDR/IP in spec."""
+        for part in spec.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                if ipaddress.ip_address(ip) in ipaddress.ip_network(part, strict=False):
+                    return True
+            except ValueError:
+                if ip == part:
+                    return True
+        return False
+
+    def _port_list_matches(port: Optional[int], spec: str) -> bool:
+        """True if port falls within any comma-separated port/range in spec (e.g. '53,8000-9000')."""
+        if port is None:
+            return False
+        for part in spec.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "-" in part:
+                lo, _, hi = part.partition("-")
+                try:
+                    if int(lo) <= port <= int(hi):
+                        return True
+                except ValueError:
+                    continue
+            else:
+                try:
+                    if port == int(part):
+                        return True
+                except ValueError:
+                    continue
+        return False
+
+    def _match_rule(mapping_id: Optional[int], remote_ip: str, dst_port: Optional[int]) -> Optional[dict]:
+        """First traffic_rules row (already priority-ordered) matching this
+        address mapping (or scoped to 'any'), destination IP, and destination port."""
+        for r in traffic_rules_list:
+            if r["address_mapping_id"] is not None and r["address_mapping_id"] != mapping_id:
+                continue
+            if r["dst_cidrs"] and not _cidr_list_matches(remote_ip, r["dst_cidrs"]):
+                continue
+            if r["dst_ports"] and not _port_list_matches(dst_port, r["dst_ports"]):
+                continue
+            return r
+        return None
+
+    def _resolve_line(meta: Optional[dict], remote_ip: str, dst_port: Optional[int]) -> Optional[tuple]:
+        """Return (priority, line_style_id, rule_name) for one side of a flow, or None if
+        unmapped. line_style_id/rule_name are None (falls back to the neutral default) if
+        no rule matches — address_mappings itself carries no style, only traffic_rules does."""
+        if not meta:
+            return None
+        rule = _match_rule(meta["id"], remote_ip, dst_port)
+        if rule:
+            return (meta["priority"], rule["line_style_id"], rule["name"])
+        return (meta["priority"], None, None)
 
     # ── Build effective IP mapping ─────────────────────────────────────────────
     # ip_to_effective : original_ip -> ip to actually send to ip-api.com
-    # ip_to_vpn_meta  : original_ip -> vpn_mappings row (if matched)
+    # ip_to_site_meta : original_ip -> matched address_mappings row
     ip_to_effective: dict[str, str] = {}
-    ip_to_vpn_meta:  dict[str, dict] = {}
+    ip_to_site_meta: dict[str, dict] = {}
 
     for p in pairs:
         for field in ("src_ip", "dst_ip"):
@@ -359,10 +425,10 @@ async def get_geo_data(
             if ip in ip_to_effective:
                 continue
             if _is_private_ip(ip):
-                m = _find_vpn_mapping(ip)
-                if m:
-                    ip_to_effective[ip] = m["public_ip"]
-                    ip_to_vpn_meta[ip]  = m
+                am = _match_cidr_or_ip(ip, address_mappings_list, "private_cidr")
+                if am:
+                    ip_to_effective[ip] = _cidr_to_query_ip(am["public_cidr"])
+                    ip_to_site_meta[ip] = am
                 # else: private, no mapping → skip
             else:
                 ip_to_effective[ip] = ip  # public → query directly
@@ -418,7 +484,7 @@ async def get_geo_data(
         g = geo_map.get(eff)
         if not g:
             continue
-        meta = ip_to_vpn_meta.get(ip, {})
+        meta = ip_to_site_meta.get(ip)
         locations.append({
             "ip":           ip,
             "lat":          g["lat"],
@@ -428,13 +494,36 @@ async def get_geo_data(
             "country_code": g["country_code"],
             "bytes":        ip_bytes.get(ip, 0),
             "flows":        ip_flows.get(ip, 0),
-            "site_name":    meta.get("site_name", ""),
-            "group":        meta.get("group_name", ""),
+            "site_name":    meta["name"]       if meta else "",
+            "group":        meta["group_name"] if meta else "",
         })
 
     # ── Build arcs ─────────────────────────────────────────────────────────────
-    arcs: list[dict] = []
-    seen: set[tuple] = set()
+    # Aggregated by (unordered endpoint pair, resolved line style) rather than
+    # directional (src, dst): a request leg (A→B) and its response leg (B→A)
+    # are the same visual line between the same two points, just opposite
+    # NetFlow directions — without normalizing direction here they'd draw as
+    # two separate arcs bowing opposite ways for what's really one relationship.
+    # Traffic on different ports to the same destination still collapses into
+    # one arc too, but a port/destination a rule singles out gets its own.
+    # get_top_ip_pairs groups by (src, dst, dst_port), so a request leg (A->B,
+    # dst_port=443) and its response leg (B->A, dst_port=<A's ephemeral port>)
+    # arrive as separate rows carrying different dst_port values. Rule-matching
+    # each row against its own dst_port makes the response leg miss the
+    # port-specific rule the request leg matched, resolving a different line
+    # style and defeating the endpoint_pair merge below. Use the lower port
+    # seen across both directions of a pair as the shared "service port" so
+    # both legs resolve identically.
+    pair_service_port: dict[tuple, int] = {}
+    for p in pairs:
+        dp = p.get("dst_port")
+        if dp is None:
+            continue
+        ep = tuple(sorted((p["src_ip"], p["dst_ip"])))
+        if ep not in pair_service_port or dp < pair_service_port[ep]:
+            pair_service_port[ep] = dp
+
+    arc_agg: dict[tuple, dict] = {}
     for p in pairs:
         src_eff = ip_to_effective.get(p["src_ip"])
         dst_eff = ip_to_effective.get(p["dst_ip"])
@@ -444,35 +533,39 @@ async def get_geo_data(
         dg = geo_map.get(dst_eff)
         if not sg or not dg:
             continue
-        key = (p["src_ip"], p["dst_ip"])
-        if key in seen:
-            continue
-        seen.add(key)
 
-        # Determine arc type: GP > S2S > WAN
-        src_meta = ip_to_vpn_meta.get(p["src_ip"])
-        dst_meta = ip_to_vpn_meta.get(p["dst_ip"])
-        types = {m["entry_type"] for m in (src_meta, dst_meta) if m}
-        if "gp" in types:
-            arc_type = "gp"
-        elif "s2s" in types:
-            arc_type = "s2s"
+        ep = tuple(sorted((p["src_ip"], p["dst_ip"])))
+        dst_port = pair_service_port.get(ep, p.get("dst_port"))
+        src_res = _resolve_line(ip_to_site_meta.get(p["src_ip"]), p["dst_ip"], dst_port)
+        dst_res = _resolve_line(ip_to_site_meta.get(p["dst_ip"]), p["src_ip"], dst_port)
+        if src_res and dst_res:
+            winning = src_res if src_res[0] <= dst_res[0] else dst_res
         else:
-            arc_type = "wan"
+            winning = src_res or dst_res
+        line_style_id = winning[1] if winning else None
+        rule_name = winning[2] if winning else None
+        style = line_styles_map.get(line_style_id, DEFAULT_LINE)
 
-        arcs.append({
-            "src_ip":  p["src_ip"],
-            "src_lat": sg["lat"],
-            "src_lng": sg["lng"],
-            "dst_ip":  p["dst_ip"],
-            "dst_lat": dg["lat"],
-            "dst_lng": dg["lng"],
-            "bytes":    p["bytes"],
-            "flows":    p["flows"],
-            "arc_type": arc_type,
-        })
+        key = (ep, line_style_id)
+        if key not in arc_agg:
+            arc_agg[key] = {
+                "src_ip":  p["src_ip"],
+                "src_lat": sg["lat"],
+                "src_lng": sg["lng"],
+                "dst_ip":  p["dst_ip"],
+                "dst_lat": dg["lat"],
+                "dst_lng": dg["lng"],
+                "bytes":   0,
+                "flows":   0,
+                "color":   style["color_hex"],
+                "dash":    style["dash_pattern"],
+                "label":   rule_name,  # the Traffic Rule that assigned this style, for the legend/tooltip
+            }
+        arc_agg[key]["bytes"] += p["bytes"]
+        arc_agg[key]["flows"] += p["flows"]
 
-    return {"locations": locations, "arcs": arcs[:50]}
+    arcs = sorted(arc_agg.values(), key=lambda a: a["bytes"], reverse=True)[:50]
+    return {"locations": locations, "arcs": arcs}
 
 
 # ── Lucidchart diagram export ─────────────────────────────────────────────────

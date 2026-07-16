@@ -26,7 +26,7 @@ from typing import Optional
 
 from app.models.flow import FlowRecord
 from app.ingest.buffer import IngestBuffer
-from app.ingest.normalizer import _device_cache  # populated by refresh_device_cache()
+from app.ingest.normalizer import _device_cache, _conversation_id, _flow_role  # populated by refresh_device_cache()
 
 log = logging.getLogger("pktflow.ingest.udp")
 
@@ -118,6 +118,9 @@ def _decode_v9_flows(
             src_ip_flow = _safe_ip(d.get("IPV4_SRC_ADDR") or d.get("IPV6_SRC_ADDR"))
             dst_ip_flow = _safe_ip(d.get("IPV4_DST_ADDR") or d.get("IPV6_DST_ADDR"))
             next_hop    = _safe_ip(d.get("IPV4_NEXT_HOP") or d.get("IPV6_NEXT_HOP"))
+            src_port    = _safe_int(d.get("L4_SRC_PORT"))
+            dst_port    = _safe_int(d.get("L4_DST_PORT"))
+            protocol    = _safe_int(d.get("PROTOCOL"))
 
             records.append(FlowRecord(
                 timestamp    = now,
@@ -126,9 +129,9 @@ def _decode_v9_flows(
                 site         = site,
                 src_ip       = src_ip_flow,
                 dst_ip       = dst_ip_flow,
-                src_port     = _safe_int(d.get("L4_SRC_PORT")),
-                dst_port     = _safe_int(d.get("L4_DST_PORT")),
-                protocol     = _safe_int(d.get("PROTOCOL")),
+                src_port     = src_port,
+                dst_port     = dst_port,
+                protocol     = protocol,
                 bytes        = _safe_int(d.get("IN_BYTES")),
                 packets      = _safe_int(d.get("IN_PKTS")),
                 duration_ms  = duration_ms,
@@ -140,6 +143,8 @@ def _decode_v9_flows(
                 src_as       = _safe_int(d.get("SRC_AS")),
                 dst_as       = _safe_int(d.get("DST_AS")),
                 flow_dir     = flow_dir,
+                conversation_id = _conversation_id(src_ip_flow, dst_ip_flow, src_port, dst_port, protocol),
+                flow_role       = _flow_role(src_port, dst_port),
             ))
         except Exception as exc:
             log.info("Flow record normalization error from %s: %s", src_ip, exc)
