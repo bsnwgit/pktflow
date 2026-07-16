@@ -643,6 +643,76 @@ class DuckDBBackend(StorageBackend):
 
     # ── Protocol distribution ──────────────────────────────────────────────────
 
+    # Well-known port → service name (dst_port context), mirrors ClickHouseStorage._WELL_KNOWN
+    _WELL_KNOWN: dict[tuple[int, int], str] = {
+        (80, 6): "HTTP", (443, 6): "HTTPS", (22, 6): "SSH", (23, 6): "Telnet",
+        (25, 6): "SMTP", (53, 17): "DNS", (53, 6): "DNS/TCP", (67, 17): "DHCP",
+        (68, 17): "DHCP", (110, 6): "POP3", (143, 6): "IMAP", (161, 17): "SNMP",
+        (162, 17): "SNMP Trap", (179, 6): "BGP", (389, 6): "LDAP",
+        (443, 17): "QUIC", (445, 6): "SMB", (514, 17): "Syslog",
+        (587, 6): "SMTP TLS", (636, 6): "LDAPS", (993, 6): "IMAPS",
+        (995, 6): "POP3S", (1433, 6): "MSSQL", (1521, 6): "Oracle",
+        (3306, 6): "MySQL", (3389, 6): "RDP", (5432, 6): "PostgreSQL",
+        (5601, 6): "Kibana", (5672, 6): "AMQP", (6379, 6): "Redis",
+        (8080, 6): "HTTP-Alt", (8443, 6): "HTTPS-Alt", (9000, 6): "ClickHouse",
+        (9200, 6): "Elasticsearch", (9300, 6): "Elasticsearch", (27017, 6): "MongoDB",
+        (2055, 17): "NetFlow", (4739, 17): "IPFIX",
+    }
+
+    _PROTO_NAMES: dict[int, str] = {
+        1: "ICMP", 2: "IGMP", 6: "TCP", 17: "UDP", 41: "IPv6",
+        46: "RSVP", 47: "GRE", 50: "ESP", 51: "AH", 58: "ICMPv6",
+        88: "EIGRP", 89: "OSPF", 103: "PIM", 112: "VRRP", 115: "L2TP", 132: "SCTP",
+    }
+
+    async def get_top_ports(
+        self,
+        start: datetime,
+        end: datetime,
+        sampler_ip: Optional[str] = None,
+        site: Optional[str] = None,
+        limit: int = 50,
+    ) -> list:
+        def _query():
+            where_parts = ["timestamp BETWEEN ? AND ?"]
+            params: list = [start, end]
+            if sampler_ip:
+                where_parts.append("sampler_ip = ?")
+                params.append(sampler_ip)
+            if site:
+                where_parts.append("site = ?")
+                params.append(site)
+            where = " AND ".join(where_parts)
+            with self._read_pool.acquire() as conn:
+                return conn.execute(f"""
+                    SELECT dst_port, protocol,
+                           SUM(bytes)   AS total_bytes,
+                           SUM(packets) AS total_packets,
+                           COUNT(*)     AS flow_count
+                    FROM flows
+                    WHERE {where}
+                    GROUP BY dst_port, protocol
+                    ORDER BY total_bytes DESC
+                    LIMIT ?
+                """, params + [limit]).fetchall()
+
+        rows = await self._read(_query) or []
+        total_bytes = sum(r[2] for r in rows) or 1
+        from app.models.flow import PortStat
+        return [
+            PortStat(
+                port=r[0],
+                protocol=r[1],
+                proto_name=self._PROTO_NAMES.get(r[1], str(r[1])),
+                service_name=self._WELL_KNOWN.get((r[0], r[1]), ""),
+                bytes=r[2],
+                packets=r[3],
+                flow_count=r[4],
+                pct_bytes=round(r[2] / total_bytes * 100, 2),
+            )
+            for r in rows
+        ]
+
     async def get_protocol_distribution(
         self,
         start: datetime,
