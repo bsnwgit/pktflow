@@ -210,10 +210,6 @@ export default function FlowExplorer() {
   const [tableSortKey, setTableSortKey]   = useState<keyof FlowRecord | null>(null)
   const [tableSortDir, setTableSortDir]   = useState<'asc' | 'desc'>('desc')
 
-  // Conversation mode — set when user clicks "Show Conversation" on a flow row
-  const [convId, setConvId]   = useState<number | null>(null)
-  const [convFlows, setConvFlows] = useState<FlowRecord[]>([])
-
   const PAGE_SIZE = 100
 
   const FLOW_COLS: Array<{ label: string; key: keyof FlowRecord | null }> = [
@@ -226,7 +222,6 @@ export default function FlowExplorer() {
     { label: 'Bytes',       key: 'bytes' },
     { label: 'Pkts',        key: 'packets' },
     { label: 'Duration',    key: 'duration_ms' },
-    { label: 'Conv',        key: null },
   ]
 
   const toggleTableSort = (key: keyof FlowRecord) => {
@@ -262,23 +257,6 @@ export default function FlowExplorer() {
   useEffect(() => {
     api.getDeviceSummaries().then(setDevices)
   }, [])
-
-  const showConversation = async (flow: FlowRecord) => {
-    if (!flow.conversation_id || flow.conversation_id === 0) return
-    setConvId(flow.conversation_id)
-    setLoading(true)
-    try {
-      const results = await api.getConversation(flow.conversation_id, 120)
-      setConvFlows(results)
-    } catch (e) {
-      console.error('conversation fetch failed', e)
-      setConvFlows([])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const clearConversation = () => { setConvId(null); setConvFlows([]) }
 
   const search = async (off = 0) => {
     setLoading(true)
@@ -516,19 +494,6 @@ export default function FlowExplorer() {
                     <td className="px-3 py-2 text-white font-medium">{fmtBytes(f.bytes)}</td>
                     <td className="px-3 py-2 text-white">{f.packets.toLocaleString()}</td>
                     <td className="px-3 py-2 text-white">{fmtDuration(f.duration_ms)}</td>
-                    <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
-                      {f.conversation_id && f.conversation_id !== 0 ? (
-                        <button
-                          onClick={() => showConversation(f)}
-                          className="text-xs bg-gray-800 hover:bg-gray-700 text-cyan-400 hover:text-cyan-300 border border-cyan-500/30 rounded px-2 py-0.5 transition-colors whitespace-nowrap"
-                          title="Show both legs of this conversation"
-                        >
-                          {f.flow_role === 1 ? '→ Convo' : f.flow_role === 2 ? '← Convo' : 'Convo'}
-                        </button>
-                      ) : (
-                        <span className="text-gray-700 text-xs">—</span>
-                      )}
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -553,64 +518,6 @@ export default function FlowExplorer() {
       {!loading && flows.length === 0 && (
         <div className="flex flex-col items-center justify-center h-40 text-white">
           <p className="text-sm">Enter filters above and click Search</p>
-        </div>
-      )}
-
-      {/* Conversation panel — slides in when a flow's Convo button is clicked */}
-      {convId !== null && (
-        <div className="bg-gray-900 border border-cyan-500/30 rounded-xl mt-4">
-          <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
-            <div>
-              <span className="text-cyan-400 font-semibold text-sm">Conversation</span>
-              <span className="text-gray-500 text-xs ml-2 font-mono">id:{convId}</span>
-              <span className="text-gray-500 text-xs ml-2">— both legs, last 2 hours</span>
-            </div>
-            <button onClick={clearConversation} className="text-gray-500 hover:text-white text-lg leading-none">×</button>
-          </div>
-          {loading ? (
-            <div className="px-4 py-6 text-center text-gray-400 text-sm">Loading…</div>
-          ) : convFlows.length === 0 ? (
-            <div className="px-4 py-6 text-center text-gray-400 text-sm">
-              No conversation data — this flow may pre-date conversation tracking.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-gray-800 text-gray-400">
-                    <th className="px-3 py-2 text-left">Time</th>
-                    <th className="px-3 py-2 text-left">Role</th>
-                    <th className="px-3 py-2 text-left">Source</th>
-                    <th className="px-3 py-2 text-left">Destination</th>
-                    <th className="px-3 py-2 text-left">Proto</th>
-                    <th className="px-3 py-2 text-left">Port</th>
-                    <th className="px-3 py-2 text-left">Bytes</th>
-                    <th className="px-3 py-2 text-left">Pkts</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-800/50">
-                  {convFlows.map((f, i) => (
-                    <tr key={i} onClick={() => setSelected(f)} className="hover:bg-gray-800/50 cursor-pointer">
-                      <td className="px-3 py-2 text-white whitespace-nowrap">{fmtTime(f.timestamp)}</td>
-                      <td className="px-3 py-2">
-                        {f.flow_role === 1
-                          ? <span className="text-green-400 font-semibold">→ Request</span>
-                          : f.flow_role === 2
-                          ? <span className="text-cyan-400 font-semibold">← Response</span>
-                          : <span className="text-gray-500">—</span>}
-                      </td>
-                      <td className="px-3 py-2 font-mono text-blue-300">{f.src_ip}</td>
-                      <td className="px-3 py-2 font-mono text-purple-300">{f.dst_ip}</td>
-                      <td className="px-3 py-2 text-white">{protoLabel(f.protocol)}</td>
-                      <td className="px-3 py-2 text-white">{f.dst_port}</td>
-                      <td className="px-3 py-2 text-white font-medium">{fmtBytes(f.bytes)}</td>
-                      <td className="px-3 py-2 text-white">{f.packets.toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       )}
     </div>

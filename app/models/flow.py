@@ -141,7 +141,12 @@ class FlowSearchResult(BaseModel):
     dst_as: int = 0
     flow_dir: int = 2
     # Conversation tracking
-    conversation_id: int = 0
+    # str, not int: this is a UInt64 hash that regularly exceeds JavaScript's
+    # Number.MAX_SAFE_INTEGER (2^53) — as a raw JSON number the browser's
+    # JSON.parse silently rounds it to a *different* value, so any client
+    # that echoes it back (e.g. GET /conversation/{id}) ends up asking for
+    # the wrong conversation and gets zero results. String round-trips exactly.
+    conversation_id: str = "0"
     flow_role: int = 0  # 0=unknown, 1=initiator, 2=responder
 
 
