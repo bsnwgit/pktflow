@@ -98,6 +98,8 @@ export const api = {
     request<TopTalker[]>(`/flows/top-talkers?${new URLSearchParams(params as any)}`),
   searchFlows: (params: SearchParams) =>
     request<FlowRecord[]>(`/flows/search?${new URLSearchParams(params as any)}`),
+  countFlows: (params: SearchParams) =>
+    request<{ total: number }>(`/flows/search/count?${new URLSearchParams(params as any)}`),
   getLastSeen: () => request<Record<string, string>>('/flows/last-seen'),
   getTopology: (params: TopologyParams) =>
     request<TopologyResponse>(`/flows/topology?${new URLSearchParams(params as any)}`),
