@@ -8,6 +8,7 @@ import {
 import { api, DeviceSummary, TimeSeriesPoint, TopTalker, FlowRecord } from '../api/client'
 import { PortsTabContent } from './Ports'
 import { protoLabel } from '../utils/protocols'
+import IpLink from '../components/IpLink'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -137,7 +138,9 @@ function InlineFlows({ srcIp, dstIp, window }: { srcIp: string; dstIp: string; w
     <tr>
       <td colSpan={9} className="px-0 py-0 bg-gray-950 border-b border-gray-800">
         <div className="px-6 py-3">
-          <p className="text-xs text-blue-300 mb-2 font-medium">{flows.length} flows — {srcIp} → {dstIp}</p>
+          <p className="text-xs text-blue-300 mb-2 font-medium">
+            {flows.length} flows — <IpLink ip={srcIp} /> → <IpLink ip={dstIp} />
+          </p>
           <table className="w-full text-xs">
             <thead>
               <tr className="text-white border-b border-gray-800">
@@ -330,8 +333,8 @@ function TopTalkersTable({ talkers, totalBytes, window, externalExpanded, onExte
                     <td className="px-4 py-2.5 text-white text-xs select-none">
                       {isExpanded ? '▼' : '▶'}
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-blue-300 text-xs">{t.src_ip}</td>
-                    <td className="px-4 py-2.5 font-mono text-purple-300 text-xs">{t.dst_ip}</td>
+                    <td className="px-4 py-2.5 font-mono text-blue-300 text-xs"><IpLink ip={t.src_ip} /></td>
+                    <td className="px-4 py-2.5 font-mono text-purple-300 text-xs"><IpLink ip={t.dst_ip} /></td>
                     <td className="px-4 py-2.5 text-white">{t.dst_port}</td>
                     <td className="px-4 py-2.5">
                       <span className="bg-gray-800 text-white text-xs px-2 py-0.5 rounded">
@@ -581,13 +584,13 @@ function SankeyTab({ talkers, onDrillDown }: { talkers: TopTalker[]; onDrillDown
       {selectedFlow && (
         <div className="mb-4 p-3 bg-gray-800 border border-blue-500/50 rounded-xl flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2 text-sm flex-wrap flex-1 min-w-0">
-            <span className="font-mono text-blue-300">{selectedFlow.src_ip}</span>
+            <IpLink ip={selectedFlow.src_ip} className="font-mono text-blue-300" />
             <span className="text-white">→</span>
             <span className="bg-gray-700 text-white px-2 py-0.5 rounded text-xs font-mono">
               {protoLabel(selectedFlow.protocol)}:{selectedFlow.dst_port}
             </span>
             <span className="text-white">→</span>
-            <span className="font-mono text-purple-300">{selectedFlow.dst_ip}</span>
+            <IpLink ip={selectedFlow.dst_ip} className="font-mono text-purple-300" />
             <span className="text-white text-xs ml-2">{fmtBytes(selectedFlow.bytes)} · {selectedFlow.flow_count.toLocaleString()} flows</span>
           </div>
           <button
@@ -725,7 +728,7 @@ export default function DeviceView() {
 
         {device && (
           <div className="flex items-center gap-3 text-sm text-white">
-            <span className="font-mono text-white">{device.sampler_ip}</span>
+            <IpLink ip={device.sampler_ip} className="font-mono text-white" />
             <span>·</span>
             <span>{fmtBytes(device.bytes_last_hour)}/hr</span>
             <span>·</span>
