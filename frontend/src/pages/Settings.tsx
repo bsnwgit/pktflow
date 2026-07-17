@@ -4,6 +4,7 @@ import { api, DeviceSummary, User, UserIn, SslStatus, AddressMapping, AddressMap
 import { useAutoRefresh } from '../store/autoRefresh'
 import { useAuth } from '../store/auth'
 import HelpButton from '../components/HelpButton'
+import { copyToClipboard } from '../utils/clipboard'
 
 // ── Generic helpers ────────────────────────────────────────────────────────────
 type Settings = Record<string, unknown>
@@ -378,7 +379,7 @@ function parseIdpMetadata(xml: string): {
 }
 
 
-// ── pktHub Integration component ─────────────────────────────────────────────
+// ── Suite Integration component ───────────────────────────────────────────────
 function PktHubTokenDisplay() {
   const [token, setToken]           = useState('')
   const [revealed, setRevealed]     = useState(false)
@@ -432,10 +433,9 @@ function PktHubTokenDisplay() {
                 {revealed ? 'Hide' : 'Reveal'}
               </button>
               <button
-                onClick={() => {
-                  navigator.clipboard.writeText(token)
-                  setCopied(true)
-                  setTimeout(() => setCopied(false), 2000)
+                onClick={async () => {
+                  const ok = await copyToClipboard(token)
+                  if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2000) }
                 }}
                 className="px-3 py-1.5 text-xs font-medium text-white rounded-lg whitespace-nowrap transition-colors"
                 style={{ background: copied ? '#16a34a' : '#2563eb' }}
@@ -468,7 +468,7 @@ function PktHubTokenDisplay() {
     </>
   )
 }
-// ── End pktHub Integration ────────────────────────────────────────────────────
+// ── End Suite Integration ─────────────────────────────────────────────────────
 
 
 export default function Settings() {
@@ -1253,7 +1253,7 @@ export default function Settings() {
             content: <>
               <p><span className="text-gray-300 font-medium">Lucidchart</span> token enables the "Export to Lucidchart" action on the Topology page — it pushes the current force-directed graph straight into a new Lucidchart document via their API, rather than just downloading a static PNG/SVG.</p>
               <p><span className="text-gray-300 font-medium">SSL/TLS</span> accepts either a combined PFX/P12 file or a separate PEM cert+key pair, drag-and-drop or click to browse — the running service auto-detects and loads whichever was uploaded at startup.</p>
-              <p><span className="text-gray-300 font-medium">pktHub Integration</span> is one-directional discovery: copy the Suite Token here into pktHub's App Manager when registering this app, so pktHub can proxy into it with users already signed in. Regenerating the token immediately revokes the old one — you'll need to re-register in pktHub afterward.</p>
+              <p><span className="text-gray-300 font-medium">Suite Integration</span> is one-directional discovery: copy the Suite Token here into pktHub's App Manager when registering this app, so pktHub can proxy into it with users already signed in. Regenerating the token immediately revokes the old one — you'll need to re-register in pktHub afterward.</p>
             </>,
           }}
         >
@@ -1278,9 +1278,9 @@ export default function Settings() {
             <SslPanel />
           </div>
 
-          {/* pktHub Integration */}
+          {/* Suite Integration */}
           <div className="pt-4 pb-1">
-            <p className="text-xs font-semibold text-white uppercase tracking-wider">pktHub Integration</p>
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">Suite Integration</p>
           </div>
           <PktHubTokenDisplay />
         </Section>
