@@ -25,6 +25,8 @@ from app.api import address_mappings as address_mappings_router
 from app.api import traffic_rules as traffic_rules_router
 from app.api import geo_config    as geo_config_router
 from app.api import widgets       as widgets_router
+from app.api import user_api_keys as user_api_keys_router
+from app.api import ip_info       as ip_info_router
 
 settings = get_settings()
 log = logging.getLogger("pktflow")
@@ -174,6 +176,8 @@ app.include_router(address_mappings_router.router, prefix="/api/address-mappings
 app.include_router(traffic_rules_router.router,    prefix="/api/traffic-rules",    tags=["traffic-rules"])
 app.include_router(geo_config_router.router,    prefix="/api/geo-config",    tags=["geo-config"])
 app.include_router(widgets_router.router,       prefix="/api",               tags=["widgets"])
+app.include_router(user_api_keys_router.router, prefix="/api/user-api-keys", tags=["user-api-keys"])
+app.include_router(ip_info_router.router,       prefix="/api/ip-info",       tags=["ip-info"])
 
 # ── Health check ──────────────────────────────────────────────────────────────
 

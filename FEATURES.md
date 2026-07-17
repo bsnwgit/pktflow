@@ -41,6 +41,15 @@ The traffic geo-visualization system, rebuilt end-to-end this cycle around a sim
 - ✅ **Auto-refresh wired up** — main Geo Map page and card both re-poll on the app's auto-refresh tick; the `/geomap` pop-out (outside the main layout) has its own manual refresh button plus a 30s interval.
 - ✅ **QA'd against real traffic** — arcs, legend, and styling verified against live data (not just synthetic test cases) since the Address Mappings + Traffic Rules rebuild; user-confirmed.
 
+## IP Intelligence & Reputation
+
+- ✅ **Per-user API keys** — every logged-in user has a Settings → API Keys tab for their own AbuseIPDB, ipinfo.io, and IPQualityScore keys (`user_api_keys` table, keyed by username). No cross-user visibility, no admin override — nobody but the owning user can see a key's value. Each field has a "Test" button (`POST /api/user-api-keys/{provider}/test`) that validates the key against the real provider API using a harmless test IP (8.8.8.8), before saving.
+- ✅ **IP Lookup** — any public (non-RFC1918/loopback/link-local) IP address is a clickable link, styled with a search icon and a bold underline so it doesn't blend into surrounding text. Clicking opens a modal (`IpLink`/`IpInfoModal` in `frontend/src/components/IpLink.tsx`) backed by `GET /api/ip-info/{ip}`, which combines ipinfo.io (city/region/country/org+ASN/hostname/timezone) and AbuseIPDB (abuse confidence score color-coded green/yellow/red, total reports, ISP, usage type, domain, last reported) using the current user's own stored keys. A provider with no key configured shows an inline "Add your key in Settings → API Keys" link instead of erroring the whole modal.
+- ✅ **Wired into Flow Explorer, Device View, Topology, and Alerts** — Flow Explorer's src/dst columns and flow-detail panel; Device View's top-talkers table, drill-down header, Sankey panel, and device header; Topology's node detail panel; Alerts' `src_ip`/`sampler_ip` chips, every IP column across the mini-tables (top contributors/sources/largest-flows/destinations), and a regex-based `linkifyIps` helper that auto-links IPs embedded inside free-text alert messages and live toast notifications.
+- 🚧 **Not wired into Geo Map** — deliberate. Geo Map's IPs render through raw Leaflet HTML tooltip strings and native SVG `<title>` elements, neither of which can host a React component/clickable link without a different architecture (a DOM-event-delegation bridge, or moving tooltips off SVG `<title>` entirely). Geo Map's own click-to-explore already routes into Flow Explorer, where the same IPs get the lookup treatment.
+- 🚧 **Not wired into `<select>`/`<option>` dropdowns** (device pickers in Device View/Topology) — HTML doesn't allow interactive content inside `<option>`, so those stay plain text by necessity.
+- 🚧 **Reverse DNS (PTR) lookup** — not built. Was in the original plan as a third, no-API-key-needed data point alongside ipinfo/AbuseIPDB; not yet added to the modal.
+
 ## Alerting
 
 - ✅ **data_gap** — fires when a known sampler goes silent for a configurable period; dismissed samplers excluded.
@@ -68,6 +77,7 @@ All settings live in the Settings UI, stored in SQLite, no file edits required p
 - ✅ **Devices** — registry CRUD, CSV import/export + template, Unknown Samplers panel with dismiss support.
 - ✅ **Alerts** — retention window.
 - ✅ **Geo Map** — Site Groups, Address Mappings, Traffic Rules, Line Styles (see above).
+- ✅ **API Keys** — every user's own tab, not admin-gated (see IP Intelligence & Reputation above).
 - ✅ **Storage** — backend selector (ClickHouse default; DuckDB was 🚧 broken — missing the `get_top_ports` abstract method, crashed on selection — now implemented and fixed), retention days, manual cleanup.
 - ✅ **Storage "Test Connection" button** — real backend at `POST /api/settings/test-connection`.
 - ✅ **Backup** — one-click or scheduled (SQLite backup API + optional ClickHouse CSV export), configurable rotation.
@@ -90,17 +100,6 @@ All settings live in the Settings UI, stored in SQLite, no file edits required p
 - ✅ **WebSocket** — real-time push after every ingest flush; single-worker process (`--workers 1`) required since `ws_manager` state is in-memory and per-worker.
 
 ## Planned Features
-
-### IP Info / Reputation Lookup — 🚧 not started
-
-Click any IP address anywhere it appears in the UI (Flow Explorer, Device View, Geo Map markers, Topology nodes, Alerts) to open a modal with:
-- **IP intelligence** — geolocation, ASN, ISP, proxy/VPN/hosting detection (provider TBD — leaning ipinfo.io; ip-api.com is already integrated for Geo Map and could serve as the base geolocation/ASN layer at no extra integration cost).
-- **IP/domain reputation** — AbuseIPDB (abuse confidence score, report history) as the primary provider.
-- **Reverse DNS (PTR) lookup** — no external API needed, standard DNS resolution server-side.
-
-**Settings requirement:** a Settings page for external API keys (AbuseIPDB, chosen IP-intelligence provider). **Keys are per-user, not shared** — each user manages their own key(s) under their own account; only that user's requests use their key. Admins can see whether a key is set (present/absent) but never the value itself.
-
-Still open before starting: final provider choice for the "IP intelligence" piece (ipinfo.io vs. IPQualityScore vs. reusing ip-api.com), and whether the click-to-lookup entry point ships everywhere at once or starts narrower (Flow Explorer + Device View) with the rest as a fast follow.
 
 ### App-wide contextual help — 🚧 not started
 

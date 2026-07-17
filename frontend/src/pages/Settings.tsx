@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { api, DeviceSummary, User, UserIn, SslStatus, AddressMapping, AddressMappingIn, TrafficRule, TrafficRuleIn, SiteGroup, SiteGroupIn, LineStyle, LineStyleIn } from '../api/client'
+import { api, DeviceSummary, User, UserIn, SslStatus, AddressMapping, AddressMappingIn, TrafficRule, TrafficRuleIn, SiteGroup, SiteGroupIn, LineStyle, LineStyleIn, UserApiKey } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import { useAuth } from '../store/auth'
 
@@ -325,7 +325,7 @@ function MetadataPasteBox({ onParsed }: {
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
-type TabId = 'general' | 'storage' | 'backup' | 'ingest' | 'auth' | 'notifications' | 'devices' | 'integrations' | 'users' | 'vpnmappings'
+type TabId = 'general' | 'storage' | 'backup' | 'ingest' | 'auth' | 'notifications' | 'devices' | 'integrations' | 'users' | 'vpnmappings' | 'apikeys'
 
 const TABS: Array<{ id: TabId; label: string; adminOnly?: boolean }> = [
   { id: 'general',       label: 'General' },
@@ -337,6 +337,7 @@ const TABS: Array<{ id: TabId; label: string; adminOnly?: boolean }> = [
   { id: 'auth',          label: 'Auth' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'integrations',  label: 'Integrations' },
+  { id: 'apikeys',       label: 'API Keys' },
   { id: 'users',         label: 'Users', adminOnly: true },
 ]
 
@@ -1180,6 +1181,9 @@ export default function Settings() {
       {/* Geo Map tab — admin only */}
       {tab === 'vpnmappings' && isAdmin && <GeoMapTab />}
 
+      {/* API Keys tab — every user manages their own */}
+      {tab === 'apikeys' && <ApiKeysTab />}
+
       {/* Users tab — admin only */}
       {tab === 'users' && isAdmin && <UsersTab />}
 
@@ -1894,6 +1898,117 @@ function DevicesTab({ prefillIp = '' }: { prefillIp?: string }) {
           </tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+// ── API Keys tab — per-user external API keys, scoped to whoever is logged in ──
+function ApiKeysTab() {
+  const { user } = useAuth()
+  const [keys, setKeys]       = useState<UserApiKey[]>([])
+  const [loading, setLoading] = useState(true)
+  const [drafts, setDrafts]   = useState<Record<string, string>>({})
+  const [saving, setSaving]   = useState<Record<string, boolean>>({})
+  const [saved, setSaved]     = useState<Record<string, boolean>>({})
+  const [error, setError]     = useState<Record<string, string>>({})
+  const [testing, setTesting] = useState<Record<string, boolean>>({})
+  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; detail: string }>>({})
+
+  function load() {
+    setLoading(true)
+    api.getUserApiKeys()
+      .then(rows => { setKeys(rows); setDrafts(Object.fromEntries(rows.map(r => [r.provider, r.api_key]))) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { load() }, [])
+
+  async function handleSave(provider: string) {
+    setSaving(s => ({ ...s, [provider]: true }))
+    setError(e => ({ ...e, [provider]: '' }))
+    try {
+      const updated = await api.setUserApiKey(provider, drafts[provider] ?? '')
+      setKeys(prev => prev.map(k => k.provider === provider ? updated : k))
+      setSaved(s => ({ ...s, [provider]: true }))
+      setTimeout(() => setSaved(s => ({ ...s, [provider]: false })), 2000)
+    } catch (err: any) {
+      setError(e => ({ ...e, [provider]: err.message ?? 'Save failed' }))
+    } finally {
+      setSaving(s => ({ ...s, [provider]: false }))
+    }
+  }
+
+  async function handleTest(provider: string) {
+    setTesting(t => ({ ...t, [provider]: true }))
+    setTestResult(r => ({ ...r, [provider]: undefined as any }))
+    try {
+      const res = await api.testUserApiKey(provider, drafts[provider] ?? '')
+      setTestResult(r => ({ ...r, [provider]: { ok: res.status === 'ok', detail: res.detail } }))
+    } catch (err: any) {
+      setTestResult(r => ({ ...r, [provider]: { ok: false, detail: err.message ?? 'Test failed' } }))
+    } finally {
+      setTesting(t => ({ ...t, [provider]: false }))
+    }
+  }
+
+  const inp = 'w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono'
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-2">
+        <h2 className="text-lg font-semibold text-white">API Keys</h2>
+        <HelpButton title="API Keys — How It Works">
+          <p>External API keys for lookup tools (IP reputation, geolocation, etc.) are <span className="text-gray-300 font-medium">personal, not shared</span> — each user stores their own key here under their own account, and only that user's own requests use it. Nobody else, including admins, can see the key's value.</p>
+          <p>Leave a field blank and save to clear a key.</p>
+        </HelpButton>
+      </div>
+      <p className="text-sm text-white">
+        Signed in as <span className="text-white font-medium">{user?.username}</span> — these keys apply to your account only.
+      </p>
+
+      {loading ? (
+        <p className="text-sm text-white">Loading…</p>
+      ) : (
+        <div className="space-y-4 max-w-lg">
+          {keys.map(k => (
+            <div key={k.provider}>
+              <label className="block text-xs text-white mb-1">{k.label}</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="password"
+                  value={drafts[k.provider] ?? ''}
+                  onChange={e => setDrafts(d => ({ ...d, [k.provider]: e.target.value }))}
+                  placeholder="Not set"
+                  className={inp}
+                />
+                <button
+                  onClick={() => handleTest(k.provider)}
+                  disabled={testing[k.provider] || !(drafts[k.provider] ?? '').trim()}
+                  className="shrink-0 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white text-sm font-medium rounded-lg px-4 py-2 transition-colors disabled:opacity-50"
+                >
+                  {testing[k.provider] ? 'Testing…' : 'Test'}
+                </button>
+                <button
+                  onClick={() => handleSave(k.provider)}
+                  disabled={saving[k.provider]}
+                  className="shrink-0 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg px-4 py-2 transition-colors"
+                >
+                  {saving[k.provider] ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+              <div className="mt-1 h-4">
+                {saved[k.provider] && <span className="text-xs text-green-400">Saved</span>}
+                {error[k.provider] && <span className="text-xs text-red-400">{error[k.provider]}</span>}
+                {testResult[k.provider] && (
+                  <span className={`text-xs ${testResult[k.provider].ok ? 'text-green-400' : 'text-red-400'}`}>
+                    {testResult[k.provider].ok ? '✓ ' : '✗ '}{testResult[k.provider].detail}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
