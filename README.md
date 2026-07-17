@@ -62,9 +62,12 @@ All settings in `config.example.yaml` can also be passed as `PKTFLOW_*` environm
 - **Real-time dashboard** — flows/sec counter with live WebSocket updates (green dot = live, falls back to polling)
 - **Analytics** — traffic timeseries charts; short-range (REST) and long-range (hourly/daily rollup) views
 - **Device View** — per-sampler traffic history, top talkers table, protocol distribution
-- **Flow Explorer** — search and filter flows by IP, port, protocol, time range; paginated results; CSV/JSON export
-- **Network Topology** — D3 force-directed graph with site cluster labeling; export to PNG, SVG, JSON, DOT, Draw.io, or Lucidchart
-- **Geo Map** — Leaflet dark map with D3 SVG arc overlays; ip-api.com geo lookup; arc classification by type (GlobalProtect VPN = green dash-dot, Site-to-Site VPN = blue dashed, WAN = solid red); circle markers colored by configurable site groups; collapsible VPN Sites panel (admin CRUD); map legend overlay; VPN site mapping resolves RFC-1918 private IPs to their firewall public IPs for accurate geo placement
+- **Flow Explorer** — search and filter flows by IP, port, protocol, time range; server-side pagination with a sliding page-number bar (Prev/Next, `1 ..` / `.. N` jump shortcuts); CSV/JSON export; any public source/destination IP is a clickable link to the IP Lookup modal (see below)
+- **Network Topology** — D3 force-directed graph with site cluster labeling; clicking a node opens a detail panel with "Flows from →" / "Flows to →" deep links into Flow Explorer; export to PNG, SVG, JSON, DOT, Draw.io, or Lucidchart
+- **Geo Map** — Leaflet dark map with D3 SVG arc overlays; ip-api.com geo lookup; circle markers colored by configurable Site Groups; arc styling comes entirely from **Address Mappings** (private→public CIDR/IP topology, resolves RFC-1918 traffic to the correct physical site) + **Traffic Rules** (priority-ordered, drag-and-drop, matches on address mapping/destination CIDR/destination port to pick a Line Style) — see Settings → Geo Map; dynamic legend shows only the Traffic Rules actually on screen, labeled by rule name; both legs of a bidirectional conversation always merge into one arc
+- **Traffic by Port** (`/ports`) — protocol mix, top ports by bytes/flows, traffic-over-time chart, full port inventory table
+- **Sankey flow diagrams** — a network-wide src→dst view on Analytics, and a per-device top-talkers flow map on Device View
+- **IP Lookup** — any public (non-RFC1918) IP address shown in Flow Explorer, Device View, Topology, or Alerts is a clickable link that opens a modal combining ipinfo.io geolocation/ASN data with an AbuseIPDB reputation score, using each user's own API keys (see Settings → API Keys below). Private/loopback/link-local addresses are always shown as plain text.
 
 ### Alerting
 - **data_gap** — fires when a known sampler goes silent for a configurable period; dismissed samplers are excluded
@@ -87,6 +90,8 @@ All settings in `config.example.yaml` can also be passed as `PKTFLOW_*` environm
 
 ### Settings & Configuration
 All configuration is managed via the Settings UI (no file edits required after install). Settings are stored in SQLite and survive restarts.
+
+- **API Keys** — every logged-in user (not just admins) has their own "API Keys" tab to store personal keys for AbuseIPDB, ipinfo.io, and IPQualityScore, used by the IP Lookup feature above. Keys are scoped strictly to the owning user — nobody else, including admins, can see the value. Each field has a "Test" button that calls the real provider API with a harmless test IP to validate the key before saving.
 
 ### Integrations
 - **SSL/TLS** — upload a PFX/P12 bundle or separate PEM cert+key via drag-and-drop; service auto-detects SSL files on startup
@@ -385,15 +390,18 @@ Notification channels are configured per-alert-rule. Available channels:
 | PagerDuty | Code written; requires integration key |
 | Webhook | Code written; requires endpoint URL |
 
-> **Note:** Notification channels have not been end-to-end tested against live services. Verify `httpx`, `aiosmtplib`, and `jinja2` are installed before enabling.
+Each channel has a "Send Test" button (`POST /api/settings/test-notification`) that dispatches a real test message using the saved settings — not yet confirmed fired against a live Slack/SMTP/PagerDuty endpoint in production, but the endpoint itself is implemented, not a stub.
 
 ### Storage
 
 | Setting | Description |
 |---------|-------------|
-| Storage backend | `clickhouse` (production, default) or `duckdb` (**incomplete** — missing a required backend method, selecting it will crash the app on next restart; do not use until `app/storage/duckdb.py` implements `get_top_ports`). **Requires a service restart to take effect.** |
+| Storage backend | `clickhouse` (production, default) or `duckdb` (embedded, no external service required). **Requires a service restart to take effect.** |
 | Flow retention days | ClickHouse TTL for raw flows table (default 90) |
 | Manual cleanup | Trigger immediate retention cleanup |
+| Test Connection | `POST /api/system/test-connection` — verifies the currently configured backend is reachable |
+
+> DuckDB implements the core query paths (search, top talkers/ports, protocol distribution, topology). A handful of alert-engine detail queries (baselines, elephant-flow/threshold/port-scan lookups) deliberately raise `NotImplementedError` under DuckDB rather than being built out — those specific alert rule types are ClickHouse-only for now.
 
 ### Backup
 
@@ -502,11 +510,14 @@ pktflow/
 │   │   ├── alerts.py       Alert rules + events
 │   │   ├── auth.py         Login, SAML, token refresh
 │   │   ├── devices.py      Device registry CRUD + unknown samplers
-│   │   ├── settings.py     App settings CRUD
+│   │   ├── settings.py     App settings CRUD + notification test
 │   │   ├── users.py        User management
-│   │   ├── vpn_mappings.py VPN site mapping CRUD (/api/vpn-mappings)
-│   │   ├── geo_config.py   Geo map config CRUD (/api/geo-config/*)
-│   │   ├── system.py       Health, restart, SSL upload, cleanup, backup
+│   │   ├── address_mappings.py Private↔public CIDR topology (/api/address-mappings)
+│   │   ├── traffic_rules.py    Geo Map line-style rules (/api/traffic-rules)
+│   │   ├── geo_config.py   Site groups + line styles CRUD (/api/geo-config/*)
+│   │   ├── user_api_keys.py Per-user external API keys (/api/user-api-keys)
+│   │   ├── ip_info.py      Combined ipinfo.io + AbuseIPDB lookup (/api/ip-info)
+│   │   ├── system.py       Health, restart, SSL upload, cleanup, backup, test-connection
 │   │   ├── ws.py           WebSocket endpoint + broadcast helpers
 │   │   └── ai.py           AI assistant (Claude)
 │   ├── alerts/
@@ -523,7 +534,7 @@ pktflow/
 │   ├── storage/
 │   │   ├── base.py         Storage interface
 │   │   ├── clickhouse.py   ClickHouse backend (production)
-│   │   ├── duckdb.py       DuckDB backend (experimental)
+│   │   ├── duckdb.py       DuckDB backend (embedded, core paths implemented)
 │   │   └── factory.py      Backend selector
 │   ├── config.py           Settings loader (YAML + env)
 │   ├── database.py         SQLite init + migrations + first-run admin seed
@@ -532,10 +543,13 @@ pktflow/
 ├── frontend/src/
 │   ├── pages/              Dashboard, Analytics, DeviceView, FlowExplorer,
 │   │                         Topology, GeoMap, Ports, Alerts, Settings, Users
-│   ├── components/         Layout, AiAssistant
+│   ├── components/         Layout, AiAssistant, Pagination, IpLink (also
+│   │                         exports linkifyIps, used to auto-link IPs
+│   │                         embedded in alert message text)
 │   ├── api/client.ts       Typed API client + getToken() for WebSocket
 │   ├── hooks/useWebSocket.ts  WebSocket hook
-│   └── utils/protocols.ts  Shared protocol name map
+│   └── utils/               protocols.ts (protocol name map), ip.ts (RFC1918
+│                               private-range check backing IpLink)
 ├── migrations/             SQLite migration scripts (auto-applied on startup)
 ├── install.sh              Ubuntu install script (ClickHouse, venv, systemd service)
 ├── config.example.yaml     Config file template
@@ -565,33 +579,53 @@ pktflow/
 | `GET` | `/api/flows/timeseries/hourly` | Hourly totals from rollup table |
 | `GET` | `/api/flows/top-talkers` | Top src/dst IPs by bytes or flows |
 | `GET` | `/api/flows/search` | Paginated flow search |
+| `GET` | `/api/flows/search/count` | Total matching row count for the current `/search` filters (page-number pagination) |
 | `GET` | `/api/flows/topology` | Node/edge list for topology graph |
 | `GET` | `/api/flows/topology/lucidchart` | Export topology to Lucidchart |
-| `GET` | `/api/flows/geo` | Geo-located IP pairs + arc type classification for Geo Map |
+| `GET` | `/api/flows/geo` | Geo-located IP pairs + Traffic Rule-resolved arc styling for Geo Map |
 | `GET` | `/api/flows/rate` | Current flows/sec |
 | `GET` | `/api/flows/export` | Download flows as CSV or JSON |
 | `GET` | `/api/flows/devices` | Device summaries with live stats |
 
 Common query parameters: `sampler_ip`, `src_ip`, `dst_ip`, `src_port`, `dst_port`, `protocol`, `site`, `start`, `end`, `limit`, `offset`.
 
-### VPN Site Mappings
+### Address Mappings & Traffic Rules
+
+Replaced the old VPN Site Mappings / WAN Addresses / Traffic Types design. Address Mappings are pure network topology (private CIDR/IP → representative public CIDR/IP, for correct geo placement); Traffic Rules are the sole source of Geo Map line styling (priority-ordered, first-match-wins).
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/vpn-mappings` | JWT | List all VPN site mappings |
-| `POST` | `/api/vpn-mappings` | Admin JWT | Create a new VPN mapping |
-| `PUT` | `/api/vpn-mappings/{id}` | Admin JWT | Update a VPN mapping |
-| `DELETE` | `/api/vpn-mappings/{id}` | Admin JWT | Delete a VPN mapping |
+| `GET/POST` | `/api/address-mappings` | JWT / Admin JWT | List / create address mappings |
+| `PUT/DELETE` | `/api/address-mappings/{id}` | Admin JWT | Update / delete a mapping |
+| `POST` | `/api/address-mappings/reorder` | Admin JWT | Rewrite priority order from a client-supplied ordered id list |
+| `GET/POST` | `/api/traffic-rules` | JWT / Admin JWT | List / create traffic rules |
+| `PUT/DELETE` | `/api/traffic-rules/{id}` | Admin JWT | Update / delete a rule |
+| `POST` | `/api/traffic-rules/reorder` | Admin JWT | Rewrite priority order from a client-supplied ordered id list |
 
-VPN mappings resolve private RFC-1918 CIDRs or single IPs to a public firewall IP and a site group. The `/api/flows/geo` endpoint uses these to show VPN traffic at the correct real-world location. `entry_type` is `gp` (GlobalProtect) or `s2s` (Site-to-Site), which determines arc color/style on the map.
+A Traffic Rule optionally matches an Address Mapping (or "Any"), a comma-separated list of destination CIDRs/IPs, and/or a comma-separated list of destination ports/ranges — at least one filter is required. `/api/flows/geo` resolves each arc's Address Mapping first (for geolocation), then its Traffic Rule (for color/dash style + legend label).
 
 ### Geo Map Config
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET/POST/PUT/DELETE` | `/api/geo-config/site-groups` | Admin JWT | Site group definitions (color per group) |
-| `GET/POST/PUT/DELETE` | `/api/geo-config/line-styles` | Admin JWT | Arc line style catalog |
-| `GET/POST/PUT/DELETE` | `/api/geo-config/traffic-types` | Admin JWT | Traffic type → line style mappings |
+| `GET/POST/PUT/DELETE` | `/api/geo-config/site-groups` | Admin JWT | Site group definitions (marker color, badge color, "show in legend" toggle) |
+| `GET/POST/PUT/DELETE` | `/api/geo-config/line-styles` | Admin JWT | Arc line style catalog (color + dash pattern), picked by Traffic Rules |
+
+### User API Keys
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/user-api-keys` | JWT | This user's own keys for `abuseipdb`, `ipinfo`, `ipqualityscore` |
+| `PUT` | `/api/user-api-keys/{provider}` | JWT | Set (or clear, with an empty value) this user's key for a provider |
+| `POST` | `/api/user-api-keys/{provider}/test` | JWT | Validate a key against the real provider API using a harmless test IP |
+
+Scoped strictly to the authenticated user (by username, not user id — pktHub suite-proxy logins share a single pseudo id). No admin override or cross-user visibility.
+
+### IP Info
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/ip-info/{ip}` | JWT | Combined ipinfo.io + AbuseIPDB lookup for a single public IP, using the caller's own stored keys. Returns 400 for private/loopback/link-local/reserved addresses. |
 
 ### WebSocket
 
@@ -613,6 +647,7 @@ Message types: `device_update` (device summaries), `ingest_stats` (buffer counte
 | `GET` | `/api/system/ssl/status` | Admin JWT | SSL file status |
 | `POST` | `/api/system/cleanup` | Admin JWT | Trigger retention cleanup |
 | `POST` | `/api/system/backup` | Admin JWT | Trigger local backup |
+| `POST` | `/api/system/test-connection` | Admin JWT | Verify the configured storage backend is reachable |
 
 ---
 
@@ -657,18 +692,14 @@ After pktFlow restarts, Vector detects the connection reset and immediately retr
 
 ## Incomplete / Planned Features
 
+This list is kept in sync with [FEATURES.md](FEATURES.md), which is the canonical, actively-maintained inventory — check there first if this drifts.
+
 | Feature | Status |
 |---------|--------|
-| Notification channels (Slack, Email, PagerDuty, Webhook) | Code written; not end-to-end tested against live services |
-| Okta OIDC | SAML works; OIDC (`app/auth/okta.py`) not implemented |
-| AI assistant | Code written; needs `anthropic` package in venv + API key in Settings |
-| Topology node click → flow drill-down | Nodes not interactive beyond hover |
-| Traffic by Port page | Not yet built — planned: port inventory, protocol mix, top ports, traffic chart |
-| Sankey flow diagram | Not yet built — planned: D3-sankey `src_ip → dst_port → dst_ip` arc chart |
-| Pie charts on Device View | Not built |
-| Storage "Test Connection" button | UI exists, no backend endpoint |
-| DuckDB backend | **Broken, not just unvalidated** — `DuckDBBackend` doesn't implement the abstract `get_top_ports` method required by `StorageBackend`, so selecting it crashes the app on next restart (`TypeError: Can't instantiate abstract class DuckDBBackend`). `storage_backend` now defaults to `clickhouse` everywhere specifically to avoid this; do not switch to `duckdb` until this method is implemented. |
-| Migration mode / flow forwarding | UI toggle exists, no backend logic |
+| Notification channels (Slack, Email, PagerDuty, Webhook) | Code written, including a real `POST /api/settings/test-notification` behind the "Send Test" buttons — not yet confirmed fired against a live service in production |
+| AI assistant | Code written (`app/api/ai.py`, `AiAssistant.tsx`); `anthropic` is now a declared dependency in `requirements.txt` — not yet confirmed used with a live API key in production |
+| Okta OIDC | **Deliberately dropped, not pending** — `app/auth/okta.py` is an intentional no-op; SAML 2.0 covers Okta SSO |
+| App-wide contextual help | The "?" → modal `HelpButton` pattern (built for Address Mappings / Traffic Rules) hasn't been extended to the rest of Settings yet |
 
 ---
 
