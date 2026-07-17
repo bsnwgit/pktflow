@@ -10,6 +10,7 @@ import * as d3 from 'd3'
 import { api, TimeSeriesPoint, TopologyResponse } from '../api/client'
 import { GeoMapCard } from './GeoMap'
 import { useWebSocket, type WsMessage, type IngestStats } from '../hooks/useWebSocket'
+import HelpButton from '../components/HelpButton'
 
 // ── Colour palette ─────────────────────────────────────────────────────────────
 const COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#84cc16','#ec4899','#a78bfa']
@@ -335,7 +336,14 @@ export default function Analytics() {
       {/* Header */}
       <div className="flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold text-white">Dashboard</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold text-white">Dashboard</h1>
+            <HelpButton title="Dashboard — How It Works">
+              <p>The <span className="text-gray-300 font-medium">1h/6h/24h/7d/30d</span> window picker at top right drives Traffic Over Time and the top-talkers/protocol cards — all short-range, queried straight from raw flow records.</p>
+              <p><span className="text-gray-300 font-medium">Historical Trend</span> is separate and always long-range (7d/30d/90d) — it reads from hourly rollups instead of raw flows, which is what keeps it fast even over 90 days of data.</p>
+              <p><span className="text-gray-300 font-medium">Live</span> badge means flow data is arriving over WebSocket in real time; if it's absent the page falls back to periodic polling — data is still current, just not push-driven.</p>
+            </HelpButton>
+          </div>
           {wsConnected && (
             <span className="flex items-center gap-1.5 text-xs text-green-400">
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />

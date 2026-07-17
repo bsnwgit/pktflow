@@ -23,6 +23,7 @@ import { Maximize2, RefreshCw, X, MapPin } from 'lucide-react'
 import { api, setToken, getToken, getTokenRole } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import type { GeoDataResponse, SiteGroup } from '../api/client'
+import HelpButton from '../components/HelpButton'
 
 // ── Geo config (dynamic — fetched from API, falls back to hardcoded defaults) ──
 // Line style info no longer lives here — arcs already carry their resolved
@@ -388,7 +389,14 @@ export function GeoPage() {
     <div className="flex flex-col h-full gap-3">
       {/* Header */}
       <div className="flex items-center justify-between flex-shrink-0">
-        <h1 className="text-xl font-semibold text-white">Geo Map</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold text-white">Geo Map</h1>
+          <HelpButton title="Geo Map — How It Works">
+            <p>Every arc and marker on this page is driven entirely by <span className="text-gray-300 font-medium">Settings → Geo Map</span> — Address Mappings place your private ranges at a real-world location, Traffic Rules decide each arc's color/dash style, Site Groups color the circle markers. This page has no styling controls of its own.</p>
+            <p>Click any marker or arc to jump into Flow Explorer, pre-filtered to that location's or that conversation's traffic.</p>
+            <p><span className="text-gray-300 font-medium">Pop-out</span> opens the map as a real separate browser window rather than a modal — its Close button actually closes just that window, and it keeps itself refreshed on its own 30s timer independent of this page's auto-refresh setting.</p>
+          </HelpButton>
+        </div>
         <div className="flex items-center gap-3">
           {loading && <span className="text-xs text-gray-400 animate-pulse">Loading…</span>}
           <button onClick={load} title="Refresh" className="p-1.5 rounded text-gray-400 hover:text-white transition-colors">
