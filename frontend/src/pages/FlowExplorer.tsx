@@ -4,6 +4,7 @@ import { api, downloadExport, FlowRecord, DeviceSummary } from '../api/client'
 import { protoLabel } from '../utils/protocols'
 import Pagination from '../components/Pagination'
 import IpLink from '../components/IpLink'
+import HelpButton from '../components/HelpButton'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -344,7 +345,15 @@ export default function FlowExplorer() {
       {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-white">Flow Explorer</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-white">Flow Explorer</h1>
+            <HelpButton title="Flow Explorer — How It Works">
+              <p>Queries hit <span className="text-gray-300 font-medium">raw flow records</span> directly — every filter combination narrows the same underlying table, so results reflect exactly what was ingested and stored, not a rollup or sample.</p>
+              <p>Pagination is <span className="text-gray-300 font-medium">server-side</span> — the page number bar reflects the full filtered result count, not just what's currently rendered, so jumping to a late page is still fast.</p>
+              <p><span className="text-gray-300 font-medium">CSV/JSON export</span> respects whatever filters are currently active, not just the current page — it's exporting the full filtered result set.</p>
+              <p>Clicking a public IP anywhere in the results opens the IP Lookup modal (ipinfo.io + AbuseIPDB, using your own API keys from Settings → API Keys).</p>
+            </HelpButton>
+          </div>
           <p className="text-sm text-white mt-0.5">Search and inspect individual flow records</p>
         </div>
       </div>
