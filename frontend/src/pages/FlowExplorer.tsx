@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { api, downloadExport, FlowRecord, DeviceSummary } from '../api/client'
 import { protoLabel } from '../utils/protocols'
 import Pagination from '../components/Pagination'
+import IpLink from '../components/IpLink'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -84,7 +85,7 @@ function FlowDetail({ flow, onClose, onExploreIp }: {
           <p className="text-xs font-medium text-white uppercase tracking-wider mt-4 mb-2">Network</p>
           <Field label="Source IP">
             <div className="flex items-center gap-2">
-              <span className="font-mono text-blue-300 text-sm">{flow.src_ip}</span>
+              <IpLink ip={flow.src_ip} className="font-mono text-blue-300 text-sm" />
               <button
                 onClick={() => onExploreIp(flow.src_ip)}
                 className="text-xs text-white hover:text-blue-400 transition-colors"
@@ -97,7 +98,7 @@ function FlowDetail({ flow, onClose, onExploreIp }: {
           <Field label="Source Port" value={flow.src_port || '—'} />
           <Field label="Destination IP">
             <div className="flex items-center gap-2">
-              <span className="font-mono text-purple-300 text-sm">{flow.dst_ip}</span>
+              <IpLink ip={flow.dst_ip} className="font-mono text-purple-300 text-sm" />
               <button
                 onClick={() => onExploreIp(flow.dst_ip)}
                 className="text-xs text-white hover:text-blue-400 transition-colors"
@@ -500,8 +501,8 @@ export default function FlowExplorer() {
                   >
                     <td className="px-3 py-2 text-white whitespace-nowrap">{fmtTime(f.timestamp)}</td>
                     <td className="px-3 py-2 text-white">{f.sampler_name || f.sampler_ip}</td>
-                    <td className="px-3 py-2 font-mono text-blue-300">{f.src_ip}</td>
-                    <td className="px-3 py-2 font-mono text-purple-300">{f.dst_ip}</td>
+                    <td className="px-3 py-2 font-mono text-blue-300"><IpLink ip={f.src_ip} /></td>
+                    <td className="px-3 py-2 font-mono text-purple-300"><IpLink ip={f.dst_ip} /></td>
                     <td className="px-3 py-2">
                       <span className="bg-gray-800 text-white px-1.5 py-0.5 rounded">
                         {protoLabel(f.protocol)}
