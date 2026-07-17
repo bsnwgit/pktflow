@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, AlertRule, AlertEvent, getToken } from '../api/client'
 import { useWebSocket, type WsMessage, type AlertFiredPayload } from '../hooks/useWebSocket'
+import IpLink, { linkifyIps } from '../components/IpLink'
 
 // ── Time range ────────────────────────────────────────────────────────────────
 
@@ -526,10 +527,11 @@ type TopFlow      = { src_ip: string; dst_ip: string; bytes: number; protocol: s
 type TopDst       = { dst_ip: string; flow_count: number; bytes: number }
 type SamplePort   = { dst_port: number; protocol: string; flow_count: number }
 
-function MiniTable({ title, headers, rows }: {
+function MiniTable({ title, headers, rows, ipCols = [] }: {
   title: string
   headers: string[]
   rows: (string | number)[][]
+  ipCols?: number[]
 }) {
   if (!rows.length) return null
   return (
@@ -548,7 +550,9 @@ function MiniTable({ title, headers, rows }: {
             <tr key={ri} className="border-t border-gray-800/70">
               {row.map((cell, ci) => (
                 <td key={ci} className={`py-1 ${ci === row.length - 1 ? 'text-right text-gray-200' : 'text-gray-200 font-mono'}`}>
-                  {typeof cell === 'string' ? cell : cell.toLocaleString()}
+                  {ipCols.includes(ci) && typeof cell === 'string'
+                    ? <IpLink ip={cell} />
+                    : typeof cell === 'string' ? cell : cell.toLocaleString()}
                 </td>
               ))}
             </tr>
@@ -608,7 +612,8 @@ function DetailsPanel({ details }: { details: DetailMap }) {
         <div className="flex flex-wrap gap-2">
           {chips.map(([k, label, v]) => (
             <span key={k} className="text-xs bg-blue-500/15 text-blue-300 border border-blue-500/25 px-2.5 py-0.5 rounded-full">
-              <span className="text-blue-500/70 mr-1">{label}</span>{v}
+              <span className="text-blue-500/70 mr-1">{label}</span>
+              {CHIP_IP_KEYS.includes(k) ? <IpLink ip={v} /> : v}
             </span>
           ))}
         </div>
@@ -627,16 +632,17 @@ function DetailsPanel({ details }: { details: DetailMap }) {
       )}
 
       {/* Top contributors (inter-site) */}
-      <MiniTable title="Top contributors" headers={contribHeaders} rows={contribRows} />
+      <MiniTable title="Top contributors" headers={contribHeaders} rows={contribRows} ipCols={contribHasSampler ? [0, 1, 3] : [0, 1]} />
 
       {/* Top sources (threshold / rate_spike / port_protocol / protocol_anomaly) */}
-      <MiniTable title="Top sources" headers={topSourceHeaders} rows={topSourceRows} />
+      <MiniTable title="Top sources" headers={topSourceHeaders} rows={topSourceRows} ipCols={topSourceHasExtra ? [0, 1, 3] : [0]} />
 
       {/* Largest flows (elephant flow) */}
       <MiniTable
         title="Largest flows"
         headers={['Source', 'Destination', 'Proto', 'Bytes']}
         rows={(topFlows || []).map(f => [f.src_ip, f.dst_ip, f.protocol, fmtBytes(f.bytes)])}
+        ipCols={[0, 1]}
       />
 
       {/* Top destinations (connection burst) */}
@@ -644,6 +650,7 @@ function DetailsPanel({ details }: { details: DetailMap }) {
         title="Top destinations"
         headers={['Destination IP', 'Flows', 'Bytes']}
         rows={(topDsts || []).map(d => [d.dst_ip, d.flow_count, fmtBytes(d.bytes)])}
+        ipCols={[0]}
       />
 
       {/* Sample ports (port scan) */}
@@ -734,7 +741,7 @@ function EventCard({ event, onAck }: { event: AlertEvent; onAck: (id: number) =>
           )}
           <div className="min-w-0">
             <p className="text-sm font-medium text-white truncate">{event.rule_name}</p>
-            <p className="text-sm text-white mt-0.5">{event.message}</p>
+            <p className="text-sm text-white mt-0.5">{linkifyIps(event.message)}</p>
             {isResolved && (
               <p className="text-xs text-green-500/70 mt-0.5">Resolved {fmtTime(event.resolved_at!)}</p>
             )}
@@ -1239,7 +1246,7 @@ export default function Alerts() {
                 <span className="w-2 h-2 rounded-full bg-current flex-shrink-0 animate-pulse" />
                 <span className="font-medium flex-shrink-0 capitalize">{t.severity}</span>
                 <span className="font-semibold flex-shrink-0">{t.rule_name}</span>
-                <span className="truncate opacity-80">{t.message}</span>
+                <span className="truncate opacity-80">{linkifyIps(t.message)}</span>
               </div>
               <button
                 onClick={() => setToasts(prev => prev.filter(x => x.event_id !== t.event_id))}
