@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom'
 import { api, TopologyNode, TopologyEdge, DeviceSummary } from '../api/client'
 import { protoShort } from '../utils/protocols'
 import IpLink from '../components/IpLink'
+import HelpButton from '../components/HelpButton'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -570,6 +571,11 @@ export default function Topology() {
       {/* Controls */}
       <div className="flex items-center gap-3 flex-wrap shrink-0">
         <h1 className="text-xl font-bold text-white mr-1">Topology</h1>
+        <HelpButton title="Topology — How It Works">
+          <p>Nodes are IP addresses, sized by total bytes; edges are aggregated flows between a pair, width proportional to bytes; color groups nodes by site.</p>
+          <p>Click a node to open a detail panel with <span className="text-gray-300 font-medium">"Flows from →"</span> / <span className="text-gray-300 font-medium">"Flows to →"</span> buttons that deep-link straight into Flow Explorer, pre-filtered to that IP.</p>
+          <p><span className="text-gray-300 font-medium">Export</span> covers PNG/SVG/JSON/DOT/Draw.io, plus a direct push to Lucidchart if an API token is set (Settings → Integrations) — useful for handing the current graph to something outside pktFlow.</p>
+        </HelpButton>
 
         <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1">
           {WINDOWS.map(w => (

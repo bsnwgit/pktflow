@@ -9,6 +9,7 @@ import { api, DeviceSummary, TimeSeriesPoint, TopTalker, FlowRecord } from '../a
 import { PortsTabContent } from './Ports'
 import { protoLabel } from '../utils/protocols'
 import IpLink from '../components/IpLink'
+import HelpButton from '../components/HelpButton'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -714,17 +715,24 @@ export default function DeviceView() {
     <div className="space-y-5">
       {/* Header row */}
       <div className="flex items-center gap-4 flex-wrap">
-        <select
-          value={selected}
-          onChange={e => setSelected(e.target.value)}
-          className="bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          {devices.map(d => (
-            <option key={d.sampler_ip} value={d.sampler_ip}>
-              {d.sampler_name || d.sampler_ip} — {d.site}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            value={selected}
+            onChange={e => setSelected(e.target.value)}
+            className="bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {devices.map(d => (
+              <option key={d.sampler_ip} value={d.sampler_ip}>
+                {d.sampler_name || d.sampler_ip} — {d.site}
+              </option>
+            ))}
+          </select>
+          <HelpButton title="Device View — How It Works">
+            <p>Everything on this page is scoped to <span className="text-gray-300 font-medium">one sampler at a time</span> — pick it from the dropdown, or land here directly via a device's row in Flow Explorer/Alerts.</p>
+            <p>Top Talkers and the Sankey diagram are both <span className="text-gray-300 font-medium">click-to-drill-down</span> — clicking a talker or a Sankey node/link jumps into Flow Explorer pre-filtered to that specific src/dst pair.</p>
+            <p>Only devices in the <span className="text-gray-300 font-medium">device registry</span> (Settings → Collectors) appear in this dropdown — a sampler sending flows but not yet registered won't show up here until it's added and allowed.</p>
+          </HelpButton>
+        </div>
 
         {device && (
           <div className="flex items-center gap-3 text-sm text-white">

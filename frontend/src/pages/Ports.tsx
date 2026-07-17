@@ -15,6 +15,7 @@ import {
 import { api, ProtocolStat, PortStat, DeviceSummary, FlowRecord } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import { protoLabel } from '../utils/protocols'
+import HelpButton from '../components/HelpButton'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -506,6 +507,14 @@ export default function Ports() {
 
       {/* ── Toolbar ─────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2 mr-1">
+          <h1 className="text-lg font-semibold text-white">Traffic by Port</h1>
+          <HelpButton title="Traffic by Port — How It Works">
+            <p>Protocol mix, top ports, and the port inventory table are all scoped to the current window/sampler/site filters. <span className="text-gray-300 font-medium">Traffic over time</span> shows overall traffic unless you click a port in Top Ports or the inventory table to pin it — pinning switches that chart to just that one port's history.</p>
+            <p>Sampler and Site filters are mutually exclusive — picking a sampler clears the site filter and vice versa, since a site can span several samplers.</p>
+            <p className="text-gray-500">This page isn't in the sidebar nav — bookmark <code className="text-gray-600">/ports</code> directly, or reach the same panels scoped to one device from Device View.</p>
+          </HelpButton>
+        </div>
         <WindowPicker value={window} onChange={setWindow} />
 
         <select
