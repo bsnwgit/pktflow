@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api, AlertRule, AlertEvent, getToken } from '../api/client'
 import { useWebSocket, type WsMessage, type AlertFiredPayload } from '../hooks/useWebSocket'
 import IpLink, { linkifyIps } from '../components/IpLink'
+import HelpButton from '../components/HelpButton'
 
 // ── Time range ────────────────────────────────────────────────────────────────
 
@@ -1260,7 +1261,16 @@ export default function Alerts() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-white">Alerts</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-white">Alerts</h1>
+            <HelpButton title="Alerts — How It Works">
+              <p>Rule types span three groups: <span className="text-gray-300 font-medium">Traffic</span> (threshold, rate spike, top talker, elephant flow, inter-site traffic), <span className="text-gray-300 font-medium">Security</span> (port/protocol, connection burst, port scan, internal spread, protocol anomaly), and <span className="text-gray-300 font-medium">Infrastructure</span> (data gap, unknown sampler, ingest rate low, ClickHouse table size).</p>
+              <p><span className="text-gray-300 font-medium">Auto-resolve</span> means an open alert event closes itself automatically the next time its rule is evaluated and the condition no longer holds — you don't need to manually clear it, only ACK ones you want to track while still open.</p>
+              <p><span className="text-gray-300 font-medium">Investigate</span> deep-links straight into Flow Explorer, pre-filtered to the specific IPs/ports/time range that triggered the alert — the fastest way to see the actual flows behind a fired event.</p>
+              <p>Rules can be bulk-provisioned via CSV — Export CSV to snapshot current rules, download the template for the expected columns, then Import CSV to create many rules at once instead of one by one.</p>
+              <p className="text-gray-500">What actually gets notified (Slack/Email/PagerDuty/Webhook/TraceCat) when a rule fires is configured separately in Settings → Notifications.</p>
+            </HelpButton>
+          </div>
           <p className="text-sm text-white mt-0.5">
             {(() => {
               const active   = events.filter(e => !e.resolved_at).length

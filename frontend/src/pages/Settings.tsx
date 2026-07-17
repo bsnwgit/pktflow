@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { api, DeviceSummary, User, UserIn, SslStatus, AddressMapping, AddressMappingIn, TrafficRule, TrafficRuleIn, SiteGroup, SiteGroupIn, LineStyle, LineStyleIn, UserApiKey } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import { useAuth } from '../store/auth'
+import HelpButton from '../components/HelpButton'
 
 // ── Generic helpers ────────────────────────────────────────────────────────────
 type Settings = Record<string, unknown>
@@ -117,9 +118,10 @@ function RestartServiceRow() {
 
 // ── Section wrapper with Save ─────────────────────────────────────────────────
 function Section({
-  title, children, onSave, saving, saved, error,
+  title, help, children, onSave, saving, saved, error,
 }: {
   title: string
+  help?: { title: string; content: ReactNode }
   children: React.ReactNode
   onSave: () => Promise<void>
   saving: boolean
@@ -128,8 +130,9 @@ function Section({
 }) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-      <div className="px-6 py-4 border-b border-gray-800">
+      <div className="px-6 py-4 border-b border-gray-800 flex items-center gap-2">
         <h2 className="text-sm font-semibold text-white">{title}</h2>
+        {help && <HelpButton title={help.title}>{help.content}</HelpButton>}
       </div>
       <div className="px-6 py-2">
         {children}
@@ -686,7 +689,15 @@ export default function Settings() {
 
       {/* General */}
       {tab === 'general' && (
-        <Section title="General" onSave={generalSave.save} saving={generalSave.saving} saved={generalSave.saved} error={generalSave.error}>
+        <Section title="General" onSave={generalSave.save} saving={generalSave.saving} saved={generalSave.saved} error={generalSave.error}
+          help={{
+            title: 'General — How It Works',
+            content: <>
+              <p><span className="text-gray-300 font-medium">Base URL</span> isn't cosmetic — it's baked into things other systems call back to: the SAML ACS/metadata URLs shown on the Auth tab, and any links posted in Slack/Email/webhook notifications. Set it to the actual externally-reachable address before configuring SSO or notifications, or those integrations will point at the wrong place.</p>
+              <p><span className="text-gray-300 font-medium">AI Assistant</span> needs its own Anthropic API key (from console.anthropic.com — separate from a Claude Enterprise seat) before the in-app chat panel will do anything. Haiku is the default model: fastest and cheapest for flow-context questions; switch to Sonnet or Opus only if you need deeper reasoning over larger flow contexts.</p>
+            </>,
+          }}
+        >
           <Field label="App name" hint="Displayed in browser tab and header">
             <TextInput value={str('app_name', 'pktFlow')} onChange={v => set('app_name', v)} />
           </Field>
@@ -741,14 +752,23 @@ export default function Settings() {
 
       {/* Storage */}
       {tab === 'storage' && (
-        <Section title="Storage" onSave={storageSave.save} saving={storageSave.saving} saved={storageSave.saved} error={storageSave.error}>
-          <Field label="Backend" hint="DuckDB is the default; ClickHouse requires a separate installation. A service restart is required after changing this setting.">
+        <Section title="Storage" onSave={storageSave.save} saving={storageSave.saving} saved={storageSave.saved} error={storageSave.error}
+          help={{
+            title: 'Storage — How It Works',
+            content: <>
+              <p>Switching <span className="text-gray-300 font-medium">Backend</span> requires a service restart to actually take effect — the running process picks its storage driver once at startup, so saving this field alone won't move any data or change what's being queried.</p>
+              <p><span className="text-amber-500 font-medium">DuckDB has real gaps:</span> several alert rule types (baselines, elephant-flow/threshold/port-scan detail queries) deliberately raise "not implemented" under DuckDB rather than silently returning wrong results — core paths (search, top talkers/ports, protocol distribution, topology) work fine, but those specific alert rules won't fire. ClickHouse has no such gaps.</p>
+              <p>Retention days apply per-tier — raw flow records are usually kept far shorter than hourly rollups, since rollups are what long-range Analytics charts read from. <span className="text-gray-300 font-medium">Manual cleanup</span> applies the current thresholds immediately instead of waiting for the next scheduled pass; on ClickHouse the actual deletion is a queued TTL mutation, so it may not be instant even after this returns.</p>
+            </>,
+          }}
+        >
+          <Field label="Backend" hint="ClickHouse is the production default, installed automatically by install.sh; DuckDB is embedded and needs no separate service, but has feature gaps (see below). A service restart is required after changing this setting.">
             <SelectInput
-              value={str('storage_backend', 'duckdb')}
+              value={str('storage_backend', 'clickhouse')}
               onChange={v => set('storage_backend', v)}
               options={[
-                { value: 'duckdb', label: 'DuckDB (default)' },
-                { value: 'clickhouse', label: 'ClickHouse (requires separate install)' },
+                { value: 'clickhouse', label: 'ClickHouse (default)' },
+                { value: 'duckdb', label: 'DuckDB (embedded, no external service)' },
               ]}
             />
           </Field>
@@ -807,7 +827,16 @@ export default function Settings() {
 
       {/* Backup */}
       {tab === 'backup' && (
-        <Section title="Backup" onSave={backupSave.save} saving={backupSave.saving} saved={backupSave.saved} error={backupSave.error}>
+        <Section title="Backup" onSave={backupSave.save} saving={backupSave.saving} saved={backupSave.saved} error={backupSave.error}
+          help={{
+            title: 'Backup — How It Works',
+            content: <>
+              <p>A backup always includes the SQLite database (settings, devices, users, alert rules) and <code className="text-gray-400">config.yaml</code>. <span className="text-gray-300 font-medium">Include ClickHouse flows</span> additionally exports full flow history as CSV into the same snapshot — worth disabling if you only care about configuration, since flow history is usually the largest part by far.</p>
+              <p><span className="text-gray-300 font-medium">Rotation count</span> caps how many snapshots (scheduled or manual) are kept on disk — the oldest is deleted automatically once you exceed it. Auto backup and Manual backup share the same rotation pool.</p>
+              <p><span className="text-gray-300 font-medium">Export bundle</span> is a one-off download (a <code className="text-gray-400">.tar.gz</code>) you take with you, separate from the rotation-managed snapshots above. <span className="text-amber-500 font-medium">Restore always requires a service restart</span> afterward for any config changes in the bundle to actually apply — the UI will keep showing pre-restore settings until then.</p>
+            </>,
+          }}
+        >
           <Field label="Auto backup" hint="Run a scheduled backup on the app server server at the configured interval">
             <Toggle value={bool('backup_enabled')} onChange={v => set('backup_enabled', v)} />
           </Field>
@@ -921,7 +950,17 @@ export default function Settings() {
 
       {/* Ingest */}
       {tab === 'ingest' && (
-        <Section title="Ingest" onSave={ingestSave.save} saving={ingestSave.saving} saved={ingestSave.saved} error={ingestSave.error}>
+        <Section title="Ingest" onSave={ingestSave.save} saving={ingestSave.saving} saved={ingestSave.saved} error={ingestSave.error}
+          help={{
+            title: 'Ingest — How It Works',
+            content: <>
+              <p><span className="text-gray-300 font-medium">HTTP POST</span> means one or more goflow2+Vector collector pipelines decode raw NetFlow/IPFIX/sFlow and push snake_case JSON batches to this app's <code className="text-gray-400">/api/ingest/flows</code> over HTTPS, authenticated by the Ingest token below. <span className="text-gray-300 font-medium">Direct UDP</span> skips the external collector and listens for raw NetFlow v5/v9/IPFIX/sFlow packets itself.</p>
+              <p><span className="text-amber-500 font-medium">Changing Ingest method or either UDP port requires an actual service restart</span> to take effect — the UDP listener only starts or stops at process startup, so saving this form alone won't switch anything live.</p>
+              <p>Regardless of ingest path, a flow is only stored if its sampler IP is <span className="text-gray-300 font-medium">present and enabled in the device registry</span> (Collectors tab) — this settings page controls transport, not what's allowed through.</p>
+              <p><span className="text-gray-300 font-medium">Stream raw flows</span> pushes every ingest batch to connected browsers over WebSocket for the live dashboard counter — harmless at normal volume, but worth disabling or capping (Max flows per push) on very high-throughput links.</p>
+            </>,
+          }}
+        >
           <Field label="Ingest method" hint="HTTP POST is recommended; requires no firewall changes. A service restart is required after changing this setting — the UDP listener only starts/stops at process startup.">
             <SelectInput
               value={str('ingest_method', 'http')}
@@ -981,7 +1020,17 @@ export default function Settings() {
 
       {/* Auth */}
       {tab === 'auth' && (
-        <Section title="Authentication" onSave={authSave.save} saving={authSave.saving} saved={authSave.saved} error={authSave.error}>
+        <Section title="Authentication" onSave={authSave.save} saving={authSave.saving} saved={authSave.saved} error={authSave.error}
+          help={{
+            title: 'Authentication — How It Works',
+            content: <>
+              <p><span className="text-gray-300 font-medium">Local auth</span> and <span className="text-gray-300 font-medium">SAML SSO</span> aren't mutually exclusive — both can be on at once, letting some users log in with a local password while others come through Okta. Turning Local auth off forces everyone through SSO.</p>
+              <p>SAML users are <span className="text-gray-300 font-medium">auto-provisioned</span> on first successful login — there's no separate "create user" step for SSO accounts.</p>
+              <p>Setting this up: paste Okta's IdP metadata XML into the box above to auto-fill the IdP fields, then register the <span className="text-gray-300 font-medium">ACS URL</span> shown here as the Single Sign-On URL in your Okta app. Both the ACS URL and the SP metadata link are derived from <span className="text-gray-300 font-medium">Base URL</span> on the General tab — set that correctly first, or SSO will register against the wrong address.</p>
+              <p className="text-gray-500">Okta OIDC is not a separate option here — it was deliberately dropped in favor of SAML 2.0, which already covers Okta SSO.</p>
+            </>,
+          }}
+        >
           <Field label="Local auth" hint="Username/password login using local accounts">
             <Toggle value={bool('auth_local_enabled', true)} onChange={v => set('auth_local_enabled', v)} />
           </Field>
@@ -1049,7 +1098,16 @@ export default function Settings() {
 
       {/* Notifications */}
       {tab === 'notifications' && (
-        <Section title="Notifications" onSave={notifySave.save} saving={notifySave.saving} saved={notifySave.saved} error={notifySave.error}>
+        <Section title="Notifications" onSave={notifySave.save} saving={notifySave.saving} saved={notifySave.saved} error={notifySave.error}
+          help={{
+            title: 'Notifications — How It Works',
+            content: <>
+              <p>These five channels — Slack, Email, PagerDuty, generic Webhook, and TraceCat SOAR — are what an <span className="text-gray-300 font-medium">Alert rule</span> (Alerts page) actually dispatches to when it fires. Enabling a channel here doesn't send anything by itself; it just makes the channel available for alert rules to use.</p>
+              <p><span className="text-gray-300 font-medium">Send Test</span> is a real dispatch, not a dry run — it posts to Slack, sends an actual SMTP message, fires a PagerDuty event, etc., using whatever credentials are currently filled in above (even if unsaved). Use it to confirm a webhook URL or SMTP login actually works before relying on it during a real alert.</p>
+              <p><span className="text-gray-300 font-medium">Webhook payload template</span> is Jinja2 — reference <code className="text-gray-400">alert_name</code>, <code className="text-gray-400">message</code>, <code className="text-gray-400">severity</code>, and <code className="text-gray-400">fired_at</code> to shape the JSON body sent to your endpoint.</p>
+            </>,
+          }}
+        >
           {/* Slack */}
           <div className="pt-2 pb-1">
             <p className="text-xs font-semibold text-white uppercase tracking-wider">Slack</p>
@@ -1189,7 +1247,16 @@ export default function Settings() {
 
       {/* Integrations */}
       {tab === 'integrations' && (
-        <Section title="Integrations" onSave={integrationsSave.save} saving={integrationsSave.saving} saved={integrationsSave.saved} error={integrationsSave.error}>
+        <Section title="Integrations" onSave={integrationsSave.save} saving={integrationsSave.saving} saved={integrationsSave.saved} error={integrationsSave.error}
+          help={{
+            title: 'Integrations — How It Works',
+            content: <>
+              <p><span className="text-gray-300 font-medium">Lucidchart</span> token enables the "Export to Lucidchart" action on the Topology page — it pushes the current force-directed graph straight into a new Lucidchart document via their API, rather than just downloading a static PNG/SVG.</p>
+              <p><span className="text-gray-300 font-medium">SSL/TLS</span> accepts either a combined PFX/P12 file or a separate PEM cert+key pair, drag-and-drop or click to browse — the running service auto-detects and loads whichever was uploaded at startup.</p>
+              <p><span className="text-gray-300 font-medium">pktHub Integration</span> is one-directional discovery: copy the Suite Token here into pktHub's App Manager when registering this app, so pktHub can proxy into it with users already signed in. Regenerating the token immediately revokes the old one — you'll need to re-register in pktHub afterward.</p>
+            </>,
+          }}
+        >
 
           <div className="pt-2 pb-1">
             <p className="text-xs font-semibold text-white uppercase tracking-wider">Lucidchart</p>
@@ -1785,6 +1852,15 @@ function DevicesTab({ prefillIp = '' }: { prefillIp?: string }) {
         </div>
       )}
 
+      <div className="flex items-center gap-2 mb-1">
+        <p className="text-sm font-semibold text-white">Device Registry</p>
+        <HelpButton title="Device Registry — How It Works">
+          <p>This is the <span className="text-gray-300 font-medium">ingest allowlist</span>, not just a labeling table — flows from a sampler IP that's absent here, or present but not marked Allowed, are dropped before storage entirely. They never reach the database, and won't show up unlabeled either; they simply don't exist as far as the rest of the app is concerned.</p>
+          <p>The registry is <span className="text-gray-300 font-medium">warmed into memory at process startup</span>, so adding or enabling a device takes effect immediately without a restart — but if the service itself was just restarted, a brand-new sampler won't be recognized until the registry finishes its first load.</p>
+          <p><span className="text-gray-300 font-medium">Unknown samplers</span> above lists IPs actively sending flows that aren't yet registered — click Register to pre-fill the add form with that IP, or Dismiss to silence it without adding it (dismissed IPs stay excluded from ingest).</p>
+          <p>CSV import/export and the downloadable template are for bulk provisioning — useful when onboarding many collectors at once instead of adding them one by one.</p>
+        </HelpButton>
+      </div>
       <p className="text-xs text-gray-500 mb-3">
         Gateway for what's allowed to persist — a sampler can be sending flows on the wire, but
         nothing is stored unless its IP is listed here and marked Allowed.
@@ -2223,7 +2299,14 @@ function SiteGroupsSection({ isAdmin }: { isAdmin: boolean }) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-semibold text-white">Site Groups</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-white">Site Groups</p>
+            <HelpButton title="Site Groups — How It Works">
+              <p>A Site Group's <span className="text-gray-300 font-medium">Key</span> is what an Address Mapping's <code className="text-gray-400">group_name</code> field references — renaming the key here without updating existing mappings will leave them pointing at a group that no longer matches.</p>
+              <p>Each group carries <span className="text-gray-300 font-medium">two independent color pairs</span>: fill/stroke controls the Geo Map circle marker for that site, while badge background/text controls how the group's name is displayed as a pill elsewhere in Settings — they don't have to match.</p>
+              <p><span className="text-gray-300 font-medium">Show in legend</span> only affects the Geo Map's Sites legend section — a group with it off still renders on the map, it just isn't listed as a key.</p>
+            </HelpButton>
+          </div>
           <p className="text-xs text-gray-400 mt-0.5">Define the group names and colours for Geo Map circle markers and Settings badges.</p>
         </div>
         {isAdmin && !showAdd && !editId && (
@@ -2442,7 +2525,13 @@ function LineStylesSection({ isAdmin }: { isAdmin: boolean }) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-semibold text-white">Line Style Catalog</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-white">Line Style Catalog</p>
+            <HelpButton title="Line Style Catalog — How It Works">
+              <p>This is a shared catalog, not per-rule styling — a style defined here (color + dash pattern) can be assigned to any number of Traffic Rules below. Editing a style's color or dash pattern updates every arc on the Geo Map drawn by a rule using it, all at once.</p>
+              <p>Deleting a style that's still assigned to a Traffic Rule doesn't break the rule — matching arcs just fall back to the same neutral gray line used for traffic that matches no rule at all.</p>
+            </HelpButton>
+          </div>
           <p className="text-xs text-gray-400 mt-0.5">Define arc line styles (color + dash pattern) that can be assigned to traffic types.</p>
         </div>
         {isAdmin && !showAdd && !editId && (
@@ -2605,31 +2694,6 @@ const DragHandle = () => (
     <circle cx="9" cy="18" r="1.5" /><circle cx="15" cy="18" r="1.5" />
   </svg>
 )
-
-function HelpButton({ title, children }: { title: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} title="How this works"
-        className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-blue-500 text-blue-400 hover:text-white hover:border-blue-400 hover:bg-blue-500 text-[10px] font-semibold leading-none transition-colors flex-shrink-0">
-        ?
-      </button>
-      {open && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setOpen(false)}>
-          <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-xl p-6 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-white">{title}</h2>
-              <button onClick={() => setOpen(false)} className="text-gray-500 hover:text-white text-lg leading-none">×</button>
-            </div>
-            <div className="text-sm text-gray-400 space-y-3">
-              {children}
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  )
-}
 
 function LineStylePreview({ lineStyles, id }: { lineStyles: LineStyle[]; id: number | null }) {
   if (!id) return <span className="text-xs text-gray-500">—</span>
@@ -3239,6 +3303,14 @@ function UsersTab() {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <p className="text-sm font-semibold text-white">Users</p>
+        <HelpButton title="Users — How It Works">
+          <p>Three roles: <span className="text-gray-300 font-medium">admin</span> (full access, including this Users tab and all Settings), <span className="text-gray-300 font-medium">analyst</span> (read access plus export — Flow Explorer CSV/JSON, device CSV, etc.), and <span className="text-gray-300 font-medium">viewer</span> (read-only, no export).</p>
+          <p>This tab only manages <span className="text-gray-300 font-medium">local accounts</span> — SAML/Okta SSO users are auto-provisioned on first login and managed in Okta itself, not here.</p>
+          <p><span className="text-gray-300 font-medium">Deactivate</span> blocks login immediately without deleting the account or its history — prefer it over Delete for someone who's just leaving temporarily, since Delete is permanent.</p>
+        </HelpButton>
+      </div>
       <div className="flex items-center gap-3 flex-wrap">
         <p className="text-xs text-gray-500">Local accounts only — Okta SSO users are managed in Okta</p>
         <div className="flex items-center gap-2 ml-auto">
