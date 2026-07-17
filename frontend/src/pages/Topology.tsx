@@ -8,6 +8,7 @@ import * as d3 from 'd3'
 import { useNavigate } from 'react-router-dom'
 import { api, TopologyNode, TopologyEdge, DeviceSummary } from '../api/client'
 import { protoShort } from '../utils/protocols'
+import IpLink from '../components/IpLink'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -659,7 +660,7 @@ export default function Topology() {
               )}
               {selected.site && <span className="text-xs text-white">{selected.site}</span>}
             </div>
-            <p className="text-sm font-mono text-white">{selected.id}</p>
+            <IpLink ip={selected.id} className="text-sm font-mono text-white" />
             <div className="flex gap-6 mt-2 text-sm">
               <div>
                 <p className="text-xs text-white">Total bytes</p>
