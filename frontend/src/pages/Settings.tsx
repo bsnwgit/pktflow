@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { api, DeviceSummary, User, UserIn, SslStatus, AddressMapping, AddressMappingIn, TrafficRule, TrafficRuleIn, SiteGroup, SiteGroupIn, LineStyle, LineStyleIn, UserApiKey } from '../api/client'
+import { api, DeviceSummary, User, UserIn, SslStatus, AddressMapping, AddressMappingIn, TrafficRule, TrafficRuleIn, SiteGroup, SiteGroupIn, LineStyle, LineStyleIn, UserApiKey, Integration, IntegrationInput } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import { useAuth } from '../store/auth'
 import HelpButton from '../components/HelpButton'
@@ -114,6 +114,20 @@ function RestartServiceRow() {
         )}
       </div>
     </div>
+  )
+}
+
+// ── Port field — lives in config.yaml, not the SQLite-backed settings; value
+// is lifted to the parent so it saves through the General tab's one Save button ──
+function PortField({ value, onChange, loaded }: { value: number; onChange: (v: number) => void; loaded: boolean }) {
+  return (
+    <Field label="Port" hint="Port the app listens on. Requires a service restart — the browser will need to follow the app to the new port/URL afterward.">
+      {!loaded ? (
+        <p className="text-xs text-white">Loading…</p>
+      ) : (
+        <NumberInput value={value} onChange={onChange} min={1} max={65535} />
+      )}
+    </Field>
   )
 }
 
@@ -329,20 +343,34 @@ function MetadataPasteBox({ onParsed }: {
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
-type TabId = 'general' | 'storage' | 'backup' | 'ingest' | 'auth' | 'notifications' | 'devices' | 'integrations' | 'users' | 'vpnmappings' | 'apikeys'
+type TabId = 'general' | 'security' | 'data' | 'notifications' | 'apikeys' | 'devices' | 'vpnmappings' | 'ingest'
 
-const TABS: Array<{ id: TabId; label: string; adminOnly?: boolean }> = [
+const TABS: Array<{ id: TabId; label: string; adminOnly?: boolean; gapBefore?: boolean }> = [
   { id: 'general',       label: 'General' },
-  { id: 'devices',       label: 'Collectors' },
-  { id: 'vpnmappings',   label: 'Geo Map',       adminOnly: true },
-  { id: 'storage',       label: 'Storage' },
-  { id: 'backup',        label: 'Backup' },
-  { id: 'ingest',        label: 'Ingest' },
-  { id: 'auth',          label: 'Auth' },
+  { id: 'security',      label: 'Security' },
+  { id: 'data',          label: 'Data' },
   { id: 'notifications', label: 'Notifications' },
-  { id: 'integrations',  label: 'Integrations' },
-  { id: 'apikeys',       label: 'API Keys' },
-  { id: 'users',         label: 'Users', adminOnly: true },
+  { id: 'apikeys',       label: 'User Keys' },
+  { id: 'devices',       label: 'Collectors', gapBefore: true },
+  { id: 'vpnmappings',   label: 'Geo Map',    adminOnly: true },
+  { id: 'ingest',        label: 'Ingest' },
+]
+
+// ── Security tab — its own left-hand vertical tab strip ──────────────────────
+type SecurityTabId = 'users' | 'auth' | 'suite' | 'ai' | 'ssl'
+const SECURITY_TABS: Array<{ id: SecurityTabId; label: string; adminOnly?: boolean }> = [
+  { id: 'users', label: 'Users', adminOnly: true },
+  { id: 'auth',  label: 'Auth' },
+  { id: 'suite', label: 'Suite Integration' },
+  { id: 'ai',    label: 'AI Assistant' },
+  { id: 'ssl',   label: 'SSL / TLS' },
+]
+
+// ── Data tab — its own left-hand vertical tab strip ───────────────────────────
+type DataTabId = 'storage' | 'backups'
+const DATA_TABS: Array<{ id: DataTabId; label: string }> = [
+  { id: 'storage', label: 'Storage' },
+  { id: 'backups', label: 'Backups' },
 ]
 
 // ── SAML IdP metadata parser ──────────────────────────────────────────────────
@@ -378,6 +406,180 @@ function parseIdpMetadata(xml: string): {
   }
 }
 
+
+// ── Sibling pkt apps (outbound) ─────────────────────────────────────────────────
+// Named connections to sibling pkt* apps pktflow pulls data from — currently
+// just pktIPAM, for the internal-IP lookup in IpLink.tsx. Ported from
+// pktIPAM's own "sibling pkt apps" pattern (there: pktIPAM -> pktsnmp).
+const APP_LABELS: Record<string, string> = {
+  pktipam: 'pktIPAM',
+}
+
+interface IntegrationFormState {
+  name: string; app_name: string; base_url: string; suite_token: string
+}
+
+const EMPTY_INTEGRATION: IntegrationFormState = { name: '', app_name: 'pktipam', base_url: '', suite_token: '' }
+
+function IntegrationFormModal({ integration, onClose, onSaved }: {
+  integration: Integration | null; onClose: () => void; onSaved: () => void
+}) {
+  const editing = !!integration
+  const [form, setForm] = useState<IntegrationFormState>(
+    editing ? { name: integration!.name, app_name: integration!.app_name, base_url: integration!.base_url, suite_token: '' }
+            : { ...EMPTY_INTEGRATION }
+  )
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const setF = <K extends keyof IntegrationFormState>(k: K, v: IntegrationFormState[K]) => setForm(f => ({ ...f, [k]: v }))
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      if (editing) {
+        const body: Partial<IntegrationInput> = { name: form.name, base_url: form.base_url }
+        if (form.suite_token) body.suite_token = form.suite_token
+        await api.updateIntegration(integration!.id, body)
+      } else {
+        await api.createIntegration(form)
+      }
+      onSaved()
+    } catch (e: any) {
+      setError(e.message ?? 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const inp = 'w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500'
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-white mb-5">{editing ? `Edit — ${integration!.name}` : 'Add pktIPAM Connection'}</h2>
+        <form onSubmit={submit} className="space-y-4">
+          <div>
+            <label className="text-xs text-white block mb-1">Name *</label>
+            <input value={form.name} onChange={e => setF('name', e.target.value)} required autoFocus
+              placeholder="e.g. Main pktIPAM" className={inp} />
+          </div>
+          <div>
+            <label className="text-xs text-white block mb-1">Base URL *</label>
+            <input value={form.base_url} onChange={e => setF('base_url', e.target.value)} required
+              placeholder="http://aiserver:8761" className={inp} />
+          </div>
+          <div>
+            <label className="text-xs text-white block mb-1">Suite Token {editing ? '(leave blank to keep)' : '*'}</label>
+            <input type="password" value={form.suite_token} onChange={e => setF('suite_token', e.target.value)}
+              required={!editing} placeholder="From that pktIPAM's Settings -> Integrations -> Suite Integration" className={inp} />
+          </div>
+          {error && <p className="text-red-400 text-xs">{error}</p>}
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-white">Cancel</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg disabled:opacity-50">
+              {saving ? 'Saving…' : (editing ? 'Save Changes' : 'Add Connection')}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function SiblingIntegrations() {
+  const [items, setItems] = useState<Integration[]>([])
+  const [loading, setLoading] = useState(true)
+  const [modal, setModal] = useState<'new' | Integration | null>(null)
+  const [confirm, setConfirm] = useState<Integration | null>(null)
+  const [testResult, setTestResult] = useState<Record<number, string>>({})
+  const [error, setError] = useState('')
+
+  const load = () => {
+    setLoading(true)
+    api.getIntegrations().then(setItems).catch(e => setError(e.message)).finally(() => setLoading(false))
+  }
+  useEffect(load, [])
+
+  const del = async (i: Integration) => {
+    try {
+      await api.deleteIntegration(i.id)
+      setConfirm(null)
+      load()
+    } catch (e: any) {
+      setError(e.message)
+    }
+  }
+
+  const test = async (i: Integration) => {
+    try {
+      const result = await api.testIntegration(i.id)
+      setTestResult(prev => ({ ...prev, [i.id]: result.healthy ? `OK — ${result.detail}` : `Failed — ${result.detail}` }))
+    } catch (e: any) {
+      setTestResult(prev => ({ ...prev, [i.id]: `Failed — ${e.message}` }))
+    }
+    load()
+  }
+
+  if (loading) return <p className="text-xs text-white animate-pulse py-3">Loading…</p>
+
+  return (
+    <div className="space-y-3 py-3">
+      {error && (
+        <div className="bg-red-900/30 border border-red-700/50 text-red-400 text-sm rounded-lg px-4 py-2 flex items-center justify-between">
+          {error}<button onClick={() => setError('')} className="ml-4 text-red-600 hover:text-red-400">✕</button>
+        </div>
+      )}
+
+      {items.map(i => (
+        <div key={i.id} className="bg-gray-800/40 border border-gray-800 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <p className="text-sm font-medium text-white">{i.name}</p>
+              <p className="text-xs text-white">{APP_LABELS[i.app_name] ?? i.app_name} · {i.base_url || 'no URL set'}</p>
+            </div>
+            <span className={i.health_status === 'ok' ? 'text-xs text-emerald-400' : 'text-xs text-white'}>{i.health_status}</span>
+          </div>
+          <div className="flex items-center gap-3 mt-2">
+            <button onClick={() => test(i)} className="text-xs text-white border border-gray-700 rounded-lg px-3 py-1.5 hover:bg-gray-800">Test Connection</button>
+            <button onClick={() => setModal(i)} className="text-xs text-white hover:text-blue-400">Edit</button>
+            <button onClick={() => setConfirm(i)} className="text-xs text-white hover:text-red-400">Delete</button>
+            {testResult[i.id] && <span className="text-xs text-white">{testResult[i.id]}</span>}
+          </div>
+        </div>
+      ))}
+      {items.length === 0 && <p className="text-sm text-white py-2">No pktIPAM connections yet.</p>}
+
+      <button onClick={() => setModal('new')}
+        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors">
+        <span className="text-base leading-none">+</span> Add Connection
+      </button>
+
+      {modal !== null && (
+        <IntegrationFormModal integration={modal === 'new' ? null : modal} onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); load() }} />
+      )}
+
+      {confirm && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setConfirm(null)}>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-sm w-full" onClick={e => e.stopPropagation()}>
+            <h3 className="text-white font-semibold mb-2">Delete connection?</h3>
+            <p className="text-white text-sm mb-5">
+              Remove <strong className="text-white">{confirm.name}</strong>? Internal-IP lookups will fall back to
+              any other enabled pktIPAM connection, or stop working if this was the only one.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setConfirm(null)} className="px-4 py-2 text-sm text-white">Cancel</button>
+              <button onClick={() => del(confirm)} className="px-4 py-2 text-sm bg-red-600 hover:bg-red-500 text-white rounded-lg">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+// ── End Sibling pkt apps ──────────────────────────────────────────────────────
 
 // ── Suite Integration component ───────────────────────────────────────────────
 function PktHubTokenDisplay() {
@@ -476,6 +678,8 @@ export default function Settings() {
   const isAdmin               = me?.role === 'admin'
   const [searchParams]        = useSearchParams()
   const [tab, setTab]         = useState<TabId>((searchParams.get('tab') as TabId) || 'general')
+  const [securityTab, setSecurityTab] = useState<SecurityTabId>(isAdmin ? 'users' : 'auth')
+  const [dataTab, setDataTab] = useState<DataTabId>('storage')
   // Deep-link from an "Unknown sampler" alert event — pre-fills the
   // add-device form on the Devices tab; the user still decides the rest of
   // the fields and clicks Save themselves.
@@ -517,7 +721,37 @@ export default function Settings() {
   const bool = (k: string, fallback = false) => (settings[k] as boolean) ?? fallback
 
   // Per-tab save helpers
-  const generalSave = useSave(['app_name', 'base_url', 'timezone', 'anthropic_api_key', 'ai_model'], settings, load)
+  // General tab's Port field lives in config.yaml (not the SQLite settings
+  // blob) so it needs its own fetch, but saves through the same one button.
+  const [portValue, setPortValue]   = useState(0)
+  const [portLoaded, setPortLoaded] = useState(false)
+  useEffect(() => {
+    api.getPort().then(r => setPortValue(r.port)).catch(() => {}).finally(() => setPortLoaded(true))
+  }, [])
+
+  const [generalSaving, setGeneralSaving] = useState(false)
+  const [generalSaved, setGeneralSaved]   = useState(false)
+  const [generalError, setGeneralError]   = useState('')
+
+  const saveGeneral = async () => {
+    if (portValue < 1 || portValue > 65535) { setGeneralError('Enter a port between 1 and 65535'); return }
+    setGeneralSaving(true); setGeneralSaved(false); setGeneralError('')
+    try {
+      const subset: Settings = {}
+      for (const k of ['app_name', 'base_url', 'timezone']) if (k in settings) subset[k] = settings[k]
+      await api.bulkUpdateSettings(subset)
+      await api.setPort(portValue)
+      await load()
+      setGeneralSaved(true)
+      setTimeout(() => setGeneralSaved(false), 3000)
+    } catch (e: any) {
+      setGeneralError(e.message || 'Save failed')
+    } finally {
+      setGeneralSaving(false)
+    }
+  }
+
+  const aiAssistantSave = useSave(['anthropic_api_key', 'ai_model'], settings, load)
   const storageSave = useSave([
     'storage_backend', 'retention_days_raw', 'retention_days_hourly', 'alert_event_retention_days',
   ], settings, load)
@@ -652,10 +886,7 @@ export default function Settings() {
     'notify_webhook_method', 'notify_webhook_payload_template',
     'notify_tracecat_enabled', 'notify_tracecat_webhook_url', 'notify_tracecat_api_token',
   ], settings, load)
-  const integrationsSave = useSave(
-    ['lucid_api_token', 'ssl_enabled', 'ssl_certfile', 'ssl_keyfile'],
-    settings, load
-  )
+  const lucidSave = useSave(['lucid_api_token'], settings, load)
 
   const { tick } = useAutoRefresh()
   useEffect(() => { if (tick > 0) silentLoad() }, [tick])
@@ -673,36 +904,35 @@ export default function Settings() {
       <h1 className="text-xl font-bold text-white">Settings</h1>
 
       {/* Tab bar */}
-      <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit overflow-x-auto">
+      <div className="flex items-center gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit overflow-x-auto">
         {TABS.filter(t => !t.adminOnly || isAdmin).map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`text-sm px-4 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
-              tab === t.id ? 'bg-gray-700 text-white' : 'text-white hover:text-white'
-            }`}
-          >
-            {t.label}
-          </button>
+          <Fragment key={t.id}>
+            {t.gapBefore && <div className="w-px self-stretch bg-gray-700 mx-2" />}
+            <button
+              onClick={() => setTab(t.id)}
+              className={`text-sm px-4 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
+                tab === t.id ? 'bg-gray-700 text-white' : 'text-white hover:text-white'
+              }`}
+            >
+              {t.label}
+            </button>
+          </Fragment>
         ))}
       </div>
 
       {/* General */}
       {tab === 'general' && (
-        <Section title="General" onSave={generalSave.save} saving={generalSave.saving} saved={generalSave.saved} error={generalSave.error}
+        <Section title="General" onSave={saveGeneral} saving={generalSaving} saved={generalSaved} error={generalError}
           help={{
             title: 'General — How It Works',
             content: <>
               <p><span className="text-gray-300 font-medium">Base URL</span> isn't cosmetic — it's baked into things other systems call back to: the SAML ACS/metadata URLs shown on the Auth tab, and any links posted in Slack/Email/webhook notifications. Set it to the actual externally-reachable address before configuring SSO or notifications, or those integrations will point at the wrong place.</p>
-              <p><span className="text-gray-300 font-medium">AI Assistant</span> needs its own Anthropic API key (from console.anthropic.com — separate from a Claude Enterprise seat) before the in-app chat panel will do anything. Haiku is the default model: fastest and cheapest for flow-context questions; switch to Sonnet or Opus only if you need deeper reasoning over larger flow contexts.</p>
+              <p><span className="text-gray-300 font-medium">Port</span> only takes effect after a restart. Changing it moves the app to a new URL; the browser won't follow automatically.</p>
             </>,
           }}
         >
           <Field label="App name" hint="Displayed in browser tab and header">
             <TextInput value={str('app_name', 'pktFlow')} onChange={v => set('app_name', v)} />
-          </Field>
-          <Field label="Base URL" hint="Used for redirect URIs and notification links">
-            <TextInput value={str('base_url')} onChange={v => set('base_url', v)} placeholder="http://<APP_SERVER_IP>:8080" />
           </Field>
           <Field label="Timezone" hint="Affects display of timestamps in the UI">
             <SelectInput
@@ -717,41 +947,209 @@ export default function Settings() {
               ]}
             />
           </Field>
-
-          <div className="pt-4 pb-1">
-            <p className="text-xs font-semibold text-white uppercase tracking-wider">
-              AI Assistant (Claude)
-            </p>
-          </div>
-          <Field
-            label="Anthropic API key"
-            hint="Required for the in-app AI assistant. Get a key at console.anthropic.com. Separate from Claude Enterprise."
-          >
-            <TextInput
-              value={str('anthropic_api_key')}
-              onChange={v => set('anthropic_api_key', v)}
-              placeholder="sk-ant-…"
-              secret
-              mono
-            />
-          </Field>
-          <Field label="AI model" hint="Model used for the assistant. Haiku is fast and cost-effective.">
-            <SelectInput
-              value={str('ai_model', 'claude-haiku-4-5-20251001')}
-              onChange={v => set('ai_model', v)}
-              options={[
-                { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku (fast, low cost)' },
-                { value: 'claude-sonnet-4-6', label: 'Claude Sonnet (balanced)' },
-                { value: 'claude-opus-4-8', label: 'Claude Opus (most capable)' },
-              ]}
-            />
+          <PortField value={portValue} onChange={setPortValue} loaded={portLoaded} />
+          <Field label="Base URL" hint="Used for redirect URIs and notification links">
+            <TextInput value={str('base_url')} onChange={v => set('base_url', v)} placeholder="http://<APP_SERVER_IP>:8080" />
           </Field>
           <RestartServiceRow />
         </Section>
       )}
 
-      {/* Storage */}
-      {tab === 'storage' && (
+      {/* Security */}
+      {tab === 'security' && (
+        <div className="flex gap-4 items-start">
+          <div className="flex flex-col gap-1.5 w-48 flex-shrink-0">
+            {SECURITY_TABS.filter(st => !st.adminOnly || isAdmin).map(st => (
+              <button
+                key={st.id}
+                onClick={() => setSecurityTab(st.id)}
+                className={`text-sm px-4 py-2 rounded-lg border text-left whitespace-nowrap transition-colors ${
+                  securityTab === st.id
+                    ? 'bg-gray-800 border-blue-500 text-white'
+                    : 'bg-gray-900 border-gray-800 text-white hover:border-gray-600'
+                }`}
+              >
+                {st.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex-1 min-w-0">
+            {securityTab === 'users' && isAdmin && <UsersTab />}
+
+            {securityTab === 'auth' && (
+              <Section title="Authentication" onSave={authSave.save} saving={authSave.saving} saved={authSave.saved} error={authSave.error}
+                help={{
+                  title: 'Authentication — How It Works',
+                  content: <>
+                    <p><span className="text-gray-300 font-medium">Local auth</span> and <span className="text-gray-300 font-medium">SAML SSO</span> aren't mutually exclusive — both can be on at once, letting some users log in with a local password while others come through Okta. Turning Local auth off forces everyone through SSO.</p>
+                    <p>SAML users are <span className="text-gray-300 font-medium">auto-provisioned</span> on first successful login — there's no separate "create user" step for SSO accounts.</p>
+                    <p>Setting this up: paste Okta's IdP metadata XML into the box above to auto-fill the IdP fields, then register the <span className="text-gray-300 font-medium">ACS URL</span> shown here as the Single Sign-On URL in your Okta app. Both the ACS URL and the SP metadata link are derived from <span className="text-gray-300 font-medium">Base URL</span> on the General tab — set that correctly first, or SSO will register against the wrong address.</p>
+                    <p className="text-gray-500">Okta OIDC is not a separate option here — it was deliberately dropped in favor of SAML 2.0, which already covers Okta SSO.</p>
+                  </>,
+                }}
+              >
+                <Field label="Local auth" hint="Username/password login using local accounts">
+                  <Toggle value={bool('auth_local_enabled', true)} onChange={v => set('auth_local_enabled', v)} />
+                </Field>
+                <Field label="Session timeout">
+                  <div className="flex items-center gap-3">
+                    <NumberInput value={num('session_timeout_minutes', 480)} onChange={v => set('session_timeout_minutes', v)} min={5} max={10080} />
+                    <span className="text-sm text-white">minutes</span>
+                  </div>
+                </Field>
+
+                <div className="pt-4 pb-2">
+                  <p className="text-xs font-semibold text-white uppercase tracking-wider">Okta SAML 2.0 SSO</p>
+                </div>
+                <Field label="Enable SAML SSO">
+                  <Toggle value={bool('okta_saml_enabled')} onChange={v => set('okta_saml_enabled', v)} />
+                </Field>
+                {bool('okta_saml_enabled') && (
+                  <>
+                    {/* ── Metadata paste helper ── */}
+                    <Field label="Paste IdP Metadata XML" hint="Paste the full XML from Okta → Sign On → Identity Provider metadata. Fields below will auto-fill.">
+                      <MetadataPasteBox onParsed={(r) => {
+                        if (r.entity_id) set('okta_saml_idp_entity_id', r.entity_id)
+                        if (r.sso_url)   set('okta_saml_idp_sso_url', r.sso_url)
+                        if (r.cert)      set('okta_saml_idp_cert', r.cert)
+                      }} />
+                    </Field>
+
+                    <Field label="IdP Entity ID" hint="From Okta metadata: Identity Provider Issuer">
+                      <TextInput value={str('okta_saml_idp_entity_id')} onChange={v => set('okta_saml_idp_entity_id', v)} placeholder="http://www.okta.com/..." mono />
+                    </Field>
+                    <Field label="IdP SSO URL" hint="From Okta metadata: Identity Provider Single Sign-On URL">
+                      <TextInput value={str('okta_saml_idp_sso_url')} onChange={v => set('okta_saml_idp_sso_url', v)} placeholder="https://yourorg.okta.com/app/.../sso/saml" mono />
+                    </Field>
+                    <Field label="IdP X.509 Certificate" hint="PEM headers are stripped automatically">
+                      <CertTextarea value={str('okta_saml_idp_cert')} onChange={v => set('okta_saml_idp_cert', v)} rows={4} secret />
+                    </Field>
+                    <Field label="SP Entity ID" hint="Leave blank to use the auto-generated metadata URL">
+                      <TextInput value={str('okta_saml_sp_entity_id')} onChange={v => set('okta_saml_sp_entity_id', v)} placeholder={`${str('base_url')}/api/auth/saml/metadata`} mono />
+                    </Field>
+                    <Field label="ACS URL (read-only)" hint="Register this URL as the Single Sign-On URL in your Okta app">
+                      <div className="flex items-center gap-2">
+                        <input
+                          readOnly
+                          value={`${str('base_url')}/api/auth/saml/callback`}
+                          className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-400 font-mono cursor-default"
+                        />
+                        <a
+                          href={`${str('base_url')}/api/auth/saml/metadata`}
+                          className="text-xs text-blue-400 hover:text-blue-300 whitespace-nowrap"
+                        >
+                          View SP metadata ↗
+                        </a>
+                      </div>
+                    </Field>
+                    <Field label="SP Certificate" hint="Optional: for signed authentication requests">
+                      <CertTextarea value={str('okta_saml_sp_cert')} onChange={v => set('okta_saml_sp_cert', v)} rows={3} placeholder="Leave blank if not signing requests" secret />
+                    </Field>
+                    <Field label="SP Private Key" hint="Optional: private key for signing requests (kept secret)">
+                      <CertTextarea value={str('okta_saml_sp_key')} onChange={v => set('okta_saml_sp_key', v)} rows={3} placeholder="Leave blank if not signing requests" secret />
+                    </Field>
+                  </>
+                )}
+              </Section>
+            )}
+
+            {securityTab === 'suite' && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl px-6 py-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <h2 className="text-sm font-semibold text-white">Suite Integration</h2>
+                  <HelpButton title="Suite Integration — How It Works">
+                    <p>One-directional discovery: copy the Suite Token here into pktHub's App Manager when registering this app, so pktHub can proxy into it with users already signed in. Regenerating the token immediately revokes the old one — you'll need to re-register in pktHub afterward.</p>
+                  </HelpButton>
+                </div>
+                <PktHubTokenDisplay />
+              </div>
+            )}
+
+            {securityTab === 'suite' && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl px-6 py-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <h2 className="text-sm font-semibold text-white">Sibling pkt Apps</h2>
+                  <HelpButton title="Sibling pkt Apps — How It Works">
+                    <p>The other direction from the Suite Token above: pktflow calling into pktIPAM to look up internal (private) IP addresses — subnet, hostname, DHCP lease, DNS records — the same way it already looks up external IPs via ipinfo.io/AbuseIPDB.</p>
+                    <p className="mt-2">In pktIPAM, go to Settings &#8594; Integrations &#8594; Suite Integration and copy its Suite Token, then add a connection here with pktIPAM's base URL and that token. You can add more than one named pktIPAM connection; the first enabled one is used for lookups.</p>
+                  </HelpButton>
+                </div>
+                <SiblingIntegrations />
+              </div>
+            )}
+
+            {securityTab === 'ai' && (
+              <Section title="AI Assistant" onSave={aiAssistantSave.save} saving={aiAssistantSave.saving} saved={aiAssistantSave.saved} error={aiAssistantSave.error}
+                help={{
+                  title: 'AI Assistant — How It Works',
+                  content: <>
+                    <p><span className="text-gray-300 font-medium">AI Assistant</span> needs its own Anthropic API key (from console.anthropic.com — separate from a Claude Enterprise seat) before the in-app chat panel will do anything. Haiku is the default model: fastest and cheapest for flow-context questions; switch to Sonnet or Opus only if you need deeper reasoning over larger flow contexts.</p>
+                  </>,
+                }}
+              >
+                <Field
+                  label="Anthropic API key"
+                  hint="Required for the in-app AI assistant. Get a key at console.anthropic.com. Separate from Claude Enterprise."
+                >
+                  <TextInput
+                    value={str('anthropic_api_key')}
+                    onChange={v => set('anthropic_api_key', v)}
+                    placeholder="sk-ant-…"
+                    secret
+                    mono
+                  />
+                </Field>
+                <Field label="AI model" hint="Model used for the assistant. Haiku is fast and cost-effective.">
+                  <SelectInput
+                    value={str('ai_model', 'claude-haiku-4-5-20251001')}
+                    onChange={v => set('ai_model', v)}
+                    options={[
+                      { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku (fast, low cost)' },
+                      { value: 'claude-sonnet-5', label: 'Claude Sonnet (balanced)' },
+                      { value: 'claude-opus-4-8', label: 'Claude Opus (most capable)' },
+                    ]}
+                  />
+                </Field>
+              </Section>
+            )}
+
+            {securityTab === 'ssl' && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl px-6 py-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <h2 className="text-sm font-semibold text-white">SSL / TLS</h2>
+                  <HelpButton title="SSL/TLS — How It Works">
+                    <p>Accepts either a combined PFX/P12 file or a separate PEM cert+key pair, drag-and-drop or click to browse — the running service auto-detects and loads whichever was uploaded at startup.</p>
+                  </HelpButton>
+                </div>
+                <SslPanel />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Data */}
+      {tab === 'data' && (
+        <div className="flex gap-4 items-start">
+          <div className="flex flex-col gap-1.5 w-48 flex-shrink-0">
+            {DATA_TABS.map(dt => (
+              <button
+                key={dt.id}
+                onClick={() => setDataTab(dt.id)}
+                className={`text-sm px-4 py-2 rounded-lg border text-left whitespace-nowrap transition-colors ${
+                  dataTab === dt.id
+                    ? 'bg-gray-800 border-blue-500 text-white'
+                    : 'bg-gray-900 border-gray-800 text-white hover:border-gray-600'
+                }`}
+              >
+                {dt.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex-1 min-w-0">
+      {dataTab === 'storage' && (
         <Section title="Storage" onSave={storageSave.save} saving={storageSave.saving} saved={storageSave.saved} error={storageSave.error}
           help={{
             title: 'Storage — How It Works',
@@ -826,7 +1224,7 @@ export default function Settings() {
       )}
 
       {/* Backup */}
-      {tab === 'backup' && (
+      {dataTab === 'backups' && (
         <Section title="Backup" onSave={backupSave.save} saving={backupSave.saving} saved={backupSave.saved} error={backupSave.error}
           help={{
             title: 'Backup — How It Works',
@@ -947,6 +1345,9 @@ export default function Settings() {
           </Field>
         </Section>
       )}
+          </div>
+        </div>
+      )}
 
       {/* Ingest */}
       {tab === 'ingest' && (
@@ -1014,84 +1415,6 @@ export default function Settings() {
                 <span className="text-sm text-white">flows</span>
               </div>
             </Field>
-          )}
-        </Section>
-      )}
-
-      {/* Auth */}
-      {tab === 'auth' && (
-        <Section title="Authentication" onSave={authSave.save} saving={authSave.saving} saved={authSave.saved} error={authSave.error}
-          help={{
-            title: 'Authentication — How It Works',
-            content: <>
-              <p><span className="text-gray-300 font-medium">Local auth</span> and <span className="text-gray-300 font-medium">SAML SSO</span> aren't mutually exclusive — both can be on at once, letting some users log in with a local password while others come through Okta. Turning Local auth off forces everyone through SSO.</p>
-              <p>SAML users are <span className="text-gray-300 font-medium">auto-provisioned</span> on first successful login — there's no separate "create user" step for SSO accounts.</p>
-              <p>Setting this up: paste Okta's IdP metadata XML into the box above to auto-fill the IdP fields, then register the <span className="text-gray-300 font-medium">ACS URL</span> shown here as the Single Sign-On URL in your Okta app. Both the ACS URL and the SP metadata link are derived from <span className="text-gray-300 font-medium">Base URL</span> on the General tab — set that correctly first, or SSO will register against the wrong address.</p>
-              <p className="text-gray-500">Okta OIDC is not a separate option here — it was deliberately dropped in favor of SAML 2.0, which already covers Okta SSO.</p>
-            </>,
-          }}
-        >
-          <Field label="Local auth" hint="Username/password login using local accounts">
-            <Toggle value={bool('auth_local_enabled', true)} onChange={v => set('auth_local_enabled', v)} />
-          </Field>
-          <Field label="Session timeout">
-            <div className="flex items-center gap-3">
-              <NumberInput value={num('session_timeout_minutes', 480)} onChange={v => set('session_timeout_minutes', v)} min={5} max={10080} />
-              <span className="text-sm text-white">minutes</span>
-            </div>
-          </Field>
-
-          <div className="pt-4 pb-2">
-            <p className="text-xs font-semibold text-white uppercase tracking-wider">Okta SAML 2.0 SSO</p>
-          </div>
-          <Field label="Enable SAML SSO">
-            <Toggle value={bool('okta_saml_enabled')} onChange={v => set('okta_saml_enabled', v)} />
-          </Field>
-          {bool('okta_saml_enabled') && (
-            <>
-              {/* ── Metadata paste helper ── */}
-              <Field label="Paste IdP Metadata XML" hint="Paste the full XML from Okta → Sign On → Identity Provider metadata. Fields below will auto-fill.">
-                <MetadataPasteBox onParsed={(r) => {
-                  if (r.entity_id) set('okta_saml_idp_entity_id', r.entity_id)
-                  if (r.sso_url)   set('okta_saml_idp_sso_url', r.sso_url)
-                  if (r.cert)      set('okta_saml_idp_cert', r.cert)
-                }} />
-              </Field>
-
-              <Field label="IdP Entity ID" hint="From Okta metadata: Identity Provider Issuer">
-                <TextInput value={str('okta_saml_idp_entity_id')} onChange={v => set('okta_saml_idp_entity_id', v)} placeholder="http://www.okta.com/..." mono />
-              </Field>
-              <Field label="IdP SSO URL" hint="From Okta metadata: Identity Provider Single Sign-On URL">
-                <TextInput value={str('okta_saml_idp_sso_url')} onChange={v => set('okta_saml_idp_sso_url', v)} placeholder="https://yourorg.okta.com/app/.../sso/saml" mono />
-              </Field>
-              <Field label="IdP X.509 Certificate" hint="PEM headers are stripped automatically">
-                <CertTextarea value={str('okta_saml_idp_cert')} onChange={v => set('okta_saml_idp_cert', v)} rows={4} secret />
-              </Field>
-              <Field label="SP Entity ID" hint="Leave blank to use the auto-generated metadata URL">
-                <TextInput value={str('okta_saml_sp_entity_id')} onChange={v => set('okta_saml_sp_entity_id', v)} placeholder={`${str('base_url')}/api/auth/saml/metadata`} mono />
-              </Field>
-              <Field label="ACS URL (read-only)" hint="Register this URL as the Single Sign-On URL in your Okta app">
-                <div className="flex items-center gap-2">
-                  <input
-                    readOnly
-                    value={`${str('base_url')}/api/auth/saml/callback`}
-                    className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-400 font-mono cursor-default"
-                  />
-                  <a
-                    href={`${str('base_url')}/api/auth/saml/metadata`}
-                    className="text-xs text-blue-400 hover:text-blue-300 whitespace-nowrap"
-                  >
-                    View SP metadata ↗
-                  </a>
-                </div>
-              </Field>
-              <Field label="SP Certificate" hint="Optional: for signed authentication requests">
-                <CertTextarea value={str('okta_saml_sp_cert')} onChange={v => set('okta_saml_sp_cert', v)} rows={3} placeholder="Leave blank if not signing requests" secret />
-              </Field>
-              <Field label="SP Private Key" hint="Optional: private key for signing requests (kept secret)">
-                <CertTextarea value={str('okta_saml_sp_key')} onChange={v => set('okta_saml_sp_key', v)} rows={3} placeholder="Leave blank if not signing requests" secret />
-              </Field>
-            </>
           )}
         </Section>
       )}
@@ -1239,51 +1562,13 @@ export default function Settings() {
       {/* Geo Map tab — admin only */}
       {tab === 'vpnmappings' && isAdmin && <GeoMapTab />}
 
-      {/* API Keys tab — every user manages their own */}
-      {tab === 'apikeys' && <ApiKeysTab />}
-
-      {/* Users tab — admin only */}
-      {tab === 'users' && isAdmin && <UsersTab />}
-
-      {/* Integrations */}
-      {tab === 'integrations' && (
-        <Section title="Integrations" onSave={integrationsSave.save} saving={integrationsSave.saving} saved={integrationsSave.saved} error={integrationsSave.error}
-          help={{
-            title: 'Integrations — How It Works',
-            content: <>
-              <p><span className="text-gray-300 font-medium">Lucidchart</span> token enables the "Export to Lucidchart" action on the Topology page — it pushes the current force-directed graph straight into a new Lucidchart document via their API, rather than just downloading a static PNG/SVG.</p>
-              <p><span className="text-gray-300 font-medium">SSL/TLS</span> accepts either a combined PFX/P12 file or a separate PEM cert+key pair, drag-and-drop or click to browse — the running service auto-detects and loads whichever was uploaded at startup.</p>
-              <p><span className="text-gray-300 font-medium">Suite Integration</span> is one-directional discovery: copy the Suite Token here into pktHub's App Manager when registering this app, so pktHub can proxy into it with users already signed in. Regenerating the token immediately revokes the old one — you'll need to re-register in pktHub afterward.</p>
-            </>,
-          }}
-        >
-
-          <div className="pt-2 pb-1">
-            <p className="text-xs font-semibold text-white uppercase tracking-wider">Lucidchart</p>
-          </div>
-          <Field label="API token" hint="Personal Access Token from lucid.co → Account → API Tokens. Required for topology export to Lucidchart.">
-            <TextInput
-              value={str('lucid_api_token')}
-              onChange={v => set('lucid_api_token', v)}
-              placeholder="eyJ…"
-              secret
-              mono
-            />
-          </Field>
-
-          <div className="pt-4 pb-1">
-            <p className="text-xs font-semibold text-white uppercase tracking-wider">SSL / TLS</p>
-          </div>
-          <div className="py-3">
-            <SslPanel />
-          </div>
-
-          {/* Suite Integration */}
-          <div className="pt-4 pb-1">
-            <p className="text-xs font-semibold text-white uppercase tracking-wider">Suite Integration</p>
-          </div>
-          <PktHubTokenDisplay />
-        </Section>
+      {/* User Keys tab — personal keys plus the app-wide Lucidchart token */}
+      {tab === 'apikeys' && (
+        <ApiKeysTab
+          lucidToken={str('lucid_api_token')}
+          onLucidChange={v => set('lucid_api_token', v)}
+          lucidSave={lucidSave}
+        />
       )}
     </div>
   )
@@ -1979,7 +2264,11 @@ function DevicesTab({ prefillIp = '' }: { prefillIp?: string }) {
 }
 
 // ── API Keys tab — per-user external API keys, scoped to whoever is logged in ──
-function ApiKeysTab() {
+function ApiKeysTab({ lucidToken, onLucidChange, lucidSave }: {
+  lucidToken: string
+  onLucidChange: (v: string) => void
+  lucidSave: { saving: boolean; saved: boolean; error: string; save: () => Promise<void> }
+}) {
   const { user } = useAuth()
   const [keys, setKeys]       = useState<UserApiKey[]>([])
   const [loading, setLoading] = useState(true)
@@ -2032,8 +2321,8 @@ function ApiKeysTab() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2">
-        <h2 className="text-lg font-semibold text-white">API Keys</h2>
-        <HelpButton title="API Keys — How It Works">
+        <h2 className="text-lg font-semibold text-white">User Keys</h2>
+        <HelpButton title="User Keys — How It Works">
           <p>External API keys for lookup tools (IP reputation, geolocation, etc.) are <span className="text-gray-300 font-medium">personal, not shared</span> — each user stores their own key here under their own account, and only that user's own requests use it. Nobody else, including admins, can see the key's value.</p>
           <p>Leave a field blank and save to clear a key.</p>
         </HelpButton>
@@ -2085,6 +2374,30 @@ function ApiKeysTab() {
           ))}
         </div>
       )}
+
+      <div className="pt-2 border-t border-gray-800 max-w-lg">
+        <p className="text-xs font-semibold text-white uppercase tracking-wider mt-4 mb-1">Lucidchart</p>
+        <label className="block text-xs text-white mb-1">API token</label>
+        <div className="flex items-center gap-2">
+          <input
+            type="password"
+            value={lucidToken}
+            onChange={e => onLucidChange(e.target.value)}
+            placeholder="eyJ…"
+            className={inp}
+          />
+          <button
+            onClick={lucidSave.save}
+            disabled={lucidSave.saving}
+            className="shrink-0 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg px-4 py-2 transition-colors"
+          >
+            {lucidSave.saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+        {lucidSave.saved && <p className="text-xs text-green-400 mt-1">Saved</p>}
+        {lucidSave.error && <p className="text-xs text-red-400 mt-1">{lucidSave.error}</p>}
+        <p className="text-xs text-gray-500 mt-1">Personal Access Token from lucid.co → Account → API Tokens. Required for topology export to Lucidchart.</p>
+      </div>
     </div>
   )
 }
@@ -3301,6 +3614,13 @@ function UsersTab() {
     } catch (e: any) { setError(e.message) }
   }
 
+  const makeDefaultAdmin = async (u: User) => {
+    try {
+      await api.setDefaultAdmin(u.id)
+      load()
+    } catch (e: any) { setError(e.message) }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
@@ -3309,6 +3629,7 @@ function UsersTab() {
           <p>Three roles: <span className="text-gray-300 font-medium">admin</span> (full access, including this Users tab and all Settings), <span className="text-gray-300 font-medium">analyst</span> (read access plus export — Flow Explorer CSV/JSON, device CSV, etc.), and <span className="text-gray-300 font-medium">viewer</span> (read-only, no export).</p>
           <p>This tab only manages <span className="text-gray-300 font-medium">local accounts</span> — SAML/Okta SSO users are auto-provisioned on first login and managed in Okta itself, not here.</p>
           <p><span className="text-gray-300 font-medium">Deactivate</span> blocks login immediately without deleting the account or its history — prefer it over Delete for someone who's just leaving temporarily, since Delete is permanent.</p>
+          <p>The <span className="text-yellow-400">★</span> marks the <span className="text-gray-300 font-medium">default admin</span> — when every auth method in the Auth tab is disabled, the app skips the login page entirely and signs everyone in as this account. Click the star on any active admin to reassign it.</p>
         </HelpButton>
       </div>
       <div className="flex items-center gap-3 flex-wrap">
@@ -3392,7 +3713,19 @@ function UsersTab() {
                         {u.username[0].toUpperCase()}
                       </div>
                       <div>
-                        <p className="text-white font-medium">{u.username}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-white font-medium">{u.username}</p>
+                          <button
+                            onClick={() => !u.is_default_admin && u.role === 'admin' && u.is_active && makeDefaultAdmin(u)}
+                            disabled={u.is_default_admin || u.role !== 'admin' || !u.is_active}
+                            title={u.is_default_admin
+                              ? 'Default admin — auto-logged-in when all auth methods are disabled'
+                              : (u.role === 'admin' && u.is_active ? 'Make default admin' : 'Only active admins can be the default admin')}
+                            className={`text-sm leading-none ${u.is_default_admin ? 'text-yellow-400' : 'text-gray-500 hover:text-gray-300 disabled:hover:text-gray-500'}`}
+                          >
+                            {u.is_default_admin ? '★' : '☆'}
+                          </button>
+                        </div>
                         {u.username === me?.username && <p className="text-xs text-white">you</p>}
                       </div>
                     </div>
