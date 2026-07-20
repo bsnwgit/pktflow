@@ -15,19 +15,23 @@ Requires a fresh Ubuntu Server 22.04/24.04 LTS host with `sudo` access, and Node
 git clone https://github.com/bsnwgit/pktflow.git
 cd pktflow
 
-# 2. Run the installer — system packages, ClickHouse, Python deps, schema,
-#    config.yaml + secret key, admin user, frontend build (if npm is present),
-#    systemd service (installed + started)
+# 2. Run the installer — prompts for install directory (default /opt/pktflow)
+#    and port (default 8766) when run interactively, then handles system
+#    packages, ClickHouse, Python deps, schema, config.yaml + secret key,
+#    admin user, frontend build (if npm is present), systemd service
+#    (installed + started)
 bash install.sh
 # Prints the admin password and ingest token at the end — save them, they are
 # not shown again. If npm wasn't found, the final banner prints the exact
 # manual frontend-build commands to run before the web UI will load.
 
-# 3. Open the firewall for the app port (adjust if PKTFLOW_INSTALL_DIR/port differ)
+# 3. Open the firewall for the app port (whatever you entered at the prompt, default 8766)
 sudo ufw allow 8766/tcp
 
-# 4. Open http://<server-ip>:8766 and log in with the admin credentials from step 2
+# 4. Open http://<server-ip>:8766 (or your chosen port) and log in with the admin credentials from step 2
 ```
+
+Both prompts are skippable for scripted/unattended installs via env vars: `PKTFLOW_INSTALL_DIR` and `PKTFLOW_PORT` (see [Environment variables](#environment-variables) below — these are read by `install.sh` itself, not just the running app).
 
 For a fully manual walkthrough of what `install.sh` does (e.g. to customize the install path or run steps individually), see [Installation](#installation).
 
@@ -54,8 +58,9 @@ All settings in `config.example.yaml` can also be passed as `PKTFLOW_*` environm
 
 ### Data Ingestion
 - **NetFlow v9 via goflow2 + Vector** — one or more collector pipelines, each transforming raw NetFlow to snake_case JSON and posting to pktFlow via HTTPS bearer token
-- **Direct UDP ingest** — optional built-in NetFlow v5/v9/IPFIX listener (no external collector required)
-- **Ingest buffer** — in-memory batch buffer with configurable flush interval; WebSocket broadcasts to connected browsers on every flush
+- **Direct UDP ingest** — optional built-in NetFlow v5/v9/IPFIX/sFlow listener (no external collector required); Settings → Ingest's "Ingest method" selects `http` / `udp` / `both`
+- **Source IP allowlist** — Settings → Ingest → "Allowed source IPs" (exact IPs and/or CIDRs, comma-separated) restricts which hosts may POST to `/api/ingest/flows` at all, on top of the bearer token check; empty = allow any source. A rejected source triggers the same unknown-sampler alert path as an unregistered device.
+- **Ingest buffer** — in-memory batch buffer; flush interval (`ingest_buffer_flush_secs`, default 2s) is a `config.yaml`/env-var setting (`PKTFLOW_INGEST_BUFFER_FLUSH_SECS`), not currently exposed in the Settings UI. WebSocket broadcasts to connected browsers on every flush.
 - **Invalid sampler filtering** — flows with `0.0.0.0` sampler address are rejected at ingest
 
 ### Dashboards & Visualization
@@ -67,7 +72,8 @@ All settings in `config.example.yaml` can also be passed as `PKTFLOW_*` environm
 - **Geo Map** — Leaflet dark map with D3 SVG arc overlays; ip-api.com geo lookup; circle markers colored by configurable Site Groups; arc styling comes entirely from **Address Mappings** (private→public CIDR/IP topology, resolves RFC-1918 traffic to the correct physical site) + **Traffic Rules** (priority-ordered, drag-and-drop, matches on address mapping/destination CIDR/destination port to pick a Line Style) — see Settings → Geo Map; dynamic legend shows only the Traffic Rules actually on screen, labeled by rule name; both legs of a bidirectional conversation always merge into one arc
 - **Traffic by Port** (`/ports`) — protocol mix, top ports by bytes/flows, traffic-over-time chart, full port inventory table
 - **Sankey flow diagrams** — a network-wide src→dst view on Analytics, and a per-device top-talkers flow map on Device View
-- **IP Lookup** — any public (non-RFC1918) IP address shown in Flow Explorer, Device View, Topology, or Alerts is a clickable link that opens a modal combining ipinfo.io geolocation/ASN data with an AbuseIPDB reputation score, using each user's own API keys (see Settings → API Keys below). Private/loopback/link-local addresses are always shown as plain text.
+- **IP Lookup** — any public (non-RFC1918) IP address shown in Flow Explorer, Device View, Topology, or Alerts is a clickable link that opens a modal combining ipinfo.io geolocation/ASN data with an AbuseIPDB reputation score, using each user's own API keys (see Settings → User Keys below).
+- **Internal IP Lookup (pktIPAM)** — private/RFC1918 IPs are also clickable (styled with a purple dashed underline + network icon instead of the public lookup's search icon): the modal calls out to a connected pktIPAM instance (see Settings → Security → Suite Integration → Sibling pkt Apps) and shows subnet/site, IP inventory status/hostname/MAC/owner, the active DHCP lease, DNS records, and last-seen ARP entry. If no pktIPAM connection is configured, the modal shows a link straight to that settings page instead of erroring. Addresses that aren't well-formed IPv4 (or are otherwise unparseable) still render as plain text.
 
 ### Alerting
 - **data_gap** — fires when a known sampler goes silent for a configurable period; dismissed samplers are excluded
@@ -81,21 +87,26 @@ All settings in `config.example.yaml` can also be passed as `PKTFLOW_*` environm
 - **Bulk rule provisioning** — Export CSV / Import CSV / template-download on the Rules tab; `conditions` round-trips as a JSON object string (shape depends on `rule_type`), `channels` as a comma-separated column
 - **Investigate button** — every active/history alert card deep-links straight to Flow Explorer, pre-filtered to the alert's time window plus whatever sampler/src IP/dst port/protocol its details carry
 - **Active/History time-range filter** — both alert tabs share the same search + severity + time-range filter bar as Application Logs (below)
+- **Active/History pagination** — both tabs paginate client-side at 25 events/page with the same sliding page-number bar (Prev/Next, `1 ..` / `.. N` jump shortcuts) used elsewhere in the app; filtering by text/severity/time-range resets back to page 1
 
 ### Authentication & Users
 - **Local auth** — JWT + bcrypt, configurable token lifetime
 - **SAML 2.0 (Okta)** — SP-initiated SSO; users auto-provisioned on first login
 - **Roles** — `admin` (full access), `analyst` (read + export), `viewer` (read-only)
 - **User management page** — admin can create users, reset passwords, toggle active status
+- **Default admin / auto-login** — exactly one active admin account can be flagged (★, in Settings → Security → Users) as the "default admin." If an admin ever disables **both** Local auth and SAML SSO in Settings → Security → Auth, the app skips the login page entirely and auto-signs everyone in as that account (`POST /api/auth/auto-login`) instead of dead-ending into a login form nobody can pass. This only activates when every auth method is off — with either enabled, auto-login is refused (403).
 
 ### Settings & Configuration
-All configuration is managed via the Settings UI (no file edits required after install). Settings are stored in SQLite and survive restarts.
+All configuration is managed via the Settings UI (no file edits required after install, except the listen port — see General below). Settings are stored in SQLite and survive restarts. See [Application Settings](#application-settings) for the full tab-by-tab reference.
 
-- **API Keys** — every logged-in user (not just admins) has their own "API Keys" tab to store personal keys for AbuseIPDB, ipinfo.io, and IPQualityScore, used by the IP Lookup feature above. Keys are scoped strictly to the owning user — nobody else, including admins, can see the value. Each field has a "Test" button that calls the real provider API with a harmless test IP to validate the key before saving.
+- **User Keys** — every logged-in user (not just admins) has their own "User Keys" tab to store personal keys for AbuseIPDB, ipinfo.io, and IPQualityScore, used by the IP Lookup feature above (this tab also holds the app-wide Lucidchart token). Keys are scoped strictly to the owning user — nobody else, including admins, can see the value. Each field has a "Test" button that calls the real provider API with a harmless test IP to validate the key before saving.
+- **Contextual help** — a small blue "?" (`HelpButton`) next to every page heading and every Settings section opens a modal explaining how that feature actually works, instead of permanent inline text blocks. Rolled out across every main nav page (Analytics, Flow Explorer, Device View, Topology, Geo Map, Traffic by Port, Alerts, Logs) and every Settings section.
 
 ### Integrations
-- **SSL/TLS** — upload a PFX/P12 bundle or separate PEM cert+key via drag-and-drop; service auto-detects SSL files on startup
-- **Lucidchart** — topology export directly to a Lucidchart document via API token
+- **SSL/TLS** — upload a PFX/P12 bundle or separate PEM cert+key via drag-and-drop; service is intended to auto-detect SSL files on startup (Settings → Security → SSL/TLS) — see [Known Issues & Quirks](#known-issues--quirks) for a verification gap between this and the current process entrypoint
+- **Lucidchart** — topology export directly to a Lucidchart document via API token (Settings → User Keys)
+- **Suite Integration (inbound)** — one-directional discovery token that lets pktHub's App Manager proxy into pktFlow with users already signed in (Settings → Security → Suite Integration)
+- **Sibling pkt Apps (outbound)** — named connections *from* pktFlow *to* one or more pktIPAM instances, used for the Internal IP Lookup feature above. Configured in Settings → Security → Suite Integration → Sibling pkt Apps: add a connection with pktIPAM's base URL and the Suite Token copied from that pktIPAM's own Settings → Integrations → Suite Integration page. Multiple named pktIPAM connections are supported; the first *enabled* one is used for lookups. Each has a "Test Connection" button that authenticates against the real `/api/suite/whoami` endpoint (not just a port-reachability check), so a wrong/revoked token fails the test instead of reporting a false-healthy connection.
 
 ### Infrastructure
 - **Device registry** — name, IP, site per sampler; CSV import/export + downloadable template; live stats per device; **acts as an ingest allowlist, not just labeling** — flows from a sampler IP not present and enabled in the registry are dropped before storage, not just missing metadata. The allowlist is an in-memory cache (`app/ingest/normalizer.py`'s `_device_cache`) that's now warmed from the registry at process startup (`app/main.py` lifespan) — previously it was only ever populated reactively by device create/edit/delete through the UI, so **every service restart silently dropped all incoming flow data** as "unregistered" until someone happened to edit a device afterward, even though the registry itself was correct the whole time
@@ -287,6 +298,8 @@ cp -r dist /opt/pktflow/frontend/dist
 
 ### 9. Start the service
 
+`pktflow.service` runs `python -m app.server` (see [`app/server.py`](app/server.py)), not a `uvicorn ... --port` command line — the entrypoint reads `host`/`port` from `config.yaml` itself at process start. This is what lets Settings → General → Port (below) actually take effect on the next restart: saving that field just rewrites `port:` in `config.yaml`, and the next process start picks it up here, with no unit-file edit needed.
+
 `pktflow.service` is a template — substitute the placeholders before installing it, or just run `install.sh` which does this for you:
 
 ```bash
@@ -322,9 +335,11 @@ Log in at `http://<server-ip>:8766` with the `admin_user`/`admin_password` from 
 
 ## SSL / HTTPS
 
-pktFlow auto-detects SSL on startup. If `ssl/server.crt` and `ssl/server.key` exist under the data directory, it starts in HTTPS mode; otherwise HTTP.
+pktFlow is designed to auto-detect SSL on startup: if `ssl/server.crt` and `ssl/server.key` exist under the data directory, it should start in HTTPS mode; otherwise HTTP.
 
-**To enable HTTPS:** go to **Settings → Integrations → SSL / TLS**, drag-and-drop a PFX/P12 bundle (with passphrase) or separate PEM cert + key files, then restart the service. The restart button is in **Settings → System**.
+> **Verify this before relying on it in production.** The code that reads the SSL settings and forwards them to uvicorn currently lives in a code path (`if __name__ == "__main__":` in `app/main.py`) that does not appear to be reached by either the current systemd `ExecStart` (`python -m app.server`) or the previously-committed one (`uvicorn app.main:app ...`) — both import `app.main` as a module rather than executing it directly. See [Known Issues & Quirks](#known-issues--quirks) item 7 for the full trace. Confirm with a real cert upload + restart + `curl -k https://localhost:<port>/api/health` before depending on this.
+
+**To enable HTTPS:** go to **Settings → Security → SSL / TLS**, drag-and-drop a PFX/P12 bundle (with passphrase) or separate PEM cert + key files, then restart the service. The restart button is in **Settings → General**.
 
 **To disable HTTPS:** delete the cert via the same Settings panel, then restart.
 
@@ -332,40 +347,134 @@ pktFlow auto-detects SSL on startup. If `ssl/server.crt` and `ssl/server.key` ex
 
 ## Application Settings
 
-All settings are in the browser UI at `/settings`. Changes take effect immediately (no restart needed unless otherwise noted).
+All settings are in the browser UI at `/settings`. Changes take effect immediately (no restart needed unless otherwise noted). The top-level tab bar is: **General · Security · Data · Notifications · User Keys · Collectors · Geo Map · Ingest**. Security and Data each have their own left-hand sub-tab strip.
 
 ### General
 
 | Setting | Description |
 |---------|-------------|
-| Base URL | Public-facing URL of the app (used to build SAML ACS URL and entity ID) |
-| Local auth enabled | Allow username/password login |
-| Token lifetime | JWT expiry in minutes |
+| App name | Displayed in browser tab and header |
+| Port | Port the app listens on — written to `config.yaml`, not the SQLite settings table. **Requires a service restart to take effect**, and the browser will need to follow the app to the new port/URL afterward. Backed by `GET`/`POST /api/system/port`. |
+| Base URL | Public-facing URL of the app — used to build the SAML ACS URL/entity ID and any links posted in Slack/Email/webhook notifications. Set this to the actual externally-reachable address *before* configuring SSO or notifications. |
+| Timezone | Affects display of timestamps in the UI |
+| Restart Service | Triggers a service restart; wait ~5 seconds for the service to come back. Tries `sudo systemctl restart pktflow` first; if the service user doesn't have passwordless sudo for that command (the common case), it falls back to sending itself `SIGTERM` and relying on systemd to bring it back up. **This fallback only works if `pktflow.service` has `Restart=always`** (the shipped template does) — with `Restart=on-failure`, a clean `SIGTERM` is not considered a failure by systemd and the service will stop and stay stopped instead of restarting. If you've customized the unit file, keep `Restart=always` or set up passwordless sudo for `systemctl restart pktflow` for this button to work reliably. |
 
-### Ingest
+### Security
+
+Left-hand sub-tabs: **Users** (admin only) · **Auth** · **Suite Integration** · **AI Assistant** · **SSL / TLS**.
+
+#### Security → Users (admin only)
+
+Admin can create users, reset passwords, toggle active status, and assign roles (`admin` / `analyst` / `viewer`). This tab only manages local accounts — SAML/Okta SSO users are auto-provisioned on first login and managed in Okta itself.
+
+The ★ / ☆ button next to a username marks the **default admin** — the account auto-logged-in when both Local auth and SAML SSO are disabled on the Auth sub-tab below (see [Authentication & Users](#authentication--users) above). Only one user can hold it at a time (setting it clears it from every other user); only an active admin account is eligible.
+
+#### Security → Auth
 
 | Setting | Description |
 |---------|-------------|
-| Ingest token | Bearer token required by collector Vector sinks |
-| Buffer flush interval | Seconds between ClickHouse writes (default 5) |
-| Buffer max size | Max records held before forced flush |
-| Direct UDP ingest enabled | Enable built-in NetFlow UDP listener. **Requires a service restart to take effect** — the listener only starts/stops at process startup, it does not react to this setting changing live. |
-| UDP listen port | Port for direct UDP ingest (default 2055). **Requires a service restart to take effect.** |
-| WebSocket stream raw flows | Push raw flow batches to connected browsers after each flush (bandwidth-heavy; off by default) |
-| WebSocket max raw flows | Cap on flows sent per broadcast when raw streaming is enabled |
+| Local auth | Allow username/password login |
+| Session timeout | JWT expiry, in minutes |
+| Enable SAML SSO | Turns on Okta SP-initiated SSO |
+| IdP SSO URL / IdP Entity ID / IdP certificate | From Okta's IdP metadata — a "Paste IdP Metadata XML" box auto-fills these three from Okta's raw metadata document |
+| SP Entity ID | Defaults to the auto-generated metadata URL; must match "Audience URI" in the Okta app settings if overridden |
+| ACS URL (read-only) | Register this as the Single Sign-On URL in the Okta app. Both this and the SP metadata link are derived from **Base URL** on the General tab — set that first |
+| SP Certificate / SP Private Key | Optional — only needed if signing outbound SAML requests |
 
-### Devices
+Local auth and SAML aren't mutually exclusive — both can be enabled at once. Okta OIDC is not offered here; it was deliberately dropped (`app/auth/okta.py` is an intentional no-op) in favor of SAML 2.0, which already covers Okta SSO.
+
+#### Security → Suite Integration
+
+Two sections on this sub-tab:
+
+- **Suite Integration (inbound)** — the Suite Token pktHub's App Manager uses to proxy into pktFlow with users already signed in. Regenerating it immediately revokes the old one.
+- **Sibling pkt Apps (outbound)** — named connections *from* pktFlow to one or more pktIPAM instances, powering the Internal IP Lookup feature (see [Features](#features) above). Add a connection with a name, pktIPAM's base URL, and the Suite Token copied from that pktIPAM's own Settings → Integrations → Suite Integration page. Each has Test/Edit/Delete actions; "Test Connection" round-trips a real authenticated call to `/api/suite/whoami` on the target, so a wrong or revoked token fails the test instead of just checking the port is open.
+
+#### Security → AI Assistant
+
+| Setting | Description |
+|---------|-------------|
+| Anthropic API key | Required to enable the AI assistant panel. From console.anthropic.com — separate from a Claude Enterprise seat |
+| AI model | Model used for the assistant. Default `claude-haiku-4-5-20251001` (fast/cheap); selectable alternatives are Sonnet (`claude-sonnet-5`, balanced) and Opus (`claude-opus-4-8`, most capable) |
+
+#### Security → SSL / TLS
+
+Upload a PFX/P12 bundle or separate PEM cert+key via drag-and-drop; the running service auto-detects and loads whichever was uploaded, at startup. See [SSL / HTTPS](#ssl--https) above.
+
+### Data
+
+Left-hand sub-tabs: **Storage** · **Backups**.
+
+#### Data → Storage
+
+| Setting | Description |
+|---------|-------------|
+| Storage backend | `clickhouse` (production, default) or `duckdb` (embedded, no external service required). **Requires a service restart to take effect.** |
+| Flow retention days | ClickHouse TTL for raw flows table (default 90) |
+| Manual cleanup | Trigger immediate retention cleanup |
+| Test Connection | `POST /api/system/test-connection` — verifies the currently configured backend is reachable |
+
+> DuckDB implements the core query paths (search, top talkers/ports, protocol distribution, topology). A handful of alert-engine detail queries (baselines, elephant-flow/threshold/port-scan/inter-site/asymmetric-flow lookups — 18 methods in `app/storage/duckdb.py`) deliberately raise `NotImplementedError` under DuckDB rather than being built out — those specific alert rule types are ClickHouse-only for now.
+
+#### Data → Backups
+
+| Setting | Description |
+|---------|-------------|
+| Auto backup | Run a scheduled backup at the configured interval |
+| Interval | Hours between automatic backup runs (default 24) |
+| Rotation count | Number of snapshots to keep before old ones are deleted (default 5) |
+| Backup path | Destination directory for snapshots. Defaults to a `backups/` directory next to `pktflow.db` (i.e. inside the install directory) if left blank |
+| Include ClickHouse | Also export the `flows` table to CSV alongside the SQLite snapshot |
+
+Each run creates a timestamped `pktflow-backup-<UTC timestamp>/` directory containing a consistent copy of `pktflow.db` (via SQLite's own backup API, safe to run against a live database) and, if enabled, `flows.csv`. Trigger manually from Settings → Data → Backups → **Run Backup Now**, or via `POST /api/system/backup`.
+
+### Notifications
+
+Notification channels are configured per-alert-rule. Available channels:
+
+| Channel | Status |
+|---------|--------|
+| Slack webhook | Code written; requires webhook URL |
+| Email (SMTP) | Code written; requires SMTP host, port, credentials |
+| PagerDuty | Code written; requires integration key |
+| Webhook | Code written; requires endpoint URL |
+| Tracecat | Code written; requires webhook URL + API token |
+
+Each channel has a "Send Test" button (`POST /api/settings/test-notification`) that dispatches a real test message using the saved settings — not yet confirmed fired against a live Slack/SMTP/PagerDuty/Tracecat endpoint in production, but the endpoint itself is implemented, not a stub.
+
+### User Keys
+
+Every logged-in user (not just admins) manages their **own** keys here for AbuseIPDB, ipinfo.io, and IPQualityScore — used by the public IP Lookup feature. Keys are scoped strictly to the owning user; nobody else, including admins, can see the value. Each field has a "Test" button that calls the real provider API with a harmless test IP before saving. Leaving a field blank and saving clears that key.
+
+This tab also holds the app-wide **Lucidchart API token** (a Personal Access Token from lucid.co → Account → API Tokens), which enables "Export to Lucidchart" on the Topology page — this one setting is shared across all users, unlike the personal keys above it.
+
+### Collectors (Devices)
 
 The device registry maps sampler IPs to human-readable names and sites. Devices appear on Device View and the sampler dropdown throughout the UI.
 
 - Add devices manually or **import from CSV** (columns: `name`, `ip`, `site`, `description`)
 - **Unknown Samplers** panel shows IPs sending flows that are not in the registry; dismiss to suppress the `new_host` alert without adding to the registry
 
-### Alerts
+### Geo Map
+
+Admin-only tab covering Address Mappings, Traffic Rules, Site Groups, and Line Styles — see [Geo Map](#dashboards--visualization) under Features above for what each does.
+
+### Ingest
 
 | Setting | Description |
 |---------|-------------|
-| Alert retention days | How long to keep alert events in SQLite before auto-purge |
+| Ingest method | `http` (goflow2 + Vector POSTing to `/api/ingest/flows` — recommended), `udp` (built-in direct listener only), or `both`. **Changing this or either UDP port requires an actual service restart** — the UDP listener only starts/stops at process startup, saving the form alone doesn't switch anything live. |
+| Ingest token | Bearer token required on the HTTP POST ingest endpoint. Leave blank in the form to keep the current (masked) value. |
+| HTTP port | Informational display field (`ingest_http_port`, default 8766) describing the port pktFlow listens on for ingest — this is a separate SQLite-stored value from the actual bind port and is not itself wired to change anything; the port the process actually listens on is set via **Settings → General → Port** (config.yaml). Don't expect editing this field to move the app to a new port. |
+| UDP NetFlow port | Port for direct UDP NetFlow ingest (default 2055). **Requires a service restart to take effect.** |
+| UDP sFlow port | Port for direct UDP sFlow ingest (default 6343) |
+| Allowed source IPs | Comma-separated exact IPs and/or CIDR blocks. Empty = allow ingest from any source. Enforced in `app/api/ingest.py` on every POST to `/api/ingest/flows`, in addition to (not instead of) the bearer token check and the device-registry allowlist described under Infrastructure below — a rejected source IP fires the same `new_host`-style alert path as an unregistered sampler. |
+| Stream raw flows | Push raw flow batches to connected browsers after each flush (bandwidth-heavy; off by default) |
+| Max flows per push | Cap on flows sent per broadcast when raw streaming is enabled (1–1000) |
+
+### Alerts
+
+Alert retention (days before auto-purge of alert events) is configured on the Data → Storage sub-tab alongside the other retention settings.
 
 **Alert rule types:**
 
@@ -378,73 +487,6 @@ The device registry maps sampler IPs to human-readable names and sites. Devices 
 | `port_protocol` | Specific port/protocol/direction combinations appear in recent flows |
 
 Dismissed sampler IPs (via the Unknown Samplers panel) are excluded from `data_gap` evaluation. `0.0.0.0` is always excluded.
-
-### Notifications
-
-Notification channels are configured per-alert-rule. Available channels:
-
-| Channel | Status |
-|---------|--------|
-| Slack webhook | Code written; requires webhook URL |
-| Email (SMTP) | Code written; requires SMTP host, port, credentials |
-| PagerDuty | Code written; requires integration key |
-| Webhook | Code written; requires endpoint URL |
-
-Each channel has a "Send Test" button (`POST /api/settings/test-notification`) that dispatches a real test message using the saved settings — not yet confirmed fired against a live Slack/SMTP/PagerDuty endpoint in production, but the endpoint itself is implemented, not a stub.
-
-### Storage
-
-| Setting | Description |
-|---------|-------------|
-| Storage backend | `clickhouse` (production, default) or `duckdb` (embedded, no external service required). **Requires a service restart to take effect.** |
-| Flow retention days | ClickHouse TTL for raw flows table (default 90) |
-| Manual cleanup | Trigger immediate retention cleanup |
-| Test Connection | `POST /api/system/test-connection` — verifies the currently configured backend is reachable |
-
-> DuckDB implements the core query paths (search, top talkers/ports, protocol distribution, topology). A handful of alert-engine detail queries (baselines, elephant-flow/threshold/port-scan lookups) deliberately raise `NotImplementedError` under DuckDB rather than being built out — those specific alert rule types are ClickHouse-only for now.
-
-### Backup
-
-| Setting | Description |
-|---------|-------------|
-| Auto backup | Run a scheduled backup at the configured interval |
-| Interval | Hours between automatic backup runs (default 24) |
-| Rotation count | Number of snapshots to keep before old ones are deleted (default 5) |
-| Backup path | Destination directory for snapshots. Defaults to a `backups/` directory next to `pktflow.db` (i.e. inside the install directory) if left blank |
-| Include ClickHouse | Also export the `flows` table to CSV alongside the SQLite snapshot |
-
-Each run creates a timestamped `pktflow-backup-<UTC timestamp>/` directory containing a consistent copy of `pktflow.db` (via SQLite's own backup API, safe to run against a live database) and, if enabled, `flows.csv`. Trigger manually from Settings → Backup → **Run Backup Now**, or via `POST /api/system/backup`.
-
-### Integrations
-
-| Setting | Description |
-|---------|-------------|
-| SSL / TLS | Upload PFX/P12 or PEM cert+key; restart required to apply |
-| Lucidchart API token | Enables "Export to Lucidchart" on the Topology page |
-
-### System
-
-- **Restart Service** — triggers a service restart; wait ~5 seconds for the service to come back. Tries `sudo systemctl restart pktflow` first; if the service user doesn't have passwordless sudo for that command (the common case), it falls back to sending itself `SIGTERM` and relying on systemd to bring it back up. **This fallback only works if `pktflow.service` has `Restart=always`** (the shipped template does) — with `Restart=on-failure`, a clean `SIGTERM` is not considered a failure by systemd and the service will stop and stay stopped instead of restarting. If you've customized the unit file, keep `Restart=always` or set up passwordless sudo for `systemctl restart pktflow` for this button to work reliably.
-- **Backup** — see [Backup](#backup) above
-
-### Okta SAML
-
-| Setting | Description |
-|---------|-------------|
-| SAML enabled | Enable Okta SSO login |
-| IdP SSO URL | Okta app's Single Sign On URL |
-| IdP Entity ID | Okta Issuer |
-| IdP certificate | Okta X.509 signing certificate |
-| SP Entity ID | Must match "Audience URI" in Okta app settings |
-
-> The SP Entity ID is derived from Base URL: `<base_url>/api/auth/saml/metadata`. If you change Base URL, update the Okta app's Audience URI to match.
-
-### AI Assistant
-
-| Setting | Description |
-|---------|-------------|
-| Anthropic API key | Required to enable the AI assistant panel |
-| AI model | Claude model to use (default: claude-3-5-haiku) |
 
 ---
 
@@ -516,16 +558,23 @@ pktflow/
 │   │   ├── traffic_rules.py    Geo Map line-style rules (/api/traffic-rules)
 │   │   ├── geo_config.py   Site groups + line styles CRUD (/api/geo-config/*)
 │   │   ├── user_api_keys.py Per-user external API keys (/api/user-api-keys)
-│   │   ├── ip_info.py      Combined ipinfo.io + AbuseIPDB lookup (/api/ip-info)
-│   │   ├── system.py       Health, restart, SSL upload, cleanup, backup, test-connection
+│   │   ├── ip_info.py      Combined ipinfo.io + AbuseIPDB lookup (/api/ip-info); also
+│   │   │                     /api/ip-info/internal/{ip} — pktIPAM-backed internal IP lookup
+│   │   ├── integrations.py Outbound sibling-app connections, currently pktIPAM only (/api/integrations)
+│   │   ├── suite.py        Inbound pktHub Suite Integration token + /api/suite/whoami
+│   │   ├── system.py       Health, restart, port, SSL upload, cleanup, backup, test-connection
 │   │   ├── ws.py           WebSocket endpoint + broadcast helpers
 │   │   └── ai.py           AI assistant (Claude)
 │   ├── alerts/
-│   │   ├── engine.py       Alert evaluation loop (all rule types)
+│   │   ├── engine.py       Alert evaluation loop (all rule types) + notification dispatch
+│   │   │                     (Slack, Email/SMTP, PagerDuty, generic Webhook, Tracecat — all
+│   │   │                     implemented inline here, not in notifiers/ below)
 │   │   ├── cleanup.py      Alert event retention purge job
-│   │   └── notifiers/      Slack, email, PagerDuty, webhook
+│   │   └── notifiers/      Present but currently unused (just __init__.py)
 │   ├── auth/
 │   │   └── local.py        JWT + bcrypt
+│   ├── integrations/
+│   │   └── suite_client.py Outbound HTTP client for calling a sibling pkt* app via its Suite Token
 │   ├── ingest/
 │   │   ├── normalizer.py   Vector JSON → FlowRecord (rejects 0.0.0.0)
 │   │   ├── buffer.py       In-memory batch buffer + WS broadcast
@@ -538,23 +587,29 @@ pktflow/
 │   │   └── factory.py      Backend selector
 │   ├── config.py           Settings loader (YAML + env)
 │   ├── database.py         SQLite init + migrations + first-run admin seed
-│   └── main.py             App factory, lifespan, router registration
+│   ├── main.py             App factory, lifespan, router registration
+│   └── server.py           Process entrypoint (`python -m app.server`) — reads host/port from
+│                             config.yaml at startup so Settings → General → Port takes effect
+│                             on the next restart without a systemd unit edit
 ├── clickhouse/schema.sql   flows + rollup tables + materialized views
 ├── frontend/src/
-│   ├── pages/              Dashboard, Analytics, DeviceView, FlowExplorer,
-│   │                         Topology, GeoMap, Ports, Alerts, Settings, Users
-│   ├── components/         Layout, AiAssistant, Pagination, IpLink (also
-│   │                         exports linkifyIps, used to auto-link IPs
-│   │                         embedded in alert message text)
+│   ├── pages/              Analytics (dashboard + timeseries), DeviceView, FlowExplorer,
+│   │                         Topology, GeoMap, Ports, Alerts, Logs, Settings
+│   ├── components/         Layout, AiAssistant, Pagination, IpLink (public + internal/pktIPAM
+│   │                         lookup modals; also exports linkifyIps, used to auto-link IPs
+│   │                         embedded in alert message text), HelpButton (app-wide contextual help)
 │   ├── api/client.ts       Typed API client + getToken() for WebSocket
 │   ├── hooks/useWebSocket.ts  WebSocket hook
-│   └── utils/               protocols.ts (protocol name map), ip.ts (RFC1918
-│                               private-range check backing IpLink)
+│   └── utils/               protocols.ts (protocol name map), ip.ts (RFC1918 private-range
+│                               check + IPv4-validity check backing IpLink)
 ├── migrations/             SQLite migration scripts (auto-applied on startup)
-├── install.sh              Ubuntu install script (ClickHouse, venv, systemd service)
+├── install.sh              Ubuntu install script (ClickHouse, venv, systemd service; prompts
+│                             for install dir and port)
 ├── config.example.yaml     Config file template
-├── pktflow.service         systemd unit template (placeholders filled in by install.sh)
-├── start.sh                SSL-aware startup wrapper
+├── pktflow.service         systemd unit template (placeholders filled in by install.sh);
+│                             ExecStart runs `python -m app.server`, not a raw uvicorn command
+├── start.sh                SSL-aware startup wrapper — present in the repo but not currently
+│                             referenced by install.sh or pktflow.service (see Known Issues & Quirks)
 └── requirements.txt
 ```
 
@@ -626,6 +681,25 @@ Scoped strictly to the authenticated user (by username, not user id — pktHub s
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/api/ip-info/{ip}` | JWT | Combined ipinfo.io + AbuseIPDB lookup for a single public IP, using the caller's own stored keys. Returns 400 for private/loopback/link-local/reserved addresses. |
+| `GET` | `/api/ip-info/internal/{ip}` | JWT | pktIPAM-backed lookup for a single private/loopback/link-local IP — subnet, IP inventory record, DHCP leases, DNS records, ARP entries. Returns 400 for public addresses. Returns `configured: false` (not an error) if no enabled pktIPAM connection exists yet. |
+
+### Sibling pkt Apps (Integrations)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/integrations` | JWT | List configured outbound connections to sibling pkt* apps (currently pktIPAM only) |
+| `POST` | `/api/integrations` | Admin JWT | Create a named connection (`name`, `app_name`, `base_url`, `suite_token`) |
+| `PUT` | `/api/integrations/{id}` | Admin JWT | Update name/base_url/suite_token/enabled (partial update) |
+| `DELETE` | `/api/integrations/{id}` | Admin JWT | Remove a connection |
+| `POST` | `/api/integrations/{id}/test` | Admin JWT | Authenticate against the target's `/api/suite/whoami` and report health |
+
+### Suite Integration (inbound, from pktHub)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/suite/token` | — | Returns the current Suite Token, generating one on first call |
+| `POST` | `/api/suite/register` | — | Manual token override |
+| `GET` | `/api/suite/whoami` | Suite Token or JWT | Identity/health check — used by sibling apps' "Test Connection" so a bad token fails instead of reporting a false-healthy port check |
 
 ### WebSocket
 
@@ -641,6 +715,8 @@ Message types: `device_update` (device summaries), `ingest_stats` (buffer counte
 |--------|------|------|-------------|
 | `GET` | `/api/health` | None | Service health check |
 | `POST` | `/api/system/restart` | Admin JWT | Restart pktflow service |
+| `GET` | `/api/system/port` | Admin JWT | Current listen port (read from `config.yaml`) |
+| `POST` | `/api/system/port` | Admin JWT | Rewrite the `port:` line in `config.yaml`; takes effect on the next restart, does not restart itself |
 | `POST` | `/api/system/ssl/upload-pfx` | Admin JWT | Upload PFX/P12 bundle |
 | `POST` | `/api/system/ssl/upload` | Admin JWT | Upload PEM cert + key separately |
 | `DELETE` | `/api/system/ssl` | Admin JWT | Remove SSL files |
@@ -648,6 +724,18 @@ Message types: `device_update` (device summaries), `ingest_stats` (buffer counte
 | `POST` | `/api/system/cleanup` | Admin JWT | Trigger retention cleanup |
 | `POST` | `/api/system/backup` | Admin JWT | Trigger local backup |
 | `POST` | `/api/system/test-connection` | Admin JWT | Verify the configured storage backend is reachable |
+
+### Auth (additional)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/auth/auto-login` | None | Issues a session for the flagged default-admin account. Only succeeds when both Local auth and SAML are disabled (403 otherwise) — see [Default admin / auto-login](#authentication--users). |
+
+### Users (additional)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `PATCH` | `/api/users/{id}/set-default-admin` | Admin JWT | Flags this user as the default admin for auto-login, clearing the flag from every other user. Target must be an active admin. |
 
 ---
 
@@ -681,12 +769,13 @@ After pktFlow restarts, Vector detects the connection reset and immediately retr
 
 ## Known Issues & Quirks
 
-1. **Workers = 1 required for WebSocket** — `start.sh` uses `--workers 1`. With multiple workers, each has its own in-memory `ws_manager`; broadcasts from the ingest worker don't reach WS connections on other workers.
+1. **Workers = 1 required for WebSocket** — the systemd unit's `ExecStart` always runs a single worker. With multiple workers, each has its own in-memory `ws_manager`; broadcasts from the ingest worker don't reach WS connections on other workers.
 2. **goflow2 template errors after restart** — Normal. goflow2 loses cached NetFlow v9 templates on restart; "template error" log lines resolve within seconds when the router sends the next template packet.
 3. **Collector orphan process** — If `goflow2-vector` is restarted while flows are active, the old goflow2 process may survive and hold port 2055. Symptom: service is `active` but no flows arriving. Fix: `sudo kill -9 <old_goflow2_pid>`.
 4. **ClickHouse threading** — `clickhouse-driver` is not thread-safe. All calls are serialized with `threading.Lock()` in `clickhouse.py`.
 5. **passlib/bcrypt on Python 3.12+** — Pin `passlib==1.7.4` and `bcrypt==4.0.1` to avoid attribute errors.
 6. **Direct UDP ingest depends on a `netflow` library workaround** — the third-party `netflow` package (`bitkeks/python-netflow-v9-softflowd`) initializes its own template cache as a list, but its NetFlow v9 parser then indexes into that same object using the exporter's raw Template ID (commonly ≥256 for real hardware) as a dict-style key — this raises `IndexError` for any realistic Template ID, silently dropping every flow record after the first template arrives. `app/ingest/udp_listener.py` works around this by pre-seeding the template cache as `{"netflow": {}, "ipfix": {}}` (dicts) before the library ever gets a chance to install its own broken list default. If you upgrade the `netflow` dependency, re-verify this workaround is still needed (or still effective) against a real capture before relying on direct UDP ingest.
+7. **SSL/TLS auto-detection needs verification against the current entrypoint** — the code that reads `ssl_enabled`/`ssl_certfile`/`ssl_keyfile` from the settings DB and passes them to uvicorn lives in an `if __name__ == "__main__":` block in `app/main.py`. Neither the shipped `pktflow.service` (`ExecStart=... python -m app.server`, and `app/server.py`'s own `uvicorn.run()` call does not forward SSL kwargs) nor the older direct `uvicorn app.main:app ...` CLI invocation actually executes that block — both import `app.main` as a module rather than running it as `__main__`. `start.sh` (which does build the `--ssl-certfile`/`--ssl-keyfile` uvicorn args correctly) is not referenced by `install.sh` or `pktflow.service`. Before relying on the Settings → Security → SSL/TLS panel to actually serve HTTPS in production, confirm end-to-end that a live process picks up an uploaded cert after a restart — this looks like a real gap between the documented behavior and what the current startup path executes, not just a docs lag.
 
 ---
 
@@ -696,10 +785,12 @@ This list is kept in sync with [FEATURES.md](FEATURES.md), which is the canonica
 
 | Feature | Status |
 |---------|--------|
-| Notification channels (Slack, Email, PagerDuty, Webhook) | Code written, including a real `POST /api/settings/test-notification` behind the "Send Test" buttons — not yet confirmed fired against a live service in production |
+| Notification channels (Slack, Email, PagerDuty, Webhook, Tracecat) | Code written, including a real `POST /api/settings/test-notification` behind the "Send Test" buttons — not yet confirmed fired against a live service in production |
 | AI assistant | Code written (`app/api/ai.py`, `AiAssistant.tsx`); `anthropic` is now a declared dependency in `requirements.txt` — not yet confirmed used with a live API key in production |
 | Okta OIDC | **Deliberately dropped, not pending** — `app/auth/okta.py` is an intentional no-op; SAML 2.0 covers Okta SSO |
-| App-wide contextual help | The "?" → modal `HelpButton` pattern (built for Address Mappings / Traffic Rules) hasn't been extended to the rest of Settings yet |
+| SSL/TLS auto-detection | **Needs verification** — the code that wires an uploaded cert into uvicorn on startup lives in a code path that the current process entrypoint doesn't appear to execute; see Known Issues & Quirks above |
+| `ingest_http_port` Settings field | Vestigial — displayed in Settings → Ingest but not read anywhere in the backend; the real listen port is Settings → General → Port |
+| App-wide contextual help | **Done, not pending** — the "?" → modal `HelpButton` pattern originally built for Address Mappings/Traffic Rules is now on every main nav page and every Settings section |
 
 ---
 
@@ -708,6 +799,9 @@ This list is kept in sync with [FEATURES.md](FEATURES.md), which is the canonica
 - Change `secret_key` in `config.yaml` (or `PKTFLOW_SECRET_KEY` env var) before production use — `openssl rand -hex 32`
 - Change the default admin password immediately after first login
 - The ingest token is in **Settings → Ingest** and must match `auth.token` in each collector's `vector.toml`
+- Consider setting **Settings → Ingest → Allowed source IPs** to your collector hosts' IPs/CIDRs — the ingest token alone is bearer-only; the allowlist adds a source-IP check on top
 - `cors_origins` should be restricted to your dashboard origin in production
 - If using a self-signed cert or connecting by IP, set `verify_certificate = false` in Vector's TLS section
 - SAML SP Entity ID must exactly match Okta's "Audience URI" — both derived from Base URL in Settings
+- Only assign **Default Admin** (Settings → Security → Users) to an account whose credentials are tightly controlled — if every auth method is ever disabled, that account is the one anyone reaching the app is auto-logged in as
+- Suite Tokens (both the inbound one under Settings → Security → Suite Integration, and each outbound Sibling pkt App connection's token) are bearer credentials equivalent to a login — treat them like any other secret
