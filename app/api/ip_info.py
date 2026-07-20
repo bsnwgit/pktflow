@@ -4,6 +4,11 @@ GET /api/ip-info/{ip} — combined IP intelligence (ipinfo.io) + reputation
 stored API keys (see app/api/user_api_keys.py). Private/loopback/link-local
 addresses are rejected — external providers have nothing useful to say
 about them.
+
+GET /api/ip-info/internal/{ip} — the internal-IP counterpart. Looks the
+address up in pktIPAM (subnet, DHCP lease, DNS records, ARP sightings) over
+the Suite Integration channel (see app/integrations/suite_client.py).
+Public addresses are rejected — pktIPAM has nothing to say about them.
 """
 from __future__ import annotations
 
@@ -16,6 +21,7 @@ from pydantic import BaseModel
 
 from app.database import DB_PATH
 from app.dependencies import CurrentUser
+from app.integrations.suite_client import SuiteClient
 
 router = APIRouter()
 
@@ -26,6 +32,18 @@ class IpInfoResult(BaseModel):
     ipinfo_error: str | None = None
     abuseipdb: dict | None = None
     abuseipdb_error: str | None = None
+
+
+class InternalIpInfoResult(BaseModel):
+    ip: str
+    configured: bool
+    found: bool = False
+    error: str | None = None
+    subnet: dict | None = None
+    ip_address: dict | None = None
+    dhcp_leases: list[dict] = []
+    dns_records: list[dict] = []
+    arp_entries: list[dict] = []
 
 
 async def _get_user_key(username: str, provider: str) -> str:
@@ -85,3 +103,49 @@ async def get_ip_info(ip: str, user: CurrentUser):
             result.abuseipdb_error = "No AbuseIPDB key configured — add one in Settings → API Keys"
 
     return result
+
+
+async def _get_pktipam_integration() -> aiosqlite.Row | None:
+    """First enabled pktIPAM connection — there's no per-lookup way to pick
+    among several, so if more than one is configured the admin should
+    disable the ones that shouldn't serve internal-IP lookups."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM integrations WHERE app_name = 'pktipam' AND enabled = 1 ORDER BY name LIMIT 1"
+        ) as cur:
+            return await cur.fetchone()
+
+
+@router.get("/internal/{ip}", response_model=InternalIpInfoResult)
+async def get_internal_ip_info(ip: str, user: CurrentUser):
+    try:
+        ip_obj = ipaddress.ip_address(ip)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid IP address: {ip}")
+
+    if not (ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local):
+        raise HTTPException(status_code=400, detail="Internal IP lookup is only available for private addresses")
+
+    integration = await _get_pktipam_integration()
+    if not integration or not integration["base_url"] or not integration["suite_token"]:
+        return InternalIpInfoResult(ip=ip, configured=False, error="pktIPAM integration is not configured — add one in Settings → Security → Suite Integration")
+
+    client = SuiteClient(integration["base_url"], integration["suite_token"], suite_user="pktflow", suite_role="admin")
+    try:
+        data = await client.get("/api/ip-addresses/lookup", params={"ip": ip})
+    except httpx.HTTPStatusError as exc:
+        return InternalIpInfoResult(ip=ip, configured=True, error=f"pktIPAM returned HTTP {exc.response.status_code}")
+    except httpx.RequestError as exc:
+        return InternalIpInfoResult(ip=ip, configured=True, error=f"Could not reach pktIPAM: {exc}")
+
+    return InternalIpInfoResult(
+        ip=ip,
+        configured=True,
+        found=data.get("found", False),
+        subnet=data.get("subnet"),
+        ip_address=data.get("ip_address"),
+        dhcp_leases=data.get("dhcp_leases", []),
+        dns_records=data.get("dns_records", []),
+        arp_entries=data.get("arp_entries", []),
+    )
