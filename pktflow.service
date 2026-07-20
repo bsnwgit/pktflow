@@ -1,6 +1,10 @@
 # Template — install.sh substitutes __INSTALL_DIR__ / __LOG_DIR__ /
 # __SERVICE_USER__ / __SERVICE_GROUP__ before installing to systemd.
 # For a manual install, replace these placeholders yourself.
+#
+# Host/port are NOT set here — app/server.py reads them from config.yaml at
+# each process start, so Settings → General → Port only needs config.yaml
+# rewritten + a restart, not a unit file edit.
 [Unit]
 Description=pktFlow NetFlow Visualization Platform
 Documentation=https://github.com/bsnwgit/pktflow
@@ -16,12 +20,7 @@ Environment=PKTFLOW_CONFIG=__INSTALL_DIR__/config.yaml
 Environment=PKTFLOW_INSTALL_DIR=__INSTALL_DIR__
 
 # DuckDB requires single worker (one write connection allowed)
-ExecStart=__INSTALL_DIR__/venv/bin/uvicorn app.main:app \
-    --host 0.0.0.0 \
-    --port 8766 \
-    --workers 1 \
-    --log-level info \
-    --no-access-log
+ExecStart=__INSTALL_DIR__/venv/bin/python -m app.server
 
 # `always` (not `on-failure`) so the app's own restart-service fallback
 # (sending SIGTERM to the master process when it lacks passwordless sudo to

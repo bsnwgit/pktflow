@@ -97,6 +97,12 @@ export const api = {
     }
     return res.json() as Promise<{ access_token: string; role: string }>
   },
+  // Deliberately bypasses request() for the same reason as login() above.
+  autoLogin: async () => {
+    const res = await fetch('/api/auth/auto-login', { method: 'POST' })
+    if (!res.ok) throw new Error('Auto-login not available')
+    return res.json() as Promise<{ access_token: string; role: string }>
+  },
   logout: () => request('/auth/logout', { method: 'POST' }),
 
   getDeviceSummaries: () => request<DeviceSummary[]>('/flows/devices'),
@@ -164,6 +170,7 @@ export const api = {
   deleteUser: (id: number) => request(`/users/${id}`, { method: 'DELETE' }),
   activateUser: (id: number) => request(`/users/${id}/activate`, { method: 'PATCH' }),
   deactivateUser: (id: number) => request(`/users/${id}/deactivate`, { method: 'PATCH' }),
+  setDefaultAdmin: (id: number) => request(`/users/${id}/set-default-admin`, { method: 'PATCH' }),
   resetUserPassword: (id: number, newPassword: string) =>
     request(`/users/${id}/reset-password`, { method: 'PATCH', body: JSON.stringify({ new_password: newPassword }) }),
   changeMyPassword: (currentPassword: string, newPassword: string) =>
@@ -177,6 +184,13 @@ export const api = {
 
   restartService: () =>
     request<{ status: string; message: string }>('/system/restart', { method: 'POST' }),
+  getPort: () =>
+    request<{ port: number }>('/system/port'),
+  setPort: (port: number) =>
+    request<{ port: number; message: string }>('/system/port', {
+      method: 'POST',
+      body: JSON.stringify({ port }),
+    }),
 
   runCleanup: () =>
     request<{
@@ -231,6 +245,15 @@ export const api = {
   testUserApiKey: (provider: string, api_key: string) =>
     request<{ status: string; detail: string }>(`/user-api-keys/${provider}/test`, { method: 'POST', body: JSON.stringify({ api_key }) }),
   getIpInfo: (ip: string) => request<IpInfoResult>(`/ip-info/${ip}`),
+  getInternalIpInfo: (ip: string) => request<InternalIpInfoResult>(`/ip-info/internal/${ip}`),
+
+  getIntegrations: () => request<Integration[]>('/integrations'),
+  createIntegration: (body: IntegrationInput) =>
+    request<Integration>('/integrations', { method: 'POST', body: JSON.stringify(body) }),
+  updateIntegration: (id: number, body: Partial<IntegrationInput>) =>
+    request<Integration>(`/integrations/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteIntegration: (id: number) => request(`/integrations/${id}`, { method: 'DELETE' }),
+  testIntegration: (id: number) => request<{ healthy: boolean; detail: string }>(`/integrations/${id}/test`, { method: 'POST' }),
 
   getSslStatus: () => request<SslStatus>('/system/ssl/status'),
   uploadSsl: async (cert: File, key: File): Promise<SslStatus> => {
@@ -446,6 +469,7 @@ export interface User {
   email: string
   role: string
   is_active: boolean
+  is_default_admin: boolean
   created_at: string
   last_login: string | null
   has_password: boolean
@@ -572,6 +596,37 @@ export interface IpInfoResult {
   ipinfo_error: string | null
   abuseipdb: Record<string, any> | null
   abuseipdb_error: string | null
+}
+
+export interface Integration {
+  id: number
+  name: string
+  app_name: string
+  base_url: string
+  has_token: boolean
+  enabled: boolean
+  health_status: string
+  last_health_check: string | null
+}
+
+export interface IntegrationInput {
+  name: string
+  app_name?: string
+  base_url: string
+  suite_token: string
+  enabled?: boolean
+}
+
+export interface InternalIpInfoResult {
+  ip: string
+  configured: boolean
+  found: boolean
+  error: string | null
+  subnet: { cidr: string; vlan_id: number | null; site: string | null; description: string | null; gateway: string | null } | null
+  ip_address: { status: string; mac_address: string | null; hostname: string | null; description: string | null; owner: string | null; tags: string[] } | null
+  dhcp_leases: { mac_address: string | null; hostname: string | null; state: string; starts_at: string | null; ends_at: string | null; last_seen: string }[]
+  dns_records: { zone: string; name: string; record_type: string; ttl: number | null; last_seen: string }[]
+  arp_entries: { device_label: string | null; mac_address: string | null; interface: string | null; vlan_tag: number | null; last_seen: string }[]
 }
 
 export interface UserApiKey {
