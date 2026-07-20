@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search } from 'lucide-react'
-import { api, IpInfoResult } from '../api/client'
-import { isPrivateIp } from '../utils/ip'
+import { Search, Network } from 'lucide-react'
+import { api, IpInfoResult, InternalIpInfoResult } from '../api/client'
+import { isPrivateIp, isValidIpv4 } from '../utils/ip'
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 function IpInfoModal({ ip, onClose }: { ip: string; onClose: () => void }) {
@@ -105,12 +105,134 @@ function IpInfoModal({ ip, onClose }: { ip: string; onClose: () => void }) {
   )
 }
 
+// ── Internal (pktIPAM) modal ────────────────────────────────────────────────────
+function InternalIpInfoModal({ ip, onClose }: { ip: string; onClose: () => void }) {
+  const navigate = useNavigate()
+  const [data, setData]       = useState<InternalIpInfoResult | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState('')
+
+  useEffect(() => {
+    setLoading(true)
+    setError('')
+    api.getInternalIpInfo(ip)
+      .then(setData)
+      .catch(e => setError(e.message ?? 'Lookup failed'))
+      .finally(() => setLoading(false))
+  }, [ip])
+
+  const goToSettings = () => { onClose(); navigate('/settings?tab=security') }
+
+  const Row = ({ label, value }: { label: string; value?: string | number | null }) => (
+    value === undefined || value === null || value === '' ? null : (
+      <div className="flex justify-between items-start py-1.5 border-b border-gray-800 last:border-0">
+        <span className="text-xs text-white shrink-0 w-32">{label}</span>
+        <span className="text-sm text-white text-right break-all">{value}</span>
+      </div>
+    )
+  )
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-gray-900 border border-purple-800/60 rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <div>
+            <h2 className="font-semibold text-white">pktIPAM Lookup</h2>
+            <p className="text-xs font-mono text-purple-300 mt-0.5">{ip}</p>
+          </div>
+          <button onClick={onClose} className="text-white hover:text-white text-lg leading-none">✕</button>
+        </div>
+
+        <div className="px-5 py-4 space-y-5">
+          {loading && <p className="text-sm text-white">Looking up…</p>}
+          {error && <p className="text-sm text-red-400">{error}</p>}
+
+          {data && !data.configured && (
+            <p className="text-xs text-white">
+              {data.error}
+              <button onClick={goToSettings} className="ml-1 text-purple-400 hover:text-purple-300 underline">
+                Go to Settings →
+              </button>
+            </p>
+          )}
+
+          {data && data.configured && data.error && (
+            <p className="text-xs text-red-400">{data.error}</p>
+          )}
+
+          {data && data.configured && !data.error && !data.found && (
+            <p className="text-xs text-white">No record of {ip} in pktIPAM.</p>
+          )}
+
+          {data && data.configured && !data.error && data.found && (
+            <>
+              <div>
+                <p className="text-xs font-medium text-white uppercase tracking-wider mb-2">Inventory</p>
+                <Row label="Subnet" value={data.subnet?.cidr} />
+                <Row label="Site" value={data.subnet?.site} />
+                <Row label="Status" value={data.ip_address?.status} />
+                <Row label="Hostname" value={data.ip_address?.hostname} />
+                <Row label="MAC Address" value={data.ip_address?.mac_address} />
+                <Row label="Owner" value={data.ip_address?.owner} />
+                <Row label="Description" value={data.ip_address?.description} />
+              </div>
+
+              {data.dhcp_leases.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-white uppercase tracking-wider mb-2">DHCP Lease</p>
+                  <Row label="State" value={data.dhcp_leases[0].state} />
+                  <Row label="Hostname" value={data.dhcp_leases[0].hostname} />
+                  <Row label="MAC Address" value={data.dhcp_leases[0].mac_address} />
+                  <Row label="Ends" value={data.dhcp_leases[0].ends_at} />
+                </div>
+              )}
+
+              {data.dns_records.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-white uppercase tracking-wider mb-2">DNS Records</p>
+                  {data.dns_records.map((r, i) => (
+                    <Row key={i} label={r.record_type} value={`${r.name}.${r.zone}`} />
+                  ))}
+                </div>
+              )}
+
+              {data.arp_entries.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-white uppercase tracking-wider mb-2">Last Seen (ARP)</p>
+                  <Row label="Device" value={data.arp_entries[0].device_label} />
+                  <Row label="Interface" value={data.arp_entries[0].interface} />
+                  <Row label="VLAN" value={data.arp_entries[0].vlan_tag} />
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Link ──────────────────────────────────────────────────────────────────────
 export default function IpLink({ ip, className = '' }: { ip: string; className?: string }) {
   const [open, setOpen] = useState(false)
 
   if (isPrivateIp(ip)) {
-    return <span className={className}>{ip}</span>
+    if (!isValidIpv4(ip)) {
+      return <span className={className}>{ip}</span>
+    }
+    return (
+      <>
+        <button
+          onClick={e => { e.stopPropagation(); setOpen(true) }}
+          className={`${className} group inline-flex items-center gap-1 rounded px-1 -mx-1 hover:bg-purple-500/10 transition-colors`}
+          title="Look up in pktIPAM"
+        >
+          <span className="underline decoration-purple-400/70 decoration-2 underline-offset-2 decoration-dashed group-hover:decoration-purple-300">{ip}</span>
+          <Network className="w-3 h-3 text-purple-400 group-hover:text-purple-300 shrink-0" />
+        </button>
+        {open && <InternalIpInfoModal ip={ip} onClose={() => setOpen(false)} />}
+      </>
+    )
   }
 
   return (
