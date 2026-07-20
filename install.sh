@@ -1,9 +1,10 @@
 #!/bin/bash
 # pktFlow install script — Ubuntu Server 22.04/24.04 LTS
 # Usage: bash install.sh
-# Prompts for the install directory (default /opt/pktflow) when run interactively.
-# Override defaults with env vars to skip the prompt, e.g.:
-#   PKTFLOW_INSTALL_DIR=/opt/pktflow PKTFLOW_SERVICE_USER=pktflow bash install.sh
+# Prompts for the install directory (default /opt/pktflow) and port (default
+# 8766) when run interactively.
+# Override defaults with env vars to skip the prompts, e.g.:
+#   PKTFLOW_INSTALL_DIR=/opt/pktflow PKTFLOW_SERVICE_USER=pktflow PKTFLOW_PORT=8766 bash install.sh
 
 set -euo pipefail
 
@@ -12,6 +13,12 @@ if [ -z "${PKTFLOW_INSTALL_DIR:-}" ] && [ -t 0 ]; then
     INSTALL_DIR="${INSTALL_DIR_INPUT:-/opt/pktflow}"
 else
     INSTALL_DIR="${PKTFLOW_INSTALL_DIR:-/opt/pktflow}"
+fi
+if [ -z "${PKTFLOW_PORT:-}" ] && [ -t 0 ]; then
+    read -rp "Port [8766]: " PORT_INPUT
+    PORT="${PORT_INPUT:-8766}"
+else
+    PORT="${PKTFLOW_PORT:-8766}"
 fi
 LOG_DIR="${PKTFLOW_LOG_DIR:-$INSTALL_DIR/logs}"
 SERVICE_USER="${PKTFLOW_SERVICE_USER:-$(whoami)}"
@@ -23,6 +30,7 @@ REPO_DIR="$SCRIPT_DIR"
 echo "=== pktFlow Installer ==="
 echo "Install dir: $INSTALL_DIR"
 echo "Service user: $SERVICE_USER"
+echo "Port: $PORT"
 echo ""
 
 # ── 1. System packages ────────────────────────────────────────────────────────
@@ -101,6 +109,7 @@ if [ ! -f "$INSTALL_DIR/config.yaml" ]; then
     SECRET=$(openssl rand -hex 32)
     sed -i "s/CHANGE_ME_generate_with_openssl_rand_hex_32/$SECRET/" "$INSTALL_DIR/config.yaml"
     sed -i "s#/opt/pktflow#$INSTALL_DIR#g" "$INSTALL_DIR/config.yaml"
+    sed -i "s/^port: 8766/port: $PORT/" "$INSTALL_DIR/config.yaml"
     echo "  Config created at $INSTALL_DIR/config.yaml"
     echo "  !! Review and update cors_origins before production use !!"
 else
@@ -182,7 +191,7 @@ echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║              pktFlow installed successfully!             ║"
 echo "╠══════════════════════════════════════════════════════════╣"
-printf "║  URL:           http://%-35s║\n" "$(hostname -I | awk '{print $1}'):8766"
+printf "║  URL:           http://%-35s║\n" "$(hostname -I | awk '{print $1}'):$PORT"
 echo "║  Username:      admin                                    ║"
 printf "║  Password:      %-43s║\n" "$ADMIN_PASS"
 echo "║                                                          ║"

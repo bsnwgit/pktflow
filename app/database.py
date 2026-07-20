@@ -42,8 +42,8 @@ async def _seed_admin_user() -> None:
             hashed = pwd_ctx.hash(s.admin_password)
             username = s.admin_user or "admin"
             await conn.execute(
-                """INSERT INTO users (username, email, hashed_password, role, is_active, created_at)
-                   VALUES (?, ?, ?, 'admin', 1, ?)""",
+                """INSERT INTO users (username, email, hashed_password, role, is_active, is_default_admin, created_at)
+                   VALUES (?, ?, ?, 'admin', 1, 1, ?)""",
                 (username, f"{username}@localhost", hashed, datetime.utcnow().isoformat()),
             )
             await conn.commit()
