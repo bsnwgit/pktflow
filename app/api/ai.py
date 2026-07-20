@@ -33,6 +33,8 @@ Guidelines:
 - Keep responses focused — users are busy network engineers
 - Use plain text; avoid markdown headers in responses (inline bold is fine)"""
 
+DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+
 
 class ChatRequest(BaseModel):
     question: str
@@ -64,6 +66,8 @@ async def chat(
             detail="AI assistant not configured. Add your Anthropic API key in Settings → General.",
         )
 
+    model = await _get_setting(db, "ai_model") or DEFAULT_MODEL
+
     # Build context block
     ctx_lines: list[str] = []
     if body.context.get("devices"):
@@ -93,7 +97,7 @@ async def chat(
         import anthropic
         client = anthropic.AsyncAnthropic(api_key=api_key)
         response = await client.messages.create(
-            model="claude-haiku-4-5-20251001",   # Fast + cost-effective for in-app assistant
+            model=model,
             max_tokens=1024,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_message}],
