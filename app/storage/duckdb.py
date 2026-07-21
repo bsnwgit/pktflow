@@ -62,6 +62,7 @@ from app.models.flow import (
     TopologyNode, TopologyEdge,
 )
 from app.storage.base import StorageBackend
+from app.topology_enrich import attach_dominant_sampler
 
 log = logging.getLogger("pktflow.storage.duckdb")
 settings = get_settings()
@@ -434,6 +435,7 @@ class DuckDBBackend(StorageBackend):
         end: Optional[datetime] = None,
         limit: int = 500,
         offset: int = 0,
+        any_direction: bool = False,
     ) -> list[FlowSearchResult]:
         def _query():
             conditions: list[str] = []
@@ -442,10 +444,17 @@ class DuckDBBackend(StorageBackend):
                 conditions.append("timestamp >= ?"); params.append(start)
             if end:
                 conditions.append("timestamp <= ?"); params.append(end)
-            if src_ip:
-                conditions.append("src_ip = ?"); params.append(src_ip)
-            if dst_ip:
-                conditions.append("dst_ip = ?"); params.append(dst_ip)
+            if any_direction and src_ip and dst_ip:
+                conditions.append("((src_ip = ? AND dst_ip = ?) OR (src_ip = ? AND dst_ip = ?))")
+                params += [src_ip, dst_ip, dst_ip, src_ip]
+            elif any_direction and (src_ip or dst_ip):
+                ip = src_ip or dst_ip
+                conditions.append("(src_ip = ? OR dst_ip = ?)"); params += [ip, ip]
+            else:
+                if src_ip:
+                    conditions.append("src_ip = ?"); params.append(src_ip)
+                if dst_ip:
+                    conditions.append("dst_ip = ?"); params.append(dst_ip)
             if src_port is not None:
                 conditions.append("src_port = ?"); params.append(src_port)
             if dst_port is not None:
@@ -492,6 +501,7 @@ class DuckDBBackend(StorageBackend):
         sampler_ip: Optional[str] = None,
         start: Optional[datetime] = None,
         end: Optional[datetime] = None,
+        any_direction: bool = False,
     ) -> int:
         def _query():
             conditions: list[str] = []
@@ -500,10 +510,17 @@ class DuckDBBackend(StorageBackend):
                 conditions.append("timestamp >= ?"); params.append(start)
             if end:
                 conditions.append("timestamp <= ?"); params.append(end)
-            if src_ip:
-                conditions.append("src_ip = ?"); params.append(src_ip)
-            if dst_ip:
-                conditions.append("dst_ip = ?"); params.append(dst_ip)
+            if any_direction and src_ip and dst_ip:
+                conditions.append("((src_ip = ? AND dst_ip = ?) OR (src_ip = ? AND dst_ip = ?))")
+                params += [src_ip, dst_ip, dst_ip, src_ip]
+            elif any_direction and (src_ip or dst_ip):
+                ip = src_ip or dst_ip
+                conditions.append("(src_ip = ? OR dst_ip = ?)"); params += [ip, ip]
+            else:
+                if src_ip:
+                    conditions.append("src_ip = ?"); params.append(src_ip)
+                if dst_ip:
+                    conditions.append("dst_ip = ?"); params.append(dst_ip)
             if src_port is not None:
                 conditions.append("src_port = ?"); params.append(src_port)
             if dst_port is not None:
@@ -605,16 +622,31 @@ class DuckDBBackend(StorageBackend):
                     GROUP BY sampler_ip
                 """, params).fetchall()
 
-            return edge_rows, sampler_rows
+                # Dominant exporter per pair — lets the hierarchy anchor a
+                # conversation cluster under the vantage point that actually
+                # observed it (see clickhouse.py's get_topology for the full
+                # rationale — most conversations never touch the sampler's
+                # own IP as a src/dst endpoint).
+                sampler_attrib_rows = conn.execute(f"""
+                    SELECT
+                        CASE WHEN src_ip < dst_ip THEN src_ip ELSE dst_ip END AS ip_a,
+                        CASE WHEN src_ip < dst_ip THEN dst_ip ELSE src_ip END AS ip_b,
+                        sampler_ip,
+                        SUM(bytes) AS attrib_bytes
+                    FROM flows
+                    WHERE {where}
+                    GROUP BY ip_a, ip_b, sampler_ip
+                """, params).fetchall()
+
+            return edge_rows, sampler_rows, sampler_attrib_rows
 
         result = await self._read(_query)
-        edge_rows, sampler_rows = result if result else ([], [])
+        edge_rows, sampler_rows, sampler_attrib_raw = result if result else ([], [], [])
 
         sampler_map = {r[0]: {"name": r[1] or "", "site": r[2] or ""} for r in sampler_rows}
+        sampler_attrib_rows = [(r[0], r[1], r[2], int(r[3])) for r in sampler_attrib_raw]
 
         edges: list[TopologyEdge] = []
-        node_bytes: dict[str, int] = {}
-        node_flows: dict[str, int] = {}
         for r in edge_rows:
             src, dst = r[0], r[1]
             edges.append(TopologyEdge(
@@ -622,13 +654,22 @@ class DuckDBBackend(StorageBackend):
                 bytes=r[2], packets=r[3], flows=r[4],
                 protocol=r[5] or 0, dst_port=r[6] or 0,
             ))
-            node_bytes[src] = node_bytes.get(src, 0) + r[2]
-            node_bytes[dst] = node_bytes.get(dst, 0) + r[2]
-            node_flows[src] = node_flows.get(src, 0) + r[4]
-            node_flows[dst] = node_flows.get(dst, 0) + r[4]
 
+        edges = attach_dominant_sampler(edges, sampler_attrib_rows)
+
+        node_bytes: dict[str, int] = {}
+        node_flows: dict[str, int] = {}
+        for e in edges:
+            node_bytes[e.source] = node_bytes.get(e.source, 0) + e.bytes
+            node_bytes[e.target] = node_bytes.get(e.target, 0) + e.bytes
+            node_flows[e.source] = node_flows.get(e.source, 0) + e.flows
+            node_flows[e.target] = node_flows.get(e.target, 0) + e.flows
+
+        # Every known sampler gets a node even with zero direct edge-endpoint
+        # bytes (see clickhouse.py's get_topology for why).
+        all_ips = set(node_bytes.keys()) | set(sampler_map.keys())
         nodes: list[TopologyNode] = []
-        for ip in set(node_bytes.keys()):
+        for ip in all_ips:
             info = sampler_map.get(ip, {})
             nodes.append(TopologyNode(
                 id=ip,

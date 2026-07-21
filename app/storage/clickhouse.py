@@ -17,6 +17,7 @@ from clickhouse_driver import Client
 from app.config import get_settings
 from app.models.flow import FlowRecord, TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge, PortStat, ProtocolStat
 from app.storage.base import StorageBackend
+from app.topology_enrich import attach_dominant_sampler
 
 log = logging.getLogger("pktflow.storage.clickhouse")
 settings = get_settings()
@@ -256,6 +257,7 @@ class ClickHouseBackend(StorageBackend):
         end: Optional[datetime] = None,
         limit: int = 500,
         offset: int = 0,
+        any_direction: bool = False,
     ) -> list[FlowSearchResult]:
         conditions = []
         params: dict = {"limit": limit, "offset": offset}
@@ -264,10 +266,16 @@ class ClickHouseBackend(StorageBackend):
             conditions.append("timestamp >= %(start)s"); params["start"] = start
         if end:
             conditions.append("timestamp <= %(end)s"); params["end"] = end
-        if src_ip:
-            conditions.append("src_ip = %(src_ip)s"); params["src_ip"] = src_ip
-        if dst_ip:
-            conditions.append("dst_ip = %(dst_ip)s"); params["dst_ip"] = dst_ip
+        if any_direction and src_ip and dst_ip:
+            conditions.append("((src_ip = %(src_ip)s AND dst_ip = %(dst_ip)s) OR (src_ip = %(dst_ip)s AND dst_ip = %(src_ip)s))")
+            params["src_ip"] = src_ip; params["dst_ip"] = dst_ip
+        elif any_direction and (src_ip or dst_ip):
+            conditions.append("(src_ip = %(any_ip)s OR dst_ip = %(any_ip)s)"); params["any_ip"] = src_ip or dst_ip
+        else:
+            if src_ip:
+                conditions.append("src_ip = %(src_ip)s"); params["src_ip"] = src_ip
+            if dst_ip:
+                conditions.append("dst_ip = %(dst_ip)s"); params["dst_ip"] = dst_ip
         if src_port is not None:
             conditions.append("src_port = %(src_port)s"); params["src_port"] = src_port
         if dst_port is not None:
@@ -313,6 +321,7 @@ class ClickHouseBackend(StorageBackend):
         sampler_ip: Optional[str] = None,
         start: Optional[datetime] = None,
         end: Optional[datetime] = None,
+        any_direction: bool = False,
     ) -> int:
         conditions = []
         params: dict = {}
@@ -321,10 +330,16 @@ class ClickHouseBackend(StorageBackend):
             conditions.append("timestamp >= %(start)s"); params["start"] = start
         if end:
             conditions.append("timestamp <= %(end)s"); params["end"] = end
-        if src_ip:
-            conditions.append("src_ip = %(src_ip)s"); params["src_ip"] = src_ip
-        if dst_ip:
-            conditions.append("dst_ip = %(dst_ip)s"); params["dst_ip"] = dst_ip
+        if any_direction and src_ip and dst_ip:
+            conditions.append("((src_ip = %(src_ip)s AND dst_ip = %(dst_ip)s) OR (src_ip = %(dst_ip)s AND dst_ip = %(src_ip)s))")
+            params["src_ip"] = src_ip; params["dst_ip"] = dst_ip
+        elif any_direction and (src_ip or dst_ip):
+            conditions.append("(src_ip = %(any_ip)s OR dst_ip = %(any_ip)s)"); params["any_ip"] = src_ip or dst_ip
+        else:
+            if src_ip:
+                conditions.append("src_ip = %(src_ip)s"); params["src_ip"] = src_ip
+            if dst_ip:
+                conditions.append("dst_ip = %(dst_ip)s"); params["dst_ip"] = dst_ip
         if src_port is not None:
             conditions.append("src_port = %(src_port)s"); params["src_port"] = src_port
         if dst_port is not None:
@@ -490,10 +505,26 @@ class ClickHouseBackend(StorageBackend):
         sampler_rows = await asyncio.to_thread(self._execute, sampler_query, params)
         sampler_map = {str(r[0]): {"name": r[1], "site": r[2]} for r in sampler_rows}
 
+        # Dominant exporter per pair — most conversations never touch the
+        # sampler's own IP as a src/dst endpoint, so this is what lets the
+        # hierarchy anchor a conversation under the vantage point that
+        # actually observed it, instead of relying on incidental graph
+        # connectivity between otherwise-unrelated conversations.
+        sampler_attrib_query = f"""
+            SELECT
+                if(src_ip < dst_ip, src_ip, dst_ip) AS ip_a,
+                if(src_ip < dst_ip, dst_ip, src_ip) AS ip_b,
+                sampler_ip,
+                sum(bytes) AS attrib_bytes
+            FROM {settings.clickhouse_database}.flows
+            WHERE {where}
+            GROUP BY ip_a, ip_b, sampler_ip
+        """
+        sampler_attrib_raw = await asyncio.to_thread(self._execute, sampler_attrib_query, params)
+        sampler_attrib_rows = [(str(r[0]), str(r[1]), str(r[2]), int(r[3])) for r in sampler_attrib_raw]
+
         # Build edges; track dominant site per IP from flow data
         edges: list[TopologyEdge] = []
-        node_bytes: dict[str, int] = {}
-        node_flows: dict[str, int] = {}
         node_site: dict[str, str] = {}   # site from actual flows (first non-empty wins)
         for r in edge_rows:
             src, dst = str(r[0]), str(r[1])
@@ -509,16 +540,26 @@ class ClickHouseBackend(StorageBackend):
                 bytes_fwd=bytes_fwd, bytes_rev=bytes_rev,
                 is_asymmetric=is_asym,
             ))
-            node_bytes[src] = node_bytes.get(src, 0) + int(r[2])
-            node_bytes[dst] = node_bytes.get(dst, 0) + int(r[2])
-            node_flows[src] = node_flows.get(src, 0) + int(r[4])
-            node_flows[dst] = node_flows.get(dst, 0) + int(r[4])
             if edge_site:
                 node_site.setdefault(src, edge_site)
                 node_site.setdefault(dst, edge_site)
 
+        edges = attach_dominant_sampler(edges, sampler_attrib_rows)
+
         # Build nodes from IPs seen in edges
-        all_ips = set(node_bytes.keys())
+        node_bytes: dict[str, int] = {}
+        node_flows: dict[str, int] = {}
+        for e in edges:
+            node_bytes[e.source] = node_bytes.get(e.source, 0) + e.bytes
+            node_bytes[e.target] = node_bytes.get(e.target, 0) + e.bytes
+            node_flows[e.source] = node_flows.get(e.source, 0) + e.flows
+            node_flows[e.target] = node_flows.get(e.target, 0) + e.flows
+
+        # Every known sampler gets a node even with zero direct edge-endpoint
+        # bytes — most conversations never name the sampler's own IP as a
+        # src/dst, so without this the vantage point simply wouldn't exist
+        # for the hierarchy view to anchor anything under.
+        all_ips = set(node_bytes.keys()) | set(sampler_map.keys())
         nodes: list[TopologyNode] = []
         for ip in all_ips:
             info = sampler_map.get(ip, {})
