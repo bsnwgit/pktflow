@@ -24,6 +24,43 @@ const SITE_COLORS = [
   '#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4',
 ]
 
+function siteColorFn(nodes: TopologyNode[]): (site: string) => string {
+  const sites = Array.from(new Set(nodes.map(n => n.site || 'unknown')))
+  return (s: string) => SITE_COLORS[sites.indexOf(s) % SITE_COLORS.length]
+}
+
+function attachTooltip() {
+  const tip = d3.select('body').append('div')
+    .style('position', 'fixed').style('background', '#111827')
+    .style('border', '1px solid #374151').style('border-radius', '8px')
+    .style('padding', '8px 12px').style('font-size', '12px')
+    .style('color', '#f3f4f6').style('pointer-events', 'none')
+    .style('opacity', '0').style('z-index', '9999')
+    .style('max-width', '260px').style('line-height', '1.6')
+  const show = (_ev: MouseEvent, html: string) => tip.style('opacity', '1').html(html)
+  const move = (ev: MouseEvent) => tip.style('left', ev.clientX + 14 + 'px').style('top', ev.clientY - 10 + 'px')
+  const hide = () => tip.style('opacity', '0')
+  return { tip, show, move, hide }
+}
+
+function renderSiteLegend(
+  svg: d3.Selection<SVGSVGElement, unknown, null, undefined>,
+  sites: string[],
+  siteColor: (s: string) => string,
+) {
+  const legend = svg.append('g').attr('transform', 'translate(12,12)')
+  sites.slice(0, 8).forEach((site, i) => {
+    const row = legend.append('g').attr('transform', `translate(0,${i * 18})`)
+    row.append('circle').attr('r', 5).attr('cx', 5).attr('cy', 5).attr('fill', siteColor(site))
+    row.append('text').text(site).attr('x', 14).attr('y', 9)
+      .attr('fill', '#9ca3af').attr('font-size', '10px')
+  })
+}
+
+function truncateLabel(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n - 1) + '…' : s
+}
+
 // ── D3 Graph ──────────────────────────────────────────────────────────────────
 
 interface D3Node extends TopologyNode {
@@ -35,7 +72,7 @@ interface D3Link extends d3.SimulationLinkDatum<D3Node> {
   bytes: number; flows: number; protocol: number; dst_port: number
 }
 
-function TopologyGraph({
+function ForceGraph({
   svgRef,
   data,
   onNodeClick,
@@ -55,7 +92,7 @@ function TopologyGraph({
     svg.selectAll('*').remove()
 
     const sites = Array.from(new Set(data.nodes.map(n => n.site || 'unknown')))
-    const siteColor = (s: string) => SITE_COLORS[sites.indexOf(s) % SITE_COLORS.length]
+    const siteColor = siteColorFn(data.nodes)
 
     const maxBytes     = Math.max(...data.nodes.map(n => n.bytes), 1)
     const maxEdgeBytes = Math.max(...data.edges.map(e => e.bytes), 1)
@@ -232,21 +269,7 @@ function TopologyGraph({
       .attr('pointer-events', 'none')
 
     // Tooltip
-    const tip = d3.select('body').append('div')
-      .style('position', 'fixed').style('background', '#111827')
-      .style('border', '1px solid #374151').style('border-radius', '8px')
-      .style('padding', '8px 12px').style('font-size', '12px')
-      .style('color', '#f3f4f6').style('pointer-events', 'none')
-      .style('opacity', '0').style('z-index', '9999')
-      .style('max-width', '220px').style('line-height', '1.6')
-
-    const showTip = (ev: MouseEvent, html: string) => {
-      tip.style('opacity', '1').html(html)
-    }
-    const moveTip = (ev: MouseEvent) => {
-      tip.style('left', ev.clientX + 14 + 'px').style('top', ev.clientY - 10 + 'px')
-    }
-    const hideTip = () => tip.style('opacity', '0')
+    const { tip, show: showTip, move: moveTip, hide: hideTip } = attachTooltip()
 
     node
       .on('mouseenter', (ev, d) => showTip(ev, `
@@ -311,16 +334,567 @@ function TopologyGraph({
     })
 
     // Legend
-    const legend = svg.append('g').attr('transform', 'translate(12,12)')
-    sites.slice(0, 8).forEach((site, i) => {
-      const row = legend.append('g').attr('transform', `translate(0,${i * 18})`)
-      row.append('circle').attr('r', 5).attr('cx', 5).attr('cy', 5).attr('fill', siteColor(site))
-      row.append('text').text(site).attr('x', 14).attr('y', 9)
-        .attr('fill', '#9ca3af').attr('font-size', '10px')
-    })
+    renderSiteLegend(svg, sites, siteColor)
 
     return () => { sim.stop(); tip.remove() }
   }, [data, width, height, onNodeClick, svgRef])
+
+  return <svg ref={svgRef} width={width} height={height} />
+}
+
+// ── Hierarchical Graph ───────────────────────────────────────────────────────
+//
+// Fixed 3-band diagram per sampler, not a recursive tree: private devices
+// (grouped into labeled subnet boxes) at top, one generic "L3" pivot node
+// per sampler in the middle (no IP or stats shown — it represents the
+// network boundary itself, not a specific guessed router), external
+// destinations at bottom. Every private device gets exactly one line up
+// into L3; every external gets exactly one line down from L3 — so a
+// destination reached by five different internal hosts still renders once,
+// with five lines converging on it, never duplicated or chained through
+// each other. Private<->private traffic draws as a direct dashed line
+// beside the bands, since it never actually crosses the L3 boundary.
+
+// Pure IP-address classification — no lookback at traffic history, no
+// per-deployment configuration. Works identically on any network: private
+// (RFC 1918 + loopback + link-local) vs. public, and /24 grouping for
+// clustering same-subnet devices into their own labeled box.
+function isPrivateIP(ip: string): boolean {
+  const parts = ip.split('.').map(Number)
+  if (parts.length !== 4 || parts.some(p => Number.isNaN(p))) return false
+  const [a, b] = parts
+  if (a === 10) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 192 && b === 168) return true
+  if (a === 127) return true
+  if (a === 169 && b === 254) return true
+  return false
+}
+
+function subnet24(ip: string): string {
+  const parts = ip.split('.')
+  return parts.length === 4 ? `${parts[0]}.${parts[1]}.${parts[2]}` : ip
+}
+
+interface LineInfo {
+  peerIds: Set<string>
+  bytes: number
+  flows: number
+}
+
+interface SamplerBand {
+  sampler: TopologyNode
+  subnetGroups: { subnet: string; devices: TopologyNode[] }[]
+  externals: TopologyNode[]
+  privateLine: Map<string, LineInfo>    // private device id -> aggregate toward L3
+  externalLine: Map<string, LineInfo>   // external device id -> aggregate from L3
+  privatePrivateEdges: TopologyEdge[]   // direct edges that never cross the L3 boundary
+}
+
+function buildLayeredDiagram(nodes: TopologyNode[], edges: TopologyEdge[]): SamplerBand[] {
+  const nodeById = new Map(nodes.map(n => [n.id, n]))
+  const samplers = nodes.filter(n => n.is_sampler)
+
+  return samplers.map(sampler => {
+    const relevantEdges = edges.filter(e => e.sampler_ip === sampler.id)
+
+    const privateLine = new Map<string, LineInfo>()
+    const externalLine = new Map<string, LineInfo>()
+    const privatePrivateEdges: TopologyEdge[] = []
+    const privateIds = new Set<string>()
+    const externalIds = new Set<string>()
+
+    for (const e of relevantEdges) {
+      const srcPriv = isPrivateIP(e.source)
+      const dstPriv = isPrivateIP(e.target)
+      if (srcPriv && dstPriv) {
+        privatePrivateEdges.push(e)
+        privateIds.add(e.source); privateIds.add(e.target)
+        continue
+      }
+      if (!srcPriv && !dstPriv) continue // public<->public shouldn't occur; skip defensively
+
+      const privId = srcPriv ? e.source : e.target
+      const extId  = srcPriv ? e.target : e.source
+      privateIds.add(privId); externalIds.add(extId)
+
+      const pl = privateLine.get(privId) || { peerIds: new Set<string>(), bytes: 0, flows: 0 }
+      pl.peerIds.add(extId); pl.bytes += e.bytes; pl.flows += e.flows
+      privateLine.set(privId, pl)
+
+      const el = externalLine.get(extId) || { peerIds: new Set<string>(), bytes: 0, flows: 0 }
+      el.peerIds.add(privId); el.bytes += e.bytes; el.flows += e.flows
+      externalLine.set(extId, el)
+    }
+
+    const privateDevices = [...privateIds].map(id => nodeById.get(id)).filter((n): n is TopologyNode => !!n)
+    const externalDevices = [...externalIds].map(id => nodeById.get(id)).filter((n): n is TopologyNode => !!n)
+      .sort((a, b) => b.bytes - a.bytes)
+
+    const bySubnet = new Map<string, TopologyNode[]>()
+    for (const d of privateDevices) {
+      const key = subnet24(d.id)
+      if (!bySubnet.has(key)) bySubnet.set(key, [])
+      bySubnet.get(key)!.push(d)
+    }
+    const subnetGroups = [...bySubnet.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([subnet, devices]) => ({ subnet, devices: devices.sort((a, b) => b.bytes - a.bytes) }))
+
+    return { sampler, subnetGroups, externals: externalDevices, privateLine, externalLine, privatePrivateEdges }
+  })
+}
+
+// ── Layout (manual — no d3.tree; this is a fixed band diagram, not a tree) ──
+
+const CARD_W = 172
+const CARD_H = 58
+const DEVICE_GAP_Y = 14
+const SUBNET_PAD = 16
+const SUBNET_LABEL_H = 26
+const SUBNET_GAP_X = 36
+const BAND_GAP_Y = 110
+const L3_W = 150
+const L3_H = 56
+const EXTERNAL_MAX_COLS = 6
+const EXTERNAL_GAP_X = 20
+const EXTERNAL_GAP_Y = 16
+const SAMPLER_GAP_X = 100
+
+interface PositionedCard { node: TopologyNode; x: number; y: number; samplerId: string; kind: 'private' | 'external' }
+interface LabeledBox { x: number; y: number; w: number; h: number; label: string }
+interface L3Box { sampler: TopologyNode; x: number; y: number }
+interface LayoutLine {
+  kind: 'private-l3' | 'l3-external' | 'private-private'
+  aId: string; bId: string; samplerId: string
+  bytes: number; flows: number
+  edge?: TopologyEdge
+}
+interface SamplerHeader { x: number; y: number; text: string }
+
+interface Layout {
+  cards: PositionedCard[]
+  subnetBoxes: LabeledBox[]
+  externalBoxes: LabeledBox[]
+  l3Boxes: L3Box[]
+  lines: LayoutLine[]
+  headers: SamplerHeader[]
+  width: number
+  height: number
+}
+
+function layoutSamplerBands(bands: SamplerBand[]): Layout {
+  const cards: PositionedCard[] = []
+  const subnetBoxes: LabeledBox[] = []
+  const externalBoxes: LabeledBox[] = []
+  const l3Boxes: L3Box[] = []
+  const lines: LayoutLine[] = []
+  const headers: SamplerHeader[] = []
+
+  const TOP = 44
+  let cursorX = 40
+  let maxBottom = 0
+
+  for (const band of bands) {
+    const samplerId = band.sampler.id
+    headers.push({ x: cursorX, y: TOP - 20, text: band.sampler.sampler_name || band.sampler.id })
+
+    let subnetX = cursorX
+    let tallestSubnet = 0
+    const subnetCenters: number[] = []
+    for (const group of band.subnetGroups) {
+      const n = group.devices.length
+      const boxH = SUBNET_LABEL_H + SUBNET_PAD + n * CARD_H + Math.max(0, n - 1) * DEVICE_GAP_Y + SUBNET_PAD
+      const boxW = CARD_W + SUBNET_PAD * 2
+      subnetBoxes.push({ x: subnetX, y: TOP, w: boxW, h: boxH, label: group.subnet + '.0/24' })
+      tallestSubnet = Math.max(tallestSubnet, boxH)
+      subnetCenters.push(subnetX + boxW / 2)
+
+      let deviceY = TOP + SUBNET_LABEL_H + SUBNET_PAD + CARD_H / 2
+      for (const dev of group.devices) {
+        cards.push({ node: dev, x: subnetX + boxW / 2, y: deviceY, samplerId, kind: 'private' })
+        deviceY += CARD_H + DEVICE_GAP_Y
+      }
+      subnetX += boxW + SUBNET_GAP_X
+    }
+    const bandEndX = band.subnetGroups.length ? subnetX - SUBNET_GAP_X : cursorX + CARD_W
+    const privateSpanCenter = subnetCenters.length
+      ? (subnetCenters[0] + subnetCenters[subnetCenters.length - 1]) / 2
+      : cursorX + CARD_W / 2
+
+    const l3Y = TOP + tallestSubnet + BAND_GAP_Y / 2
+    const l3X = privateSpanCenter
+    l3Boxes.push({ sampler: band.sampler, x: l3X, y: l3Y })
+
+    for (const [privId, info] of band.privateLine) {
+      lines.push({ kind: 'private-l3', aId: privId, bId: samplerId, samplerId, bytes: info.bytes, flows: info.flows })
+    }
+
+    const nExt = band.externals.length
+    const cols = Math.max(1, Math.min(EXTERNAL_MAX_COLS, nExt))
+    const rows = nExt ? Math.ceil(nExt / cols) : 0
+    const extGridW = cols * CARD_W + Math.max(0, cols - 1) * EXTERNAL_GAP_X
+    const extBoxW = extGridW + SUBNET_PAD * 2
+    const extBoxH = SUBNET_LABEL_H + SUBNET_PAD + rows * CARD_H + Math.max(0, rows - 1) * EXTERNAL_GAP_Y + SUBNET_PAD
+    const extBoxX = l3X - extBoxW / 2
+    const extBoxY = l3Y + L3_H / 2 + BAND_GAP_Y / 2
+    if (nExt) externalBoxes.push({ x: extBoxX, y: extBoxY, w: extBoxW, h: extBoxH, label: 'External' })
+
+    band.externals.forEach((dev, i) => {
+      const col = i % cols, row = Math.floor(i / cols)
+      const x = extBoxX + SUBNET_PAD + col * (CARD_W + EXTERNAL_GAP_X) + CARD_W / 2
+      const y = extBoxY + SUBNET_LABEL_H + SUBNET_PAD + row * (CARD_H + EXTERNAL_GAP_Y) + CARD_H / 2
+      cards.push({ node: dev, x, y, samplerId, kind: 'external' })
+    })
+
+    for (const [extId, info] of band.externalLine) {
+      lines.push({ kind: 'l3-external', aId: samplerId, bId: extId, samplerId, bytes: info.bytes, flows: info.flows })
+    }
+    for (const edge of band.privatePrivateEdges) {
+      lines.push({ kind: 'private-private', aId: edge.source, bId: edge.target, samplerId, bytes: edge.bytes, flows: edge.flows, edge })
+    }
+
+    maxBottom = Math.max(maxBottom, extBoxY + extBoxH, l3Y + L3_H)
+    cursorX = Math.max(bandEndX, extBoxX + extBoxW) + SAMPLER_GAP_X
+  }
+
+  return { cards, subnetBoxes, externalBoxes, l3Boxes, lines, headers, width: cursorX, height: maxBottom + 40 }
+}
+
+const qualify = (samplerId: string, id: string) => `${samplerId}|${id}`
+const l3Key = (samplerId: string) => `L3|${samplerId}`
+
+function HierarchicalGraph({
+  svgRef,
+  data,
+  width,
+  height,
+  window_,
+}: {
+  svgRef: RefObject<SVGSVGElement>
+  data: { nodes: TopologyNode[]; edges: TopologyEdge[] }
+  width: number
+  height: number
+  window_: string
+}) {
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (!svgRef.current || !data.nodes.length) return
+
+    const svg = d3.select(svgRef.current)
+    svg.selectAll('*').remove()
+
+    const sites = Array.from(new Set(data.nodes.map(n => n.site || 'unknown')))
+    const siteColor = siteColorFn(data.nodes)
+
+    const bands = buildLayeredDiagram(data.nodes, data.edges)
+    const bandById = new Map(bands.map(b => [b.sampler.id, b]))
+    const layout = layoutSamplerBands(bands)
+    if (!layout.cards.length && !layout.l3Boxes.length) return
+
+    const maxLineBytes = Math.max(...layout.lines.map(l => l.bytes), 1)
+    const wScale = d3.scaleSqrt().domain([0, maxLineBytes]).range([1, 7])
+
+    const cardPos = new Map(layout.cards.map(c => [qualify(c.samplerId, c.node.id), c]))
+    const l3Pos = new Map(layout.l3Boxes.map(l => [l.sampler.id, l]))
+
+    const g = svg.append('g')
+
+    const zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.08, 10])
+      .on('zoom', ev => g.attr('transform', ev.transform))
+    svg.call(zoomBehavior)
+
+    // Fit the whole diagram in view on first render, small padding top-left.
+    const scale = Math.min(1.1, width / layout.width, height / layout.height)
+    svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(20, 20).scale(Math.max(scale, 0.05)))
+
+    svg.append('defs').append('marker')
+      .attr('id', 'arr-h')
+      .attr('viewBox', '0 -4 8 8').attr('refX', 8).attr('refY', 0)
+      .attr('markerWidth', 5).attr('markerHeight', 5).attr('orient', 'auto')
+      .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', '#4b5563')
+
+    const linkGenV = d3.linkVertical<{ source: { x: number; y: number }; target: { x: number; y: number } }, { x: number; y: number }>()
+      .x(d => d.x).y(d => d.y)
+    const linkGenH = d3.linkHorizontal<{ source: { x: number; y: number }; target: { x: number; y: number } }, { x: number; y: number }>()
+      .x(d => d.x).y(d => d.y)
+
+    function linePoints(line: LayoutLine): { source: { x: number; y: number }; target: { x: number; y: number } } | null {
+      if (line.kind === 'private-l3') {
+        const card = cardPos.get(qualify(line.samplerId, line.aId))
+        const l3 = l3Pos.get(line.samplerId)
+        if (!card || !l3) return null
+        return { source: { x: card.x, y: card.y + CARD_H / 2 }, target: { x: l3.x, y: l3.y - L3_H / 2 } }
+      }
+      if (line.kind === 'l3-external') {
+        const l3 = l3Pos.get(line.samplerId)
+        const card = cardPos.get(qualify(line.samplerId, line.bId))
+        if (!card || !l3) return null
+        return { source: { x: l3.x, y: l3.y + L3_H / 2 }, target: { x: card.x, y: card.y - CARD_H / 2 } }
+      }
+      const a = cardPos.get(qualify(line.samplerId, line.aId))
+      const b = cardPos.get(qualify(line.samplerId, line.bId))
+      if (!a || !b) return null
+      return { source: { x: a.x, y: a.y }, target: { x: b.x, y: b.y } }
+    }
+
+    const validLines = layout.lines
+      .map(line => ({ line, pts: linePoints(line) }))
+      .filter((d): d is { line: LayoutLine; pts: { source: { x: number; y: number }; target: { x: number; y: number } } } => !!d.pts)
+
+    // ── Grouping boxes (subnets + external band) — drawn first, behind everything ──
+    const boxGroup = g.append('g')
+    boxGroup.selectAll('rect.subnet-box')
+      .data(layout.subnetBoxes).join('rect')
+      .attr('class', 'subnet-box')
+      .attr('x', d => d.x).attr('y', d => d.y).attr('width', d => d.w).attr('height', d => d.h)
+      .attr('rx', 10).attr('fill', 'none').attr('stroke', '#374151').attr('stroke-width', 1)
+    boxGroup.selectAll('text.subnet-label')
+      .data(layout.subnetBoxes).join('text')
+      .attr('class', 'subnet-label')
+      .attr('x', d => d.x + 12).attr('y', d => d.y + 18)
+      .attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#9ca3af')
+      .text(d => d.label)
+    boxGroup.selectAll('rect.ext-box')
+      .data(layout.externalBoxes).join('rect')
+      .attr('class', 'ext-box')
+      .attr('x', d => d.x).attr('y', d => d.y).attr('width', d => d.w).attr('height', d => d.h)
+      .attr('rx', 10).attr('fill', 'none').attr('stroke', '#374151').attr('stroke-width', 1)
+    boxGroup.selectAll('text.ext-label')
+      .data(layout.externalBoxes).join('text')
+      .attr('class', 'ext-label')
+      .attr('x', d => d.x + 12).attr('y', d => d.y + 18)
+      .attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#9ca3af')
+      .text(d => d.label)
+
+    g.append('g').selectAll('text.sampler-header')
+      .data(layout.headers).join('text')
+      .attr('class', 'sampler-header')
+      .attr('x', d => d.x).attr('y', d => d.y)
+      .attr('font-size', '12px').attr('font-weight', '700').attr('fill', '#e5e7eb')
+      .text(d => d.text)
+
+    // ── Links ─────────────────────────────────────────────────────────────────
+    // private<->private links draw thin and dashed (they never cross the L3
+    // boundary at all); private-l3/l3-external links carry real aggregated
+    // weight and get an arrowhead showing the direction of the hierarchy.
+    const linkSel = g.append('g').selectAll<SVGPathElement, typeof validLines[number]>('path')
+      .data(validLines).join('path')
+      .attr('fill', 'none')
+      .attr('stroke', d => d.line.kind === 'private-private' ? '#6b7280' : '#4b5563')
+      .attr('stroke-dasharray', d => d.line.kind === 'private-private' ? '4,3' : null)
+      .attr('stroke-width', d => wScale(d.line.bytes))
+      .attr('stroke-opacity', 0.65)
+      .attr('marker-end', d => d.line.kind === 'private-private' ? null : 'url(#arr-h)')
+      .attr('d', d => (d.line.kind === 'private-private' ? linkGenH(d.pts) : linkGenV(d.pts))!)
+
+    // ── L3 nodes — generic by design: no IP, no stats, just what it is ─────────
+    const l3Sel = g.append('g').selectAll<SVGGElement, typeof layout.l3Boxes[number]>('g')
+      .data(layout.l3Boxes).join('g')
+      .attr('transform', d => `translate(${d.x},${d.y})`)
+      .attr('cursor', 'default')
+
+    l3Sel.append('rect')
+      .attr('x', -L3_W / 2).attr('y', -L3_H / 2).attr('width', L3_W).attr('height', L3_H)
+      .attr('rx', 8).attr('ry', 8)
+      .attr('fill', '#111827')
+      .attr('stroke', '#6b7280').attr('stroke-width', 1.5).attr('stroke-dasharray', '4,2')
+
+    l3Sel.append('text')
+      .text('L3')
+      .attr('text-anchor', 'middle').attr('y', -4)
+      .attr('font-size', '13px').attr('font-weight', '700').attr('fill', '#d1d5db').attr('letter-spacing', '0.05em')
+
+    l3Sel.append('text')
+      .text('network boundary')
+      .attr('text-anchor', 'middle').attr('y', 12)
+      .attr('font-size', '8px').attr('fill', '#6b7280')
+
+    // ── Device cards (private + external) ───────────────────────────────────────
+    const TEXT_X = -CARD_W / 2 + 14
+
+    const cardSel = g.append('g').selectAll<SVGGElement, typeof layout.cards[number]>('g')
+      .data(layout.cards).join('g')
+      .attr('transform', c => `translate(${c.x},${c.y})`)
+      .attr('cursor', 'pointer')
+      .on('click', (_, c) => navigate(`/explorer?src_ip=${encodeURIComponent(c.node.id)}&any_direction=true&window=${window_}`))
+
+    cardSel.append('rect')
+      .attr('class', 'card-border')
+      .attr('x', -CARD_W / 2).attr('y', -CARD_H / 2)
+      .attr('width', CARD_W).attr('height', CARD_H)
+      .attr('rx', 8).attr('ry', 8)
+      .attr('fill', '#1f2937')
+      .attr('stroke', c => siteColor(c.node.site || 'unknown'))
+      .attr('stroke-width', 1.25)
+
+    cardSel.append('rect')
+      .attr('x', -CARD_W / 2).attr('y', -CARD_H / 2)
+      .attr('width', 4).attr('height', CARD_H)
+      .attr('fill', c => siteColor(c.node.site || 'unknown'))
+
+    cardSel.append('text')
+      .text(c => truncateLabel(c.node.sampler_name || c.node.id, 21))
+      .attr('x', TEXT_X).attr('y', -6)
+      .attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#f3f4f6')
+
+    cardSel.append('text')
+      .text(c => c.node.sampler_name ? c.node.id : (c.node.site || (c.kind === 'external' ? 'external' : '')))
+      .attr('x', TEXT_X).attr('y', 8)
+      .attr('font-size', '9px').attr('font-family', 'monospace').attr('fill', '#9ca3af')
+
+    cardSel.append('text')
+      .text(c => `${fmtBytes(c.node.bytes)} · ${c.node.flows.toLocaleString()} fl`)
+      .attr('x', TEXT_X).attr('y', 20)
+      .attr('font-size', '8.5px').attr('fill', '#6b7280')
+
+    // ── Tooltip + hover highlight ────────────────────────────────────────────────
+    // Always-on: hovering a device highlights its own line to L3 plus only the
+    // specific peers it actually reaches on the other side of L3 (not every
+    // device passing through that sampler); hovering L3 itself lights up
+    // everything that sampler observed.
+    const { tip, show: showTip, move: moveTip, hide: hideTip } = attachTooltip()
+
+    function computeKeep(kind: 'private' | 'external' | 'l3', id: string, samplerId: string): Set<string> {
+      const band = bandById.get(samplerId)
+      const keep = new Set<string>()
+      if (!band) return keep
+      if (kind === 'private') {
+        keep.add(qualify(samplerId, id)); keep.add(l3Key(samplerId))
+        band.privateLine.get(id)?.peerIds.forEach(x => keep.add(qualify(samplerId, x)))
+        band.privatePrivateEdges.forEach(e => {
+          if (e.source === id) keep.add(qualify(samplerId, e.target))
+          if (e.target === id) keep.add(qualify(samplerId, e.source))
+        })
+      } else if (kind === 'external') {
+        keep.add(qualify(samplerId, id)); keep.add(l3Key(samplerId))
+        band.externalLine.get(id)?.peerIds.forEach(x => keep.add(qualify(samplerId, x)))
+      } else {
+        keep.add(l3Key(samplerId))
+        band.privateLine.forEach((_, pid) => keep.add(qualify(samplerId, pid)))
+        band.externalLine.forEach((_, eid) => keep.add(qualify(samplerId, eid)))
+        band.privatePrivateEdges.forEach(e => { keep.add(qualify(samplerId, e.source)); keep.add(qualify(samplerId, e.target)) })
+      }
+      return keep
+    }
+
+    const HIGHLIGHT_COLOR = '#60a5fa'
+    const baseLinkColor = (d: typeof validLines[number]) => d.line.kind === 'private-private' ? '#6b7280' : '#4b5563'
+
+    function isLineActive(d: typeof validLines[number], keep: Set<string>): boolean {
+      const { line } = d
+      if (line.kind === 'private-l3') return keep.has(qualify(line.samplerId, line.aId)) && keep.has(l3Key(line.samplerId))
+      if (line.kind === 'l3-external') return keep.has(qualify(line.samplerId, line.bId)) && keep.has(l3Key(line.samplerId))
+      return keep.has(qualify(line.samplerId, line.aId)) && keep.has(qualify(line.samplerId, line.bId))
+    }
+
+    function applyHighlight(keep: Set<string>) {
+      cardSel.attr('opacity', c => keep.has(qualify(c.samplerId, c.node.id)) ? 1 : 0.25)
+      cardSel.select<SVGRectElement>('rect.card-border')
+        .attr('stroke', c => keep.has(qualify(c.samplerId, c.node.id)) ? HIGHLIGHT_COLOR : siteColor(c.node.site || 'unknown'))
+        .attr('stroke-width', c => keep.has(qualify(c.samplerId, c.node.id)) ? 2.5 : 1.25)
+      l3Sel.attr('opacity', d => keep.has(l3Key(d.sampler.id)) ? 1 : 0.25)
+      linkSel
+        .attr('opacity', d => isLineActive(d, keep) ? 1 : 0.12)
+        .attr('stroke', d => isLineActive(d, keep) ? HIGHLIGHT_COLOR : baseLinkColor(d))
+        .attr('stroke-width', d => isLineActive(d, keep) ? Math.max(2, wScale(d.line.bytes)) : wScale(d.line.bytes))
+    }
+    function clearHighlight() {
+      cardSel.attr('opacity', 1)
+      cardSel.select<SVGRectElement>('rect.card-border')
+        .attr('stroke', c => siteColor(c.node.site || 'unknown'))
+        .attr('stroke-width', 1.25)
+      l3Sel.attr('opacity', 1)
+      linkSel
+        .attr('opacity', 1)
+        .attr('stroke', d => baseLinkColor(d))
+        .attr('stroke-width', d => wScale(d.line.bytes))
+    }
+
+    // The card itself already shows name/id/bytes/flows — repeating that in
+    // the tooltip adds nothing, so the tooltip instead lists the actual
+    // connections (peer IP, port, protocol) that aren't visible on the card.
+    const MAX_TOOLTIP_ROWS = 10
+    function connectionRows(deviceId: string, samplerId: string): string {
+      const rows = data.edges
+        .filter(e => e.sampler_ip === samplerId && (e.source === deviceId || e.target === deviceId))
+        .sort((a, b) => b.bytes - a.bytes)
+      if (!rows.length) return '<br><span style="color:#9ca3af">No recorded connections</span>'
+      const shown = rows.slice(0, MAX_TOOLTIP_ROWS).map(e => {
+        const peer = e.source === deviceId ? e.target : e.source
+        const port = e.dst_port ? `:${e.dst_port}` : ''
+        return `<br>${peer}${port} <span style="color:#6b7280">${protoShort(e.protocol)} · ${fmtBytes(e.bytes)}</span>`
+      }).join('')
+      const more = rows.length > MAX_TOOLTIP_ROWS ? `<br><span style="color:#6b7280">+${rows.length - MAX_TOOLTIP_ROWS} more</span>` : ''
+      return shown + more
+    }
+
+    cardSel
+      .on('mouseenter', (ev, c) => {
+        applyHighlight(computeKeep(c.kind, c.node.id, c.samplerId))
+        showTip(ev, `
+          <b>${c.node.sampler_name || c.node.id}</b>
+          ${connectionRows(c.node.id, c.samplerId)}
+        `)
+      })
+      .on('mousemove', moveTip)
+      .on('mouseleave', () => { clearHighlight(); hideTip() })
+
+    l3Sel
+      .on('mouseenter', (ev, d) => {
+        applyHighlight(computeKeep('l3', '', d.sampler.id))
+        showTip(ev, `
+          <b>L3 — network boundary</b>
+          <br><span style="color:#9ca3af">Every private↔external conversation ${d.sampler.sampler_name || d.sampler.id} observed passes through here. Generic by design — this represents the boundary itself, not a specific guessed router.</span>
+        `)
+      })
+      .on('mousemove', moveTip)
+      .on('mouseleave', () => { clearHighlight(); hideTip() })
+
+    linkSel
+      .attr('cursor', d => d.line.kind === 'private-private' ? 'pointer' : 'default')
+      .on('click', (_, d) => {
+        if (d.line.kind !== 'private-private') return
+        navigate(`/explorer?src_ip=${encodeURIComponent(d.line.aId)}&dst_ip=${encodeURIComponent(d.line.bId)}&any_direction=true&window=${window_}`)
+      })
+      .on('mouseenter', (ev, d) => {
+        const { line } = d
+        if (line.kind === 'private-l3') applyHighlight(computeKeep('private', line.aId, line.samplerId))
+        else if (line.kind === 'l3-external') applyHighlight(computeKeep('external', line.bId, line.samplerId))
+        else applyHighlight(new Set([qualify(line.samplerId, line.aId), qualify(line.samplerId, line.bId)]))
+
+        if (line.kind === 'private-private') {
+          const e = line.edge!
+          const asymFlag = e.is_asymmetric
+            ? `<br><span style="color:#f59e0b">⚠ Asymmetric — one side sent ≥10× the other</span>`
+            : ''
+          showTip(ev, `
+            <b>${e.source} ↔ ${e.target}</b>
+            <br>Total: ${fmtBytes(e.bytes)} · ${e.flows.toLocaleString()} flows
+            <br>→ ${fmtBytes(e.bytes_fwd)} &nbsp; ← ${fmtBytes(e.bytes_rev)}
+            <br><span style="color:#9ca3af">${protoShort(e.protocol)}${e.dst_port ? `:${e.dst_port}` : ''}</span>
+            ${asymFlag}
+            <br><span style="color:#9ca3af">Click to view these flows in Explorer</span>
+          `)
+        } else {
+          const label = line.kind === 'private-l3' ? line.aId : line.bId
+          showTip(ev, `
+            <b>${label} ↔ L3</b>
+            <br>Total: ${fmtBytes(line.bytes)} · ${line.flows.toLocaleString()} flows
+            <br><span style="color:#9ca3af">Click ${label} directly to view its flows in Explorer</span>
+          `)
+        }
+      })
+      .on('mousemove', moveTip)
+      .on('mouseleave', () => { clearHighlight(); hideTip() })
+
+    // Legend
+    renderSiteLegend(svg, sites, siteColor)
+
+    return () => { tip.remove() }
+  }, [data, width, height, svgRef, window_, navigate])
 
   return <svg ref={svgRef} width={width} height={height} />
 }
@@ -345,6 +919,7 @@ export default function Topology() {
   const exportMenuRef  = useRef<HTMLDivElement>(null)
   const [dims, setDims] = useState({ w: 900, h: 600 })
 
+  const [layout, setLayout]      = useState<'hierarchical' | 'force'>('hierarchical')
   const [window_, setWindow]     = useState('1h')
   const [sampler, setSampler]    = useState('')
   const [minBytes, setMinBytes]  = useState('')
@@ -535,30 +1110,30 @@ export default function Topology() {
   }
 
   async function doExportLucidchart() {
-    if (!svgRef.current) return
     setShowExport(false)
     setExportMsg('Sending to Lucidchart…')
-    const svgStr = new XMLSerializer().serializeToString(svgRef.current)
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch('/api/topology/export/lucidchart', {
+      const params = new URLSearchParams({ window: window_ })
+      if (sampler)  params.set('sampler_ip', sampler)
+      if (minBytes) params.set('min_bytes', minBytes)
+      const res = await fetch(`/api/flows/topology/lucidchart?${params.toString()}`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ svg: svgStr }),
       })
       if (res.ok) {
-        const { url } = await res.json()
-        window.location.href = url
+        const { edit_url } = await res.json()
+        window.open(edit_url, '_blank', 'noopener')
         setExportMsg('')
       } else {
-        setExportMsg('Lucidchart export requires an API token in Settings → Integrations.')
+        const body = await res.json().catch(() => null)
+        setExportMsg(body?.detail || 'Lucidchart export requires an API token in Settings → Integrations.')
         setTimeout(() => setExportMsg(''), 4000)
       }
     } catch {
-      setExportMsg('Lucidchart export requires an API token in Settings → Integrations.')
+      setExportMsg('Lucidchart export failed — check your connection and try again.')
       setTimeout(() => setExportMsg(''), 4000)
     }
   }
@@ -572,10 +1147,20 @@ export default function Topology() {
       <div className="flex items-center gap-3 flex-wrap shrink-0">
         <h1 className="text-xl font-bold text-white mr-1">Topology</h1>
         <HelpButton title="Topology — How It Works">
-          <p>Nodes are IP addresses, sized by total bytes; edges are aggregated flows between a pair, width proportional to bytes; color groups nodes by site.</p>
-          <p>Click a node to open a detail panel with <span className="text-gray-300 font-medium">"Flows from →"</span> / <span className="text-gray-300 font-medium">"Flows to →"</span> buttons that deep-link straight into Flow Explorer, pre-filtered to that IP.</p>
-          <p><span className="text-gray-300 font-medium">Export</span> covers PNG/SVG/JSON/DOT/Draw.io, plus a direct push to Lucidchart if an API token is set (Settings → Integrations) — useful for handing the current graph to something outside pktFlow.</p>
+          <p><span className="text-gray-300 font-medium">Hierarchical</span> (default) is a fixed 3-band diagram per NetFlow sampler: private devices at top (grouped into their own labeled subnet boxes), a single generic <span className="text-gray-300 font-medium">L3</span> node in the middle, external destinations at bottom. L3 is deliberately generic — no IP, no stats — it represents the network boundary itself, not a specific guessed router. A destination reached by five different internal hosts still renders once, with five lines converging on it — never duplicated, never chained through unrelated conversations. Private↔private traffic (which never crosses the L3 boundary) draws as a direct dashed line instead. <span className="text-gray-300 font-medium">Force</span> keeps the original free-floating graph, grouped into site clusters.</p>
+          <p>Cards are IP addresses, sized/labeled by total bytes and flows, colored by site. Link width is proportional to bytes; amber flags an asymmetric private↔private conversation (one side sent ≥10× the other).</p>
+          <p><span className="text-gray-300 font-medium">Hover</span> a device to highlight its own line to L3 plus only the specific peers it actually reaches on the far side — not every device passing through that sampler. Hover the L3 node itself to light up everything that sampler observed. <span className="text-gray-300 font-medium">Click</span> a device (or a private↔private link) to jump into Flow Explorer, filtered to that traffic in either direction for the current window — the L3 node itself isn't clickable, since it's not a real flow endpoint.</p>
+          <p><span className="text-gray-300 font-medium">Export</span> covers PNG/SVG/JSON/DOT/Draw.io of the current layout, plus a direct push to Lucidchart if an API token is set (Settings → Integrations) — useful for handing the current graph to something outside pktFlow.</p>
         </HelpButton>
+
+        <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1">
+          {(['hierarchical', 'force'] as const).map(l => (
+            <button key={l} onClick={() => setLayout(l)}
+              className={`text-xs px-3 py-1.5 rounded-lg transition-colors capitalize ${layout === l ? 'bg-gray-700 text-white' : 'text-white hover:text-white'}`}>
+              {l}
+            </button>
+          ))}
+        </div>
 
         <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1">
           {WINDOWS.map(w => (
@@ -713,17 +1298,29 @@ export default function Topology() {
         )}
 
         {data && data.nodes.length > 0 && (
-          <TopologyGraph
-            svgRef={svgRef}
-            data={data}
-            onNodeClick={setSelected}
-            width={dims.w}
-            height={dims.h}
-          />
+          layout === 'hierarchical' ? (
+            <HierarchicalGraph
+              svgRef={svgRef}
+              data={data}
+              width={dims.w}
+              height={dims.h}
+              window_={window_}
+            />
+          ) : (
+            <ForceGraph
+              svgRef={svgRef}
+              data={data}
+              onNodeClick={setSelected}
+              width={dims.w}
+              height={dims.h}
+            />
+          )
         )}
 
         <p className="absolute bottom-3 left-3 text-xs text-white pointer-events-none select-none">
-          Scroll to zoom · Drag nodes · Click to inspect
+          {layout === 'hierarchical'
+            ? 'Scroll to zoom · Drag to pan · Hover to trace · Click to view flows'
+            : 'Scroll to zoom · Drag nodes · Click to inspect'}
         </p>
       </div>
     </div>
