@@ -180,6 +180,7 @@ class TopologyEdge(BaseModel):
     bytes_fwd: int = 0             # bytes from source→target
     bytes_rev: int = 0             # bytes from target→source
     is_asymmetric: bool = False    # True when one side sent >10× the other
+    sampler_ip: str = ""           # dominant NetFlow exporter that observed this pair (by bytes)
 
 
 class PortStat(BaseModel):

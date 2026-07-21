@@ -65,8 +65,14 @@ class StorageBackend(ABC):
         end: Optional[datetime] = None,
         limit: int = 500,
         offset: int = 0,
+        any_direction: bool = False,
     ) -> list[FlowSearchResult]:
-        """Filtered flow search for the Flow Explorer."""
+        """Filtered flow search for the Flow Explorer.
+
+        any_direction: when True and only one of src_ip/dst_ip is set, matches
+        that IP as either src or dst; when both are set, matches both orderings
+        (src=A,dst=B OR src=B,dst=A) — the full two-way conversation between
+        those two hosts regardless of which leg recorded which direction."""
 
     @abstractmethod
     async def count_flows(
@@ -79,6 +85,7 @@ class StorageBackend(ABC):
         sampler_ip: Optional[str] = None,
         start: Optional[datetime] = None,
         end: Optional[datetime] = None,
+        any_direction: bool = False,
     ) -> int:
         """Total matching rows for the same filters as search_flows, for pagination."""
 

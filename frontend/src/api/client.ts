@@ -527,6 +527,7 @@ export interface TopologyEdge {
   bytes_fwd: number      // source→target bytes
   bytes_rev: number      // target→source bytes
   is_asymmetric: boolean // one side sent >10× the other
+  sampler_ip: string     // dominant NetFlow exporter that observed this pair
 }
 
 export interface TopologyResponse {
@@ -679,6 +680,7 @@ export type TopTalkersParams = { sampler_ip?: string; window?: string; limit?: s
 export type SearchParams = {
   src_ip?: string; dst_ip?: string; src_port?: string; dst_port?: string
   protocol?: string; sampler_ip?: string; window?: string; limit?: string
+  offset?: string; any_direction?: string
 }
 export type TopPortsParams = { window?: string; sampler_ip?: string; site?: string; limit?: string }
 
