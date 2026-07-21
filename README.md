@@ -67,8 +67,8 @@ All settings in `config.example.yaml` can also be passed as `PKTFLOW_*` environm
 - **Real-time dashboard** — flows/sec counter with live WebSocket updates (green dot = live, falls back to polling)
 - **Analytics** — traffic timeseries charts; short-range (REST) and long-range (hourly/daily rollup) views
 - **Device View** — per-sampler traffic history, top talkers table, protocol distribution
-- **Flow Explorer** — search and filter flows by IP, port, protocol, time range; server-side pagination with a sliding page-number bar (Prev/Next, `1 ..` / `.. N` jump shortcuts); CSV/JSON export; any public source/destination IP is a clickable link to the IP Lookup modal (see below)
-- **Network Topology** — D3 force-directed graph with site cluster labeling; clicking a node opens a detail panel with "Flows from →" / "Flows to →" deep links into Flow Explorer; export to PNG, SVG, JSON, DOT, Draw.io, or Lucidchart
+- **Flow Explorer** — search and filter flows by IP, port, protocol, time range; **Any direction** toggle turns Source/Destination IP into an either-side match (one IP set matches it on either side; both set matches the full two-way conversation between them, regardless of which leg recorded which direction); server-side pagination with a sliding page-number bar (Prev/Next, `1 ..` / `.. N` jump shortcuts); CSV/JSON/PCAP export (all respect the any-direction filter); any public source/destination IP is a clickable link to the IP Lookup modal (see below)
+- **Network Topology** — two layouts, toggled per view. **Hierarchical** (default) is a fixed 3-band diagram per NetFlow sampler: private devices grouped into labeled `/24` subnet boxes at top, a single generic **L3** pivot node in the middle (deliberately no IP/stats — it represents the network boundary itself, not a guessed router), external destinations at bottom. A destination reached by several internal hosts renders once with several lines converging on it, never duplicated or chained through unrelated conversations; private↔private traffic (which never crosses the L3 boundary) draws as a direct dashed line instead. Hovering a device highlights its own line plus only the specific peers it actually reaches, in a brighter accent color; hovering L3 lights up everything that sampler observed. Clicking a device (or a private↔private link) deep-links into Flow Explorer, any-direction-filtered to that traffic for the current window. **Force** keeps the original free-floating D3 graph with site clustering. Export to PNG, SVG, JSON, DOT, Draw.io, or Lucidchart (Lucidchart mirrors the same 3-band structure)
 - **Geo Map** — Leaflet dark map with D3 SVG arc overlays; ip-api.com geo lookup; circle markers colored by configurable Site Groups; arc styling comes entirely from **Address Mappings** (private→public CIDR/IP topology, resolves RFC-1918 traffic to the correct physical site) + **Traffic Rules** (priority-ordered, drag-and-drop, matches on address mapping/destination CIDR/destination port to pick a Line Style) — see Settings → Geo Map; dynamic legend shows only the Traffic Rules actually on screen, labeled by rule name; both legs of a bidirectional conversation always merge into one arc
 - **Traffic by Port** (`/ports`) — protocol mix, top ports by bytes/flows, traffic-over-time chart, full port inventory table
 - **Sankey flow diagrams** — a network-wide src→dst view on Analytics, and a per-device top-talkers flow map on Device View
@@ -633,10 +633,10 @@ pktflow/
 | `GET` | `/api/flows/timeseries/daily` | Daily totals from rollup table |
 | `GET` | `/api/flows/timeseries/hourly` | Hourly totals from rollup table |
 | `GET` | `/api/flows/top-talkers` | Top src/dst IPs by bytes or flows |
-| `GET` | `/api/flows/search` | Paginated flow search |
+| `GET` | `/api/flows/search` | Paginated flow search (`any_direction` param: either-side IP match) |
 | `GET` | `/api/flows/search/count` | Total matching row count for the current `/search` filters (page-number pagination) |
-| `GET` | `/api/flows/topology` | Node/edge list for topology graph |
-| `GET` | `/api/flows/topology/lucidchart` | Export topology to Lucidchart |
+| `GET` | `/api/flows/topology` | Node/edge list for topology graph (edges carry `sampler_ip`, the dominant observing exporter) |
+| `POST` | `/api/flows/topology/lucidchart` | Export topology to Lucidchart (same fixed 3-band layout as the in-app Hierarchical view) |
 | `GET` | `/api/flows/geo` | Geo-located IP pairs + Traffic Rule-resolved arc styling for Geo Map |
 | `GET` | `/api/flows/rate` | Current flows/sec |
 | `GET` | `/api/flows/export` | Download flows as CSV or JSON |
