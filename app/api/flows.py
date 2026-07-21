@@ -158,6 +158,7 @@ async def search_flows(
     end: Optional[datetime] = Query(None),
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
+    any_direction: bool = Query(False, description="Match src/dst IP filters in either direction"),
 ):
     """Filtered flow search for the Flow Explorer page."""
     if start and end:
@@ -176,6 +177,7 @@ async def search_flows(
         end=e,
         limit=limit,
         offset=offset,
+        any_direction=any_direction,
     )
 
 
@@ -191,6 +193,7 @@ async def count_flows(
     window: str = Query("1h"),
     start: Optional[datetime] = Query(None),
     end: Optional[datetime] = Query(None),
+    any_direction: bool = Query(False),
 ) -> dict:
     """Total matching rows for the current /search filters, for page-number pagination."""
     if start and end:
@@ -207,6 +210,7 @@ async def count_flows(
         sampler_ip=sampler_ip,
         start=s,
         end=e,
+        any_direction=any_direction,
     )
     return {"total": total}
 
@@ -611,59 +615,279 @@ def _fmt_bytes_lucid(b: int) -> str:
 SITE_COLORS_LUCID = ["#3b82f6","#8b5cf6","#10b981","#f59e0b","#ef4444","#06b6d4"]
 PROTO_NAMES_LUCID = {1:"ICMP",6:"TCP",17:"UDP",47:"GRE",50:"ESP"}
 
+# Fixed 3-band layout constants — mirror Topology.tsx's buildLayeredDiagram /
+# layoutSamplerBands exactly, so the exported diagram matches the in-app view.
+CARD_W, CARD_H = 172, 58
+DEVICE_GAP_Y = 14
+SUBNET_PAD = 16
+SUBNET_LABEL_H = 26
+SUBNET_GAP_X = 36
+BAND_GAP_Y = 110
+L3_W, L3_H = 150, 56
+EXTERNAL_MAX_COLS = 6
+EXTERNAL_GAP_X = 20
+EXTERNAL_GAP_Y = 16
+SAMPLER_GAP_X = 100
+BAND_TOP = 44
+
+
+def _is_private_ip_rfc1918(ip: str) -> bool:
+    """Pure octet check — RFC 1918 + loopback + link-local — matching the
+    frontend's isPrivateIP exactly, so classification agrees between the
+    in-app view and this export. Deliberately narrower than the geo-map's
+    _is_private_ip (which also excludes multicast/reserved for a different
+    purpose)."""
+    parts = ip.split(".")
+    if len(parts) != 4:
+        return False
+    try:
+        nums = [int(p) for p in parts]
+    except ValueError:
+        return False
+    a, b = nums[0], nums[1]
+    if a == 10:
+        return True
+    if a == 172 and 16 <= b <= 31:
+        return True
+    if a == 192 and b == 168:
+        return True
+    if a == 127:
+        return True
+    if a == 169 and b == 254:
+        return True
+    return False
+
+
+def _subnet24_lucid(ip: str) -> str:
+    parts = ip.split(".")
+    return ".".join(parts[:3]) if len(parts) == 4 else ip
+
+
+def _build_layered_diagram(nodes, edges) -> list[dict]:
+    """Same algorithm as the frontend's buildLayeredDiagram: for each
+    sampler, split its observed private<->public conversations into private
+    devices (grouped by /24 subnet) and external devices, with each side
+    getting exactly one aggregated line toward/from a single generic L3
+    pivot — so a destination reached by several internal hosts renders once,
+    not duplicated or chained. Private<->private edges never cross L3."""
+    node_by_id = {n.id: n for n in nodes}
+    samplers = [n for n in nodes if n.is_sampler]
+
+    bands = []
+    for sampler in samplers:
+        relevant = [e for e in edges if e.sampler_ip == sampler.id]
+
+        private_line: dict[str, dict] = {}
+        external_line: dict[str, dict] = {}
+        private_private_edges = []
+        private_ids: set[str] = set()
+        external_ids: set[str] = set()
+
+        for e in relevant:
+            src_priv = _is_private_ip_rfc1918(e.source)
+            dst_priv = _is_private_ip_rfc1918(e.target)
+            if src_priv and dst_priv:
+                private_private_edges.append(e)
+                private_ids.add(e.source); private_ids.add(e.target)
+                continue
+            if not src_priv and not dst_priv:
+                continue
+
+            priv_id = e.source if src_priv else e.target
+            ext_id = e.target if src_priv else e.source
+            private_ids.add(priv_id); external_ids.add(ext_id)
+
+            pl = private_line.setdefault(priv_id, {"peer_ids": set(), "bytes": 0, "flows": 0})
+            pl["peer_ids"].add(ext_id); pl["bytes"] += e.bytes; pl["flows"] += e.flows
+
+            el = external_line.setdefault(ext_id, {"peer_ids": set(), "bytes": 0, "flows": 0})
+            el["peer_ids"].add(priv_id); el["bytes"] += e.bytes; el["flows"] += e.flows
+
+        private_devices = [node_by_id[i] for i in private_ids if i in node_by_id]
+        external_devices = sorted(
+            (node_by_id[i] for i in external_ids if i in node_by_id),
+            key=lambda n: -n.bytes,
+        )
+
+        by_subnet: dict[str, list] = {}
+        for d in private_devices:
+            by_subnet.setdefault(_subnet24_lucid(d.id), []).append(d)
+        subnet_groups = [
+            {"subnet": subnet, "devices": sorted(devices, key=lambda n: -n.bytes)}
+            for subnet, devices in sorted(by_subnet.items())
+        ]
+
+        bands.append({
+            "sampler": sampler,
+            "subnet_groups": subnet_groups,
+            "externals": external_devices,
+            "private_line": private_line,
+            "external_line": external_line,
+            "private_private_edges": private_private_edges,
+        })
+
+    return bands
+
+
 def _build_lucid_standard_import(nodes, edges, title: str) -> dict:
-    """Convert topology nodes/edges to Lucidchart Standard Import JSON."""
+    """Convert topology nodes/edges to a hierarchical Lucidchart Standard
+    Import diagram matching Topology.tsx's fixed 3-band view: private
+    devices (grouped into subnet boxes) at top, a single generic L3 pivot
+    per sampler in the middle, external destinations at bottom."""
     sites = list(dict.fromkeys(n.site or "unknown" for n in nodes))
     site_color = lambda s: SITE_COLORS_LUCID[sites.index(s) % len(SITE_COLORS_LUCID)]
 
-    max_bytes = max((n.bytes for n in nodes), default=1)
-    max_edge_bytes = max((e.bytes for e in edges), default=1)
+    bands = _build_layered_diagram(nodes, edges)
 
-    cols = max(1, int(len(nodes) ** 0.5) + 1)
-    SPACING = 160
-    MIN_SZ, MAX_SZ = 50, 100
+    max_line_bytes = 1
+    for band in bands:
+        for info in list(band["private_line"].values()) + list(band["external_line"].values()):
+            max_line_bytes = max(max_line_bytes, info["bytes"])
+
+    def stroke_width(b: int) -> int:
+        return max(1, int(1 + (b / max_line_bytes) ** 0.5 * 5))
 
     shapes = []
-    node_shape_id: dict[str, str] = {}
+    lines = []
+    shape_id_by_key: dict[str, str] = {}
+    counter = [0]
 
-    for i, node in enumerate(nodes):
-        sid = f"n{i}"
-        node_shape_id[node.id] = sid
-        col, row = i % cols, i // cols
-        ratio = (node.bytes / max_bytes) ** 0.5
-        sz = int(MIN_SZ + ratio * (MAX_SZ - MIN_SZ))
+    def next_sid() -> str:
+        sid = f"n{counter[0]}"; counter[0] += 1
+        return sid
+
+    def device_shape(node, x: float, y: float, key: str) -> None:
+        sid = next_sid()
+        shape_id_by_key[key] = sid
         color = site_color(node.site or "unknown")
-        label = (node.sampler_name or node.id)[:30]
+        name = (node.sampler_name or node.id)[:26]
+        label = f"{name}\n{node.id}" if node.sampler_name else name
+        label += f"\n{_fmt_bytes_lucid(node.bytes)} · {node.flows:,} fl"
         shapes.append({
-            "id": sid,
-            "type": "circle",
-            "boundingBox": {"x": col * SPACING, "y": row * SPACING, "w": sz, "h": sz},
+            "id": sid, "type": "rectangle",
+            "boundingBox": {"x": x - CARD_W / 2, "y": y - CARD_H / 2, "w": CARD_W, "h": CARD_H},
             "text": label,
             "style": {
-                "fill": {"type": "color", "color": color},
-                "stroke": {"color": "#ffffff" if node.is_sampler else "#00000033", "width": 2 if node.is_sampler else 1, "style": "solid"},
-                "textColor": "#ffffff",
+                "fill": {"type": "color", "color": "#1f2937"},
+                "stroke": {"color": color, "width": 1.5, "style": "solid"},
+                "textColor": "#f3f4f6", "fontSize": 10,
             },
         })
 
-    lines = []
-    for i, edge in enumerate(edges):
-        src = node_shape_id.get(edge.source)
-        dst = node_shape_id.get(edge.target)
-        if not src or not dst:
-            continue
-        proto = PROTO_NAMES_LUCID.get(edge.protocol, f"P{edge.protocol}")
-        port_str = f":{edge.dst_port}" if edge.dst_port else ""
-        ratio = (edge.bytes / max_edge_bytes) ** 0.5
-        stroke_w = max(1, int(1 + ratio * 5))
-        lines.append({
-            "id": f"e{i}",
-            "lineType": "elbow",
-            "endpoint1": {"type": "shapeEndpoint", "style": "none", "shapeId": src},
-            "endpoint2": {"type": "shapeEndpoint", "style": "arrow", "shapeId": dst},
-            "stroke": {"color": "#6b7280", "width": stroke_w, "style": "solid"},
-            "text": [{"text": f"{proto}{port_str} {_fmt_bytes_lucid(edge.bytes)}", "position": 0.5, "side": "middle"}],
+    def group_box(x: float, y: float, w: float, h: float, label: str) -> None:
+        shapes.append({
+            "id": next_sid(), "type": "rectangle",
+            "boundingBox": {"x": x, "y": y, "w": w, "h": h},
+            "text": label,
+            "style": {
+                "fill": {"type": "none"},
+                "stroke": {"color": "#374151", "width": 1, "style": "solid"},
+                "textColor": "#9ca3af", "fontSize": 11,
+            },
         })
+
+    cursor_x = 40.0
+    for band in bands:
+        sampler = band["sampler"]
+        sampler_key = sampler.id
+
+        subnet_x = cursor_x
+        tallest_subnet = 0.0
+        subnet_centers: list[float] = []
+        for group in band["subnet_groups"]:
+            n = len(group["devices"])
+            box_h = SUBNET_LABEL_H + SUBNET_PAD + n * CARD_H + max(0, n - 1) * DEVICE_GAP_Y + SUBNET_PAD
+            box_w = CARD_W + SUBNET_PAD * 2
+            group_box(subnet_x, BAND_TOP, box_w, box_h, group["subnet"] + ".0/24")
+            tallest_subnet = max(tallest_subnet, box_h)
+            subnet_centers.append(subnet_x + box_w / 2)
+
+            device_y = BAND_TOP + SUBNET_LABEL_H + SUBNET_PAD + CARD_H / 2
+            for dev in group["devices"]:
+                device_shape(dev, subnet_x + box_w / 2, device_y, f"{sampler_key}|{dev.id}")
+                device_y += CARD_H + DEVICE_GAP_Y
+            subnet_x += box_w + SUBNET_GAP_X
+
+        band_end_x = subnet_x - SUBNET_GAP_X if band["subnet_groups"] else cursor_x + CARD_W
+        private_span_center = (
+            (subnet_centers[0] + subnet_centers[-1]) / 2 if subnet_centers else cursor_x + CARD_W / 2
+        )
+
+        l3_y = BAND_TOP + tallest_subnet + BAND_GAP_Y / 2
+        l3_x = private_span_center
+        l3_sid = next_sid()
+        shape_id_by_key[f"L3|{sampler_key}"] = l3_sid
+        shapes.append({
+            "id": l3_sid, "type": "rectangle",
+            "boundingBox": {"x": l3_x - L3_W / 2, "y": l3_y - L3_H / 2, "w": L3_W, "h": L3_H},
+            "text": "L3\nnetwork boundary",
+            "style": {
+                "fill": {"type": "color", "color": "#111827"},
+                "stroke": {"color": "#6b7280", "width": 1.5, "style": "dashed"},
+                "textColor": "#d1d5db", "fontSize": 11,
+            },
+        })
+
+        for priv_id, info in band["private_line"].items():
+            src_sid = shape_id_by_key.get(f"{sampler_key}|{priv_id}")
+            if not src_sid:
+                continue
+            lines.append({
+                "id": f"e{len(lines)}", "lineType": "elbow",
+                "endpoint1": {"type": "shapeEndpoint", "style": "none", "shapeId": src_sid},
+                "endpoint2": {"type": "shapeEndpoint", "style": "arrow", "shapeId": l3_sid},
+                "stroke": {"color": "#6b7280", "width": stroke_width(info["bytes"]), "style": "solid"},
+                "text": [{"text": f"{_fmt_bytes_lucid(info['bytes'])} · {info['flows']} fl", "position": 0.5, "side": "middle"}],
+            })
+
+        n_ext = len(band["externals"])
+        cols = max(1, min(EXTERNAL_MAX_COLS, n_ext))
+        rows = -(-n_ext // cols) if n_ext else 0
+        ext_grid_w = cols * CARD_W + max(0, cols - 1) * EXTERNAL_GAP_X
+        ext_box_w = ext_grid_w + SUBNET_PAD * 2
+        ext_box_h = SUBNET_LABEL_H + SUBNET_PAD + rows * CARD_H + max(0, rows - 1) * EXTERNAL_GAP_Y + SUBNET_PAD
+        ext_box_x = l3_x - ext_box_w / 2
+        ext_box_y = l3_y + L3_H / 2 + BAND_GAP_Y / 2
+        if n_ext:
+            group_box(ext_box_x, ext_box_y, ext_box_w, ext_box_h, "External")
+
+        for i, dev in enumerate(band["externals"]):
+            col, row = i % cols, i // cols
+            x = ext_box_x + SUBNET_PAD + col * (CARD_W + EXTERNAL_GAP_X) + CARD_W / 2
+            y = ext_box_y + SUBNET_LABEL_H + SUBNET_PAD + row * (CARD_H + EXTERNAL_GAP_Y) + CARD_H / 2
+            device_shape(dev, x, y, f"{sampler_key}|{dev.id}")
+
+        for ext_id, info in band["external_line"].items():
+            dst_sid = shape_id_by_key.get(f"{sampler_key}|{ext_id}")
+            if not dst_sid:
+                continue
+            lines.append({
+                "id": f"e{len(lines)}", "lineType": "elbow",
+                "endpoint1": {"type": "shapeEndpoint", "style": "none", "shapeId": l3_sid},
+                "endpoint2": {"type": "shapeEndpoint", "style": "arrow", "shapeId": dst_sid},
+                "stroke": {"color": "#6b7280", "width": stroke_width(info["bytes"]), "style": "solid"},
+                "text": [{"text": f"{_fmt_bytes_lucid(info['bytes'])} · {info['flows']} fl", "position": 0.5, "side": "middle"}],
+            })
+
+        for edge in band["private_private_edges"]:
+            a_sid = shape_id_by_key.get(f"{sampler_key}|{edge.source}")
+            b_sid = shape_id_by_key.get(f"{sampler_key}|{edge.target}")
+            if not a_sid or not b_sid:
+                continue
+            proto = PROTO_NAMES_LUCID.get(edge.protocol, f"P{edge.protocol}")
+            port_str = f":{edge.dst_port}" if edge.dst_port else ""
+            lines.append({
+                "id": f"e{len(lines)}", "lineType": "elbow",
+                "endpoint1": {"type": "shapeEndpoint", "style": "none", "shapeId": a_sid},
+                "endpoint2": {"type": "shapeEndpoint", "style": "none", "shapeId": b_sid},
+                "stroke": {
+                    "color": "#f59e0b" if edge.is_asymmetric else "#6b7280",
+                    "width": 1, "style": "dashed",
+                },
+                "text": [{"text": f"{proto}{port_str} {_fmt_bytes_lucid(edge.bytes)}", "position": 0.5, "side": "middle"}],
+            })
+
+        cursor_x = max(band_end_x, ext_box_x + ext_box_w) + SAMPLER_GAP_X
 
     return {
         "version": 1,
@@ -730,7 +954,8 @@ async def export_topology_lucidchart(
 # ── Export endpoints ──────────────────────────────────────────────────────────
 
 async def _fetch_for_export(
-    src_ip, dst_ip, src_port, dst_port, protocol, sampler_ip, window, start, end
+    src_ip, dst_ip, src_port, dst_port, protocol, sampler_ip, window, start, end,
+    any_direction: bool = False,
 ) -> list[FlowSearchResult]:
     """Shared query for all export formats. Cap at 10k rows."""
     if start and end:
@@ -743,6 +968,7 @@ async def _fetch_for_export(
         protocol=protocol, sampler_ip=sampler_ip,
         start=s, end=e,
         limit=10000, offset=0,
+        any_direction=any_direction,
     )
 
 
@@ -758,9 +984,11 @@ async def export_csv(
     window: str = Query("1h"),
     start: Optional[datetime] = Query(None),
     end: Optional[datetime] = Query(None),
+
+    any_direction: bool = Query(False),
 ):
     """Export filtered flows as CSV."""
-    flows = await _fetch_for_export(src_ip, dst_ip, src_port, dst_port, protocol, sampler_ip, window, start, end)
+    flows = await _fetch_for_export(src_ip, dst_ip, src_port, dst_port, protocol, sampler_ip, window, start, end, any_direction)
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -796,9 +1024,11 @@ async def export_json(
     window: str = Query("1h"),
     start: Optional[datetime] = Query(None),
     end: Optional[datetime] = Query(None),
+
+    any_direction: bool = Query(False),
 ):
     """Export filtered flows as JSON array."""
-    flows = await _fetch_for_export(src_ip, dst_ip, src_port, dst_port, protocol, sampler_ip, window, start, end)
+    flows = await _fetch_for_export(src_ip, dst_ip, src_port, dst_port, protocol, sampler_ip, window, start, end, any_direction)
 
     data = [
         {
@@ -938,6 +1168,8 @@ async def export_pcap(
     window: str = Query("1h"),
     start: Optional[datetime] = Query(None),
     end: Optional[datetime] = Query(None),
+
+    any_direction: bool = Query(False),
 ):
     """
     Export filtered flows as a synthetic PCAP file.
@@ -945,7 +1177,7 @@ async def export_pcap(
     No application payload — NetFlow does not carry payload data.
     Compatible with Wireshark, tcpdump, and other PCAP tools.
     """
-    flows = await _fetch_for_export(src_ip, dst_ip, src_port, dst_port, protocol, sampler_ip, window, start, end)
+    flows = await _fetch_for_export(src_ip, dst_ip, src_port, dst_port, protocol, sampler_ip, window, start, end, any_direction)
 
     # Global pcap header: magic, version 2.4, GMT offset 0, accuracy 0, snaplen 65535, Ethernet link type
     global_hdr = struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1)

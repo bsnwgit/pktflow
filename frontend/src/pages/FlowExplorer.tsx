@@ -175,11 +175,13 @@ interface Filters {
   src_port: string; dst_port: string
   protocol: string; sampler_ip: string
   window: string
+  any_direction: boolean
 }
 
 const EMPTY_FILTERS: Filters = {
   src_ip: '', dst_ip: '', src_port: '', dst_port: '',
   protocol: '', sampler_ip: '', window: '1h',
+  any_direction: false,
 }
 
 const WINDOWS = ['15m', '1h', '6h', '24h', '7d'] as const
@@ -196,6 +198,7 @@ export default function FlowExplorer() {
     protocol:   searchParams.get('protocol') ?? '',
     sampler_ip: searchParams.get('sampler')  ?? '',
     window:     searchParams.get('window')   ?? '1h',
+    any_direction: searchParams.get('any_direction') === 'true',
   })
 
   // Absolute time range — populated when navigating from an alert "Investigate" link
@@ -275,6 +278,7 @@ export default function FlowExplorer() {
       if (filters.dst_port)   params.dst_port   = filters.dst_port
       if (filters.protocol)   params.protocol   = filters.protocol
       if (filters.sampler_ip) params.sampler_ip = filters.sampler_ip
+      if (filters.any_direction) params.any_direction = 'true'
       // Absolute range (from alert drill-down) takes priority over relative window.
       // Replace Z suffix with +00:00 — Python 3.9 fromisoformat() rejects Z.
       if (timeFrom && timeTo) {
@@ -315,6 +319,7 @@ export default function FlowExplorer() {
     if (filters.dst_port)   params.dst_port   = filters.dst_port
     if (filters.protocol)   params.protocol   = filters.protocol
     if (filters.sampler_ip) params.sampler_ip = filters.sampler_ip
+    if (filters.any_direction) params.any_direction = 'true'
     if (timeFrom && timeTo) {
       params.start = timeFrom.replace('Z', '+00:00')
       params.end   = timeTo.replace('Z', '+00:00')
@@ -349,6 +354,7 @@ export default function FlowExplorer() {
             <h1 className="text-xl font-bold text-white">Flow Explorer</h1>
             <HelpButton title="Flow Explorer — How It Works">
               <p>Queries hit <span className="text-gray-300 font-medium">raw flow records</span> directly — every filter combination narrows the same underlying table, so results reflect exactly what was ingested and stored, not a rollup or sample.</p>
+              <p><span className="text-gray-300 font-medium">Any direction</span> turns Source IP / Dest IP from a strict match into an either-side one: set just one and it matches that host regardless of which side of a flow it was on; set both and it returns the full two-way conversation between those two hosts (A→B and B→A), regardless of which leg the flow recorded as source.</p>
               <p>Pagination is <span className="text-gray-300 font-medium">server-side</span> — the page number bar reflects the full filtered result count, not just what's currently rendered, so jumping to a late page is still fast.</p>
               <p><span className="text-gray-300 font-medium">CSV/JSON export</span> respects whatever filters are currently active, not just the current page — it's exporting the full filtered result set.</p>
               <p>Clicking a public IP anywhere in the results opens the IP Lookup modal (ipinfo.io + AbuseIPDB, using your own API keys from Settings → API Keys).</p>
@@ -379,6 +385,23 @@ export default function FlowExplorer() {
               />
             </div>
           ))}
+
+          {/* Any-direction toggle — with only Source IP or Dest IP set, matches that
+              IP as either side; with both set, matches the full two-way conversation
+              between them (src=A/dst=B OR src=B/dst=A) regardless of which leg
+              recorded which direction. */}
+          <div>
+            <label className="block text-xs text-white mb-1">Direction</label>
+            <label className="flex items-center gap-2 h-[34px] bg-gray-800 border border-gray-700 rounded-lg px-3 text-sm text-white cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={filters.any_direction}
+                onChange={e => setFilters(f => ({ ...f, any_direction: e.target.checked }))}
+                className="accent-blue-500"
+              />
+              Any direction
+            </label>
+          </div>
 
           {/* Sampler selector */}
           <div>
