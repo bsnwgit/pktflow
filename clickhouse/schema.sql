@@ -134,6 +134,26 @@ ALTER TABLE pktflow.flows ADD COLUMN IF NOT EXISTS flow_role UInt8 DEFAULT 0;
 
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- NAT translation columns (added non-destructively — Nullable, old rows stay
+-- NULL). Populated only by app/ingest/udp_listener.py's direct NetFlow v9/
+-- IPFIX UDP listener, and only when the exporting device sends the standard
+-- IANA NAT Information Elements (postNATSourceIPv4Address/
+-- postNATDestinationIPv4Address/natEvent, IPFIX IE 225/226/230 — NetFlow v9's
+-- NF_F_XLATE_SRC_ADDR_IPV4 etc. carry the same semantics). goflow2's HTTP
+-- ingestion path (app/api/ingest.py) cannot carry these — goflow2 normalizes
+-- everything into its own fixed protobuf schema, which has no NAT fields.
+-- Most consumer/prosumer NAT gear doesn't export these at all (NAT event
+-- logging is a Cisco ASA/ISR NSEL, Juniper SRX, pfSense/OPNsense-class
+-- feature) — see README's NAT Translations section.
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE pktflow.flows ADD COLUMN IF NOT EXISTS nat_src_ip Nullable(IPv4) COMMENT 'Post-NAT source address, if the exporter sent it';
+ALTER TABLE pktflow.flows ADD COLUMN IF NOT EXISTS nat_dst_ip Nullable(IPv4) COMMENT 'Post-NAT destination address, if the exporter sent it';
+ALTER TABLE pktflow.flows ADD COLUMN IF NOT EXISTS nat_src_port Nullable(UInt16);
+ALTER TABLE pktflow.flows ADD COLUMN IF NOT EXISTS nat_dst_port Nullable(UInt16);
+ALTER TABLE pktflow.flows ADD COLUMN IF NOT EXISTS nat_event Nullable(UInt8) COMMENT 'IPFIX natEvent code (1=create, 2=delete, ...), if sent';
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Useful query hints (not executed — for reference)
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Top talkers for a device, last hour:

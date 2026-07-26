@@ -53,12 +53,31 @@ class FlowRecord(BaseModel):
     # flow_role: 0=unknown, 1=initiator (ephemeral src→service dst), 2=responder (service src→ephemeral dst)
     flow_role: int = Field(default=0, ge=0, le=2)
 
+    # NAT translation — only ever populated by the direct UDP NetFlow v9/
+    # IPFIX listener, and only when the exporter itself sends the standard
+    # NAT Information Elements (see clickhouse/schema.sql's NAT columns
+    # comment). None (-> SQL NULL), not "0.0.0.0"/0, when absent — unlike
+    # src_ip/dst_ip/next_hop above, a missing NAT translation is a real,
+    # common, meaningful state (this flow simply wasn't NATted, or the
+    # exporter doesn't report NAT events at all) and must stay
+    # distinguishable from an actual (if unlikely) 0.0.0.0 translation.
+    nat_src_ip: Optional[str] = Field(default=None)
+    nat_dst_ip: Optional[str] = Field(default=None)
+    nat_src_port: Optional[int] = Field(default=None, ge=0, le=65535)
+    nat_dst_port: Optional[int] = Field(default=None, ge=0, le=65535)
+    nat_event: Optional[int] = Field(default=None, ge=0, le=255)
+
     @field_validator("src_ip", "dst_ip", "next_hop", mode="before")
     @classmethod
     def coerce_ip(cls, v):
         if v is None:
             return "0.0.0.0"
         return str(v)
+
+    @field_validator("nat_src_ip", "nat_dst_ip", mode="before")
+    @classmethod
+    def coerce_nat_ip(cls, v):
+        return None if v is None else str(v)
 
     def to_clickhouse_row(self) -> tuple:
         """Returns a tuple in ClickHouse insert column order."""
@@ -85,6 +104,11 @@ class FlowRecord(BaseModel):
             self.flow_dir,
             self.conversation_id,
             self.flow_role,
+            self.nat_src_ip,
+            self.nat_dst_ip,
+            self.nat_src_port,
+            self.nat_dst_port,
+            self.nat_event,
         )
 
 
@@ -157,6 +181,23 @@ class ProtocolStat(BaseModel):
     packets: int
     flow_count: int
     pct_bytes: float
+
+
+class NatTranslation(BaseModel):
+    """One observed (original address -> NAT'd address) mapping, aggregated
+    from flows carrying NAT Information Elements (see clickhouse/schema.sql
+    and app/ingest/udp_listener.py) — only populated when a NAT-capable
+    exporter (Cisco ASA/ISR NSEL, Juniper SRX, pfSense/OPNsense, etc.) sends
+    NAT event fields via the direct UDP NetFlow v9/IPFIX listener."""
+    sampler_ip: str
+    sampler_name: str = ""
+    direction: str                 # 'src' (source/egress NAT) or 'dst' (destination/inbound NAT)
+    original_ip: str
+    translated_ip: str
+    flow_count: int = 0
+    bytes: int = 0
+    first_seen: datetime
+    last_seen: datetime
 
 
 class TopologyNode(BaseModel):
