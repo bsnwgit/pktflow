@@ -15,7 +15,7 @@ from typing import Optional
 from clickhouse_driver import Client
 
 from app.config import get_settings
-from app.models.flow import FlowRecord, TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge, PortStat, ProtocolStat
+from app.models.flow import FlowRecord, TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge, PortStat, ProtocolStat, NatTranslation
 from app.storage.base import StorageBackend
 from app.topology_enrich import attach_dominant_sampler
 
@@ -28,7 +28,8 @@ _INSERT_COLS = """
     src_ip, dst_ip, src_port, dst_port, protocol,
     bytes, packets, duration_ms, tcp_flags, tos,
     input_if, output_if, next_hop, src_as, dst_as, flow_dir,
-    conversation_id, flow_role
+    conversation_id, flow_role,
+    nat_src_ip, nat_dst_ip, nat_src_port, nat_dst_port, nat_event
 """
 
 
@@ -201,6 +202,55 @@ class ClickHouseBackend(StorageBackend):
                 src_ip=str(r[0]), dst_ip=str(r[1]),
                 dst_port=r[2], protocol=r[3],
                 bytes=r[4], packets=r[5], flow_count=r[6],
+            )
+            for r in rows
+        ]
+
+    async def get_nat_translations(
+        self,
+        start: datetime,
+        end: datetime,
+        sampler_ip: Optional[str] = None,
+        limit: int = 500,
+    ) -> list[NatTranslation]:
+        where = "timestamp BETWEEN %(start)s AND %(end)s"
+        params: dict = {"start": start, "end": end, "limit": limit}
+        if sampler_ip:
+            where += " AND sampler_ip = %(sampler_ip)s"
+            params["sampler_ip"] = sampler_ip
+
+        # Source-side (egress/SNAT) and destination-side (inbound/DNAT)
+        # translations are separate aggregations unioned into one table —
+        # a flow can carry either, both, or neither NAT field depending on
+        # what the exporter observed for that direction.
+        query = f"""
+            SELECT sampler_ip, any(sampler_name) AS sampler_name, 'src' AS direction,
+                   src_ip AS original_ip, nat_src_ip AS translated_ip,
+                   count() AS flow_count, sum(bytes) AS bytes,
+                   min(timestamp) AS first_seen, max(timestamp) AS last_seen
+            FROM {settings.clickhouse_database}.flows
+            WHERE {where} AND nat_src_ip IS NOT NULL
+            GROUP BY sampler_ip, src_ip, nat_src_ip
+
+            UNION ALL
+
+            SELECT sampler_ip, any(sampler_name) AS sampler_name, 'dst' AS direction,
+                   dst_ip AS original_ip, nat_dst_ip AS translated_ip,
+                   count() AS flow_count, sum(bytes) AS bytes,
+                   min(timestamp) AS first_seen, max(timestamp) AS last_seen
+            FROM {settings.clickhouse_database}.flows
+            WHERE {where} AND nat_dst_ip IS NOT NULL
+            GROUP BY sampler_ip, dst_ip, nat_dst_ip
+
+            ORDER BY last_seen DESC
+            LIMIT %(limit)s
+        """
+        rows = await asyncio.to_thread(self._execute, query, params)
+        return [
+            NatTranslation(
+                sampler_ip=str(r[0]), sampler_name=r[1], direction=r[2],
+                original_ip=str(r[3]), translated_ip=str(r[4]),
+                flow_count=r[5], bytes=r[6], first_seen=r[7], last_seen=r[8],
             )
             for r in rows
         ]
