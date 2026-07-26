@@ -122,6 +122,20 @@ def _decode_v9_flows(
             dst_port    = _safe_int(d.get("L4_DST_PORT"))
             protocol    = _safe_int(d.get("PROTOCOL"))
 
+            # NAT translation — standard IANA NAT Information Elements
+            # (IPFIX IE 225-230), present only when the exporter itself
+            # supports NAT event logging (Cisco ASA/ISR NSEL, Juniper SRX,
+            # pfSense/OPNsense-class gear — see clickhouse/schema.sql).
+            # NetFlow v9 and IPFIX use different field-name strings for the
+            # same IEs; the `netflow` library decodes both by name into the
+            # same flat dict, so check both like the src/dst IPv4-vs-IPv6
+            # fallback above. None (not "0.0.0.0"/0) when absent.
+            nat_src_ip_raw = d.get("NF_F_XLATE_SRC_ADDR_IPV4") or d.get("postNATSourceIPv4Address")
+            nat_dst_ip_raw = d.get("NF_F_XLATE_DST_ADDR_IPV4") or d.get("postNATDestinationIPv4Address")
+            nat_src_port_raw = d.get("NF_F_XLATE_SRC_PORT") or d.get("postNAPTSourceTransportPort")
+            nat_dst_port_raw = d.get("NF_F_XLATE_DST_PORT") or d.get("postNAPTDestinationTransportPort")
+            nat_event_raw = d.get("natEvent")
+
             records.append(FlowRecord(
                 timestamp    = now,
                 sampler_ip   = src_ip,
@@ -145,6 +159,11 @@ def _decode_v9_flows(
                 flow_dir     = flow_dir,
                 conversation_id = _conversation_id(src_ip_flow, dst_ip_flow, src_port, dst_port, protocol),
                 flow_role       = _flow_role(src_port, dst_port),
+                nat_src_ip   = str(nat_src_ip_raw) if nat_src_ip_raw else None,
+                nat_dst_ip   = str(nat_dst_ip_raw) if nat_dst_ip_raw else None,
+                nat_src_port = _safe_int(nat_src_port_raw) if nat_src_port_raw is not None else None,
+                nat_dst_port = _safe_int(nat_dst_port_raw) if nat_dst_port_raw is not None else None,
+                nat_event    = _safe_int(nat_event_raw) if nat_event_raw is not None else None,
             ))
         except Exception as exc:
             log.info("Flow record normalization error from %s: %s", src_ip, exc)

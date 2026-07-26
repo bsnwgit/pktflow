@@ -13,6 +13,7 @@ const Topology     = lazy(() => import('./pages/Topology'))
 const Alerts       = lazy(() => import('./pages/Alerts'))
 const Settings     = lazy(() => import('./pages/Settings'))
 const Ports        = lazy(() => import('./pages/Ports'))
+const NatTranslations = lazy(() => import('./pages/NatTranslations'))
 const Logs         = lazy(() => import('./pages/Logs'))
 
 function PageFallback() {
@@ -72,6 +73,11 @@ export default function App() {
           <Route path="/ports" element={
             <ProtectedRoute>
               <Suspense fallback={<PageFallback />}><Ports /></Suspense>
+            </ProtectedRoute>
+          } />
+          <Route path="/nat-translations" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageFallback />}><NatTranslations /></Suspense>
             </ProtectedRoute>
           } />
           <Route path="/logs" element={
