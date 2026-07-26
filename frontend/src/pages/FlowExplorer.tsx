@@ -186,6 +186,9 @@ const EMPTY_FILTERS: Filters = {
 
 const WINDOWS = ['15m', '1h', '6h', '24h', '7d'] as const
 
+const PAGE_SIZE_DEFAULT = 25
+const PAGE_SIZE_OPTIONS = [25, 50, 75, 100]
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function FlowExplorer() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -211,14 +214,13 @@ export default function FlowExplorer() {
   const [loading, setLoading]     = useState(false)
   const [searched, setSearched]   = useState(false)
   const [page, setPage]           = useState(1)
+  const [pageSize, setPageSize]   = useState(PAGE_SIZE_DEFAULT)
   const [selected, setSelected]   = useState<FlowRecord | null>(null)
   const [exportMsg, setExportMsg] = useState('')
 
   const [tableFilter, setTableFilter]     = useState('')
   const [tableSortKey, setTableSortKey]   = useState<keyof FlowRecord | null>(null)
   const [tableSortDir, setTableSortDir]   = useState<'asc' | 'desc'>('desc')
-
-  const PAGE_SIZE = 100
 
   const FLOW_COLS: Array<{ label: string; key: keyof FlowRecord | null }> = [
     { label: 'Time',        key: 'timestamp' },
@@ -266,12 +268,12 @@ export default function FlowExplorer() {
     api.getDeviceSummaries().then(setDevices)
   }, [])
 
-  const search = async (toPage = 1) => {
+  const search = async (toPage = 1, size = pageSize) => {
     setLoading(true)
     setSearched(true)
     setPage(toPage)
     try {
-      const params: any = { limit: String(PAGE_SIZE), offset: String((toPage - 1) * PAGE_SIZE) }
+      const params: any = { limit: String(size), offset: String((toPage - 1) * size) }
       if (filters.src_ip)     params.src_ip     = filters.src_ip
       if (filters.dst_ip)     params.dst_ip     = filters.dst_ip
       if (filters.src_port)   params.src_port   = filters.src_port
@@ -305,6 +307,11 @@ export default function FlowExplorer() {
   useEffect(() => {
     if (filters.src_ip || filters.dst_ip || filters.sampler_ip || filters.dst_port || timeFrom) search(1)
   }, [])
+
+  const changePageSize = (size: number) => {
+    setPageSize(size)
+    search(1, size)
+  }
 
   const handleExploreIp = (ip: string) => {
     setSelected(null)
@@ -483,8 +490,21 @@ export default function FlowExplorer() {
 
       {/* Page bar */}
       {flows.length > 0 && (
-        <div className="flex justify-center">
-          <Pagination page={page} totalPages={Math.max(1, Math.ceil(total / PAGE_SIZE))} onChange={search} />
+        <div className="flex items-center justify-center gap-6">
+          <Pagination page={page} totalPages={Math.max(1, Math.ceil(total / pageSize))} onChange={search} />
+          <div className="flex items-center gap-2">
+            <label htmlFor="flows-per-page" className="text-xs text-gray-400">Flows per page:</label>
+            <select
+              id="flows-per-page"
+              value={pageSize}
+              onChange={e => changePageSize(Number(e.target.value))}
+              className="text-sm bg-gray-800 border border-gray-700 text-white rounded-lg px-2 py-1 focus:outline-none focus:border-sky-500"
+            >
+              {PAGE_SIZE_OPTIONS.map(size => (
+                <option key={size} value={size}>{size}</option>
+              ))}
+            </select>
+          </div>
         </div>
       )}
 
@@ -552,7 +572,7 @@ export default function FlowExplorer() {
 
           {/* Footer */}
           <div className="px-4 py-2 border-t border-gray-800 text-xs text-gray-500">
-            Showing {((page - 1) * PAGE_SIZE + 1).toLocaleString()}–{((page - 1) * PAGE_SIZE + flows.length).toLocaleString()} of {total.toLocaleString()} flows (newest first)
+            Showing {((page - 1) * pageSize + 1).toLocaleString()}–{((page - 1) * pageSize + flows.length).toLocaleString()} of {total.toLocaleString()} flows (newest first)
           </div>
         </div>
       )}
