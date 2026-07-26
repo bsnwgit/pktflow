@@ -103,13 +103,33 @@ CREATE TABLE IF NOT EXISTS flows (
     next_hop         VARCHAR     DEFAULT '0.0.0.0',
     src_as           INTEGER     DEFAULT 0,
     dst_as           INTEGER     DEFAULT 0,
-    flow_dir         INTEGER     DEFAULT 2
+    flow_dir         INTEGER     DEFAULT 2,
+    conversation_id  BIGINT      DEFAULT 0,
+    flow_role        INTEGER     DEFAULT 0,
+    nat_src_ip       VARCHAR,
+    nat_dst_ip       VARCHAR,
+    nat_src_port     INTEGER,
+    nat_dst_port     INTEGER,
+    nat_event        INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_flows_ts      ON flows (timestamp);
 CREATE INDEX IF NOT EXISTS idx_flows_sampler ON flows (sampler_ip);
 CREATE INDEX IF NOT EXISTS idx_flows_src_ip  ON flows (src_ip);
 CREATE INDEX IF NOT EXISTS idx_flows_dst_ip  ON flows (dst_ip);
+
+-- Non-destructive column additions for any duckdb.db file created before
+-- conversation_id/flow_role/nat_* existed — CREATE TABLE IF NOT EXISTS above
+-- is a no-op against an already-existing (older-shaped) table, same as
+-- ClickHouse's schema.sql needing explicit ALTER TABLE statements for its
+-- own non-destructive additions.
+ALTER TABLE flows ADD COLUMN IF NOT EXISTS conversation_id BIGINT DEFAULT 0;
+ALTER TABLE flows ADD COLUMN IF NOT EXISTS flow_role INTEGER DEFAULT 0;
+ALTER TABLE flows ADD COLUMN IF NOT EXISTS nat_src_ip VARCHAR;
+ALTER TABLE flows ADD COLUMN IF NOT EXISTS nat_dst_ip VARCHAR;
+ALTER TABLE flows ADD COLUMN IF NOT EXISTS nat_src_port INTEGER;
+ALTER TABLE flows ADD COLUMN IF NOT EXISTS nat_dst_port INTEGER;
+ALTER TABLE flows ADD COLUMN IF NOT EXISTS nat_event INTEGER;
 """
 
 
@@ -306,7 +326,7 @@ class DuckDBBackend(StorageBackend):
         def _insert():
             rows = [f.to_clickhouse_row() for f in flows]
             self._wconn.executemany(
-                "INSERT INTO flows VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO flows VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 rows,
             )
 

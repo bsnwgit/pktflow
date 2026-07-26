@@ -77,6 +77,7 @@ const NAV = [
   { to: '/explorer',  label: 'Flow Explorer', icon: '⊕', adminOnly: false },
   { to: '/geo',       label: 'Geo Map',       icon: '◎', adminOnly: false },
   { to: '/topology',  label: 'Topology',      icon: '⟳', adminOnly: false },
+  { to: '/nat-translations', label: 'NAT Translations', icon: '⇄', adminOnly: false },
   { to: '/alerts',    label: 'Alerts',        icon: '△', adminOnly: false },
   { to: '/logs',      label: 'Logs',          icon: '≡', adminOnly: false },
   { to: '/settings',  label: 'Settings',      icon: '⚙', adminOnly: false },
