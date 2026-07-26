@@ -2264,6 +2264,42 @@ function DevicesTab({ prefillIp = '' }: { prefillIp?: string }) {
 }
 
 // ── API Keys tab — per-user external API keys, scoped to whoever is logged in ──
+// Providers whose response the user can filter down to specific sections in
+// the IP Lookup modal. Keyed by provider id; each entry's field keys match
+// what the backend's IPINFO_FIELDS / IPAPI_IS_FIELDS constants accept.
+const FIELD_SETS: Record<string, { key: string; label: string }[]> = {
+  ipinfo: [
+    { key: 'geolocation', label: 'Geolocation' },
+    { key: 'asn',         label: 'ASN / Org' },
+    { key: 'company',     label: 'Company' },
+    { key: 'privacy',     label: 'Privacy Detection (VPN/Proxy/Tor)' },
+    { key: 'abuse',       label: 'Abuse Contact' },
+    { key: 'domains',     label: 'Hosted Domains' },
+  ],
+  ipapi_is: [
+    { key: 'geolocation', label: 'Geolocation' },
+    { key: 'asn',         label: 'ASN / Org' },
+    { key: 'company',     label: 'Company' },
+    { key: 'detection',   label: 'Threat Detection (VPN/Proxy/Tor/Datacenter)' },
+    { key: 'abuse',       label: 'Abuse Contact' },
+  ],
+  mxtoolbox: [
+    { key: 'ptr',       label: 'Reverse DNS (PTR)' },
+    { key: 'asn',       label: 'ASN' },
+    { key: 'blacklist', label: 'Blacklist Check' },
+  ],
+}
+const setFieldsApi: Record<string, (fields: string[]) => Promise<UserApiKey>> = {
+  ipinfo: api.setIpinfoFields,
+  ipapi_is: api.setIpapiIsFields,
+  mxtoolbox: api.setMxtoolboxFields,
+}
+// The 4 providers with a section in the IP Lookup modal — AbuseIPDB has no
+// per-field checkboxes (single score, not multiple sections) but still gets
+// the modal-section on/off toggle. IPQualityScore isn't wired into the modal
+// at all, so it gets neither.
+const MODAL_PROVIDERS = ['ipinfo', 'ipapi_is', 'abuseipdb', 'mxtoolbox']
+
 function ApiKeysTab({ lucidToken, onLucidChange, lucidSave }: {
   lucidToken: string
   onLucidChange: (v: string) => void
@@ -2278,6 +2314,40 @@ function ApiKeysTab({ lucidToken, onLucidChange, lucidSave }: {
   const [error, setError]     = useState<Record<string, string>>({})
   const [testing, setTesting] = useState<Record<string, boolean>>({})
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; detail: string }>>({})
+  const [fieldsError, setFieldsError] = useState('')
+
+  async function handleToggleField(provider: string, fieldKey: string, checked: boolean) {
+    const providerKey = keys.find(k => k.provider === provider)
+    const current = providerKey?.enabled_fields ?? FIELD_SETS[provider].map(f => f.key)
+    const next = checked ? [...current, fieldKey] : current.filter(f => f !== fieldKey)
+    setFieldsError('')
+    try {
+      const updated = await setFieldsApi[provider](next)
+      setKeys(prev => prev.map(k => k.provider === provider ? updated : k))
+    } catch (err: any) {
+      setFieldsError(err.message ?? 'Failed to save')
+    }
+  }
+
+  async function handleToggleFreeTier(checked: boolean) {
+    setFieldsError('')
+    try {
+      const updated = await api.setIpapiIsFreeTier(checked)
+      setKeys(prev => prev.map(k => k.provider === 'ipapi_is' ? updated : k))
+    } catch (err: any) {
+      setFieldsError(err.message ?? 'Failed to save')
+    }
+  }
+
+  async function handleToggleEnabled(provider: string, checked: boolean) {
+    setFieldsError('')
+    try {
+      const updated = await api.setProviderEnabled(provider, checked)
+      setKeys(prev => prev.map(k => k.provider === provider ? updated : k))
+    } catch (err: any) {
+      setFieldsError(err.message ?? 'Failed to save')
+    }
+  }
 
   function load() {
     setLoading(true)
@@ -2335,43 +2405,85 @@ function ApiKeysTab({ lucidToken, onLucidChange, lucidSave }: {
         <p className="text-sm text-white">Loading…</p>
       ) : (
         <div className="space-y-4 max-w-lg">
-          {keys.map(k => (
+          {keys.map(k => {
+            const isFreeTier = k.provider === 'ipapi_is' && k.free_tier
+            return (
             <div key={k.provider}>
               <label className="block text-xs text-white mb-1">{k.label}</label>
+              {MODAL_PROVIDERS.includes(k.provider) && (
+                <label className="flex items-center gap-2 text-xs text-white cursor-pointer mb-1.5">
+                  <input
+                    type="checkbox"
+                    checked={k.enabled}
+                    onChange={e => handleToggleEnabled(k.provider, e.target.checked)}
+                    className="accent-blue-600"
+                  />
+                  Show this provider in the IP Lookup modal
+                </label>
+              )}
+              {k.provider === 'ipapi_is' && (
+                <label className="flex items-center gap-2 text-xs text-white cursor-pointer mb-1.5">
+                  <input
+                    type="checkbox"
+                    checked={k.free_tier}
+                    onChange={e => handleToggleFreeTier(e.target.checked)}
+                    className="accent-blue-600"
+                  />
+                  Use free tier (no key required, ~1,000 lookups/day)
+                </label>
+              )}
               <div className="flex items-center gap-2">
                 <input
                   type="password"
                   value={drafts[k.provider] ?? ''}
                   onChange={e => setDrafts(d => ({ ...d, [k.provider]: e.target.value }))}
                   placeholder="Not set"
-                  className={inp}
+                  disabled={isFreeTier}
+                  className={`${inp} ${isFreeTier ? 'opacity-40 cursor-not-allowed' : ''}`}
                 />
                 <button
                   onClick={() => handleTest(k.provider)}
-                  disabled={testing[k.provider] || !(drafts[k.provider] ?? '').trim()}
+                  disabled={isFreeTier || testing[k.provider] || !(drafts[k.provider] ?? '').trim()}
                   className="shrink-0 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white text-sm font-medium rounded-lg px-4 py-2 transition-colors disabled:opacity-50"
                 >
                   {testing[k.provider] ? 'Testing…' : 'Test'}
                 </button>
                 <button
                   onClick={() => handleSave(k.provider)}
-                  disabled={saving[k.provider]}
+                  disabled={isFreeTier || saving[k.provider]}
                   className="shrink-0 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg px-4 py-2 transition-colors"
                 >
                   {saving[k.provider] ? 'Saving…' : 'Save'}
                 </button>
               </div>
-              <div className="mt-1 h-4">
-                {saved[k.provider] && <span className="text-xs text-green-400">Saved</span>}
-                {error[k.provider] && <span className="text-xs text-red-400">{error[k.provider]}</span>}
-                {testResult[k.provider] && (
-                  <span className={`text-xs ${testResult[k.provider].ok ? 'text-green-400' : 'text-red-400'}`}>
-                    {testResult[k.provider].ok ? '✓ ' : '✗ '}{testResult[k.provider].detail}
-                  </span>
-                )}
-              </div>
+              {saved[k.provider] && <p className="text-xs text-green-400 mt-1">Saved</p>}
+              {error[k.provider] && <p className="text-xs text-red-400 mt-1">{error[k.provider]}</p>}
+              {testResult[k.provider] && (
+                <p className={`text-xs mt-1 ${testResult[k.provider].ok ? 'text-green-400' : 'text-red-400'}`}>
+                  {testResult[k.provider].ok ? '✓ ' : '✗ '}{testResult[k.provider].detail}
+                </p>
+              )}
+              {FIELD_SETS[k.provider] && (
+                <div className="mt-3 pl-1">
+                  <p className="text-xs text-gray-500 mb-1.5">Shown in the IP Lookup modal:</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                    {FIELD_SETS[k.provider].map(f => (
+                      <label key={f.key} className="flex items-center gap-2 text-xs text-white cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={k.enabled_fields ? k.enabled_fields.includes(f.key) : true}
+                          onChange={e => handleToggleField(k.provider, f.key, e.target.checked)}
+                          className="accent-blue-600"
+                        />
+                        {f.label}
+                      </label>
+                    ))}
+                  </div>
+                  {fieldsError && <p className="text-xs text-red-400 mt-1">{fieldsError}</p>}
+                </div>
+              )}
             </div>
-          ))}
+          )})}
         </div>
       )}
 
