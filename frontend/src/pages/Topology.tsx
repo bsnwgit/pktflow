@@ -606,9 +606,12 @@ function HierarchicalGraph({
       .on('zoom', ev => g.attr('transform', ev.transform))
     svg.call(zoomBehavior)
 
-    // Fit the whole diagram in view on first render, small padding top-left.
-    const scale = Math.min(1.1, width / layout.width, height / layout.height)
-    svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(20, 20).scale(Math.max(scale, 0.05)))
+    // Fit the whole diagram in view on first render — horizontally centered
+    // (falls back to a left padding if the diagram is wider than the
+    // viewport, since there's no room to center it then), small top padding.
+    const scale = Math.max(Math.min(1.1, width / layout.width, height / layout.height), 0.05)
+    const tx = Math.max(20, (width - layout.width * scale) / 2)
+    svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, 20).scale(scale))
 
     svg.append('defs').append('marker')
       .attr('id', 'arr-h')
