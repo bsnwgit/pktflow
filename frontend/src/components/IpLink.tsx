@@ -3,6 +3,48 @@ import { useNavigate } from 'react-router-dom'
 import { Search, Network } from 'lucide-react'
 import { api, IpInfoResult, InternalIpInfoResult } from '../api/client'
 import { isPrivateIp, isValidIpv4 } from '../utils/ip'
+import AsnLink from './AsnLink'
+
+const ASN_ORG_RE = /^(AS\d+)\s*(.*)$/i
+
+// MXToolbox Lookup responses share one envelope regardless of command
+// (UID/Command/... plus Passed/Warnings/Failed/Timeouts result arrays) — a
+// generic pass/warn/fail summary covers ptr/asn/blacklist without needing a
+// bespoke renderer per command.
+function mxtoolboxEntryText(entry: any): string {
+  if (typeof entry === 'string') return entry
+  return entry?.Info || entry?.Name || entry?.Description || entry?.Message || JSON.stringify(entry)
+}
+
+// Bold, all-caps, single-line section title — visually separates each
+// provider's block in a modal that otherwise stacks four of them in a row.
+function SectionTitle({ children }: { children: string }) {
+  return (
+    <p className="text-xs font-bold text-blue-300 uppercase tracking-wider mb-2 text-center whitespace-nowrap">
+      {'*'.repeat(9)} {children} {'*'.repeat(9)}
+    </p>
+  )
+}
+
+function MxtoolboxSummary({ result, error }: { result: any; error?: string | null }) {
+  if (error) return <p className="text-xs text-gray-400">{error}</p>
+  if (!result) return <p className="text-xs text-gray-400">No data</p>
+  const passed = result.Passed?.length ?? 0
+  const warnings = result.Warnings ?? []
+  const failed = result.Failed ?? []
+  return (
+    <div>
+      <p className="text-sm text-white">
+        {passed} passed
+        {warnings.length > 0 && <span className="text-yellow-400"> · {warnings.length} warning{warnings.length === 1 ? '' : 's'}</span>}
+        {failed.length > 0 && <span className="text-red-400"> · {failed.length} failed</span>}
+      </p>
+      {[...failed, ...warnings].slice(0, 5).map((e: any, i: number) => (
+        <p key={i} className="text-xs text-gray-400 mt-1">{mxtoolboxEntryText(e)}</p>
+      ))}
+    </div>
+  )
+}
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 function IpInfoModal({ ip, onClose }: { ip: string; onClose: () => void }) {
@@ -24,6 +66,9 @@ function IpInfoModal({ ip, onClose }: { ip: string; onClose: () => void }) {
 
   const score = data?.abuseipdb?.abuseConfidenceScore as number | undefined
   const scoreColor = score === undefined ? '' : score >= 50 ? 'text-red-400' : score >= 20 ? 'text-yellow-400' : 'text-green-400'
+  const showIpinfoField = (f: string) => !data?.ipinfo_enabled_fields || data.ipinfo_enabled_fields.includes(f)
+  const showIpapiIsField = (f: string) => !data?.ipapi_is_enabled_fields || data.ipapi_is_enabled_fields.includes(f)
+  const showMxtoolboxField = (f: string) => !data?.mxtoolbox_enabled_fields || data.mxtoolbox_enabled_fields.includes(f)
 
   const Row = ({ label, value }: { label: string; value?: string | number | null }) => (
     value === undefined || value === null || value === '' ? null : (
@@ -62,24 +107,164 @@ function IpInfoModal({ ip, onClose }: { ip: string; onClose: () => void }) {
 
           {data && (
             <>
+              {data.ipinfo_enabled && (
               <div>
-                <p className="text-xs font-medium text-white uppercase tracking-wider mb-2">ipinfo.io</p>
+                <SectionTitle>IPINFO.IO</SectionTitle>
                 {data.ipinfo_error
                   ? <ProviderError msg={data.ipinfo_error} />
                   : (
-                    <div>
-                      <Row label="City" value={data.ipinfo?.city} />
-                      <Row label="Region" value={data.ipinfo?.region} />
-                      <Row label="Country" value={data.ipinfo?.country} />
-                      <Row label="Org / ASN" value={data.ipinfo?.org} />
-                      <Row label="Hostname" value={data.ipinfo?.hostname} />
-                      <Row label="Timezone" value={data.ipinfo?.timezone} />
+                    <div className="space-y-3">
+                      {showIpinfoField('geolocation') && (
+                        <div>
+                          <Row label="City" value={data.ipinfo?.city} />
+                          <Row label="Region" value={data.ipinfo?.region} />
+                          <Row label="Country" value={data.ipinfo?.country} />
+                          <Row label="Hostname" value={data.ipinfo?.hostname} />
+                          <Row label="Timezone" value={data.ipinfo?.timezone} />
+                          <Row label="Postal" value={data.ipinfo?.postal} />
+                        </div>
+                      )}
+                      {showIpinfoField('asn') && (data.ipinfo?.asn || data.ipinfo?.org) && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">ASN / Org</p>
+                          {data.ipinfo?.asn ? (
+                            <>
+                              <Row label="Name" value={data.ipinfo.asn.name} />
+                              <Row label="Route" value={data.ipinfo.asn.route} />
+                              <Row label="Type" value={data.ipinfo.asn.type} />
+                            </>
+                          ) : (() => {
+                            const org = data.ipinfo?.org as string | undefined
+                            const m = org?.match(ASN_ORG_RE)
+                            return m ? (
+                              <div className="flex justify-between items-start py-1.5 border-b border-gray-800 last:border-0">
+                                <span className="text-xs text-white shrink-0 w-32">Org / ASN</span>
+                                <span className="text-sm text-white text-right break-all">
+                                  <AsnLink asn={m[1].toUpperCase()} className="mr-1" />
+                                  {m[2]}
+                                </span>
+                              </div>
+                            ) : <Row label="Org / ASN" value={org} />
+                          })()}
+                        </div>
+                      )}
+                      {showIpinfoField('company') && data.ipinfo?.company && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Company</p>
+                          <Row label="Name" value={data.ipinfo.company.name} />
+                          <Row label="Domain" value={data.ipinfo.company.domain} />
+                          <Row label="Type" value={data.ipinfo.company.type} />
+                        </div>
+                      )}
+                      {showIpinfoField('privacy') && data.ipinfo?.privacy && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Privacy Detection</p>
+                          <p className="text-sm text-white">
+                            {[
+                              data.ipinfo.privacy.vpn && 'VPN',
+                              data.ipinfo.privacy.proxy && 'Proxy',
+                              data.ipinfo.privacy.tor && 'Tor',
+                              data.ipinfo.privacy.relay && 'Relay',
+                              data.ipinfo.privacy.hosting && 'Hosting',
+                            ].filter(Boolean).join(', ') || 'None detected'}
+                            {data.ipinfo.privacy.service && <span className="text-gray-400"> ({data.ipinfo.privacy.service})</span>}
+                          </p>
+                        </div>
+                      )}
+                      {showIpinfoField('abuse') && data.ipinfo?.abuse && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Abuse Contact</p>
+                          <Row label="Email" value={data.ipinfo.abuse.email} />
+                          <Row label="Phone" value={data.ipinfo.abuse.phone} />
+                          <Row label="Name" value={data.ipinfo.abuse.name} />
+                          <Row label="Address" value={data.ipinfo.abuse.address} />
+                        </div>
+                      )}
+                      {showIpinfoField('domains') && data.ipinfo?.domains?.domains?.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Hosted Domains</p>
+                          <p className="text-sm text-white break-all">
+                            {data.ipinfo?.domains.domains.slice(0, 5).join(', ')}
+                            {data.ipinfo?.domains.total > 5 && <span className="text-gray-400"> +{data.ipinfo?.domains.total - 5} more</span>}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
               </div>
+              )}
 
+              {data.ipapi_is_enabled && (
               <div>
-                <p className="text-xs font-medium text-white uppercase tracking-wider mb-2">AbuseIPDB</p>
+                <SectionTitle>IPAPI.IS</SectionTitle>
+                {data.ipapi_is_error
+                  ? <ProviderError msg={data.ipapi_is_error} />
+                  : (
+                    <div className="space-y-3">
+                      {showIpapiIsField('geolocation') && (
+                        <div>
+                          <Row label="City" value={data.ipapi_is?.location?.city} />
+                          <Row label="State" value={data.ipapi_is?.location?.state} />
+                          <Row label="Country" value={data.ipapi_is?.location?.country} />
+                          <Row label="Timezone" value={data.ipapi_is?.location?.timezone} />
+                          <Row label="Local Time" value={data.ipapi_is?.location?.local_time} />
+                        </div>
+                      )}
+                      {showIpapiIsField('asn') && data.ipapi_is?.asn && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">ASN / Org</p>
+                          <Row label="Name" value={data.ipapi_is.asn.org} />
+                          <Row label="Route" value={data.ipapi_is.asn.route} />
+                          <Row label="Type" value={data.ipapi_is.asn.type} />
+                        </div>
+                      )}
+                      {showIpapiIsField('company') && data.ipapi_is?.company && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Company</p>
+                          <Row label="Name" value={data.ipapi_is.company.name} />
+                          <Row label="Domain" value={data.ipapi_is.company.domain} />
+                          <Row label="Type" value={data.ipapi_is.company.type} />
+                        </div>
+                      )}
+                      {showIpapiIsField('detection') && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Threat Detection</p>
+                          <p className="text-sm text-white">
+                            {[
+                              data.ipapi_is?.is_vpn && 'VPN',
+                              data.ipapi_is?.is_proxy && 'Proxy',
+                              data.ipapi_is?.is_tor && 'Tor',
+                              data.ipapi_is?.is_datacenter && 'Datacenter',
+                              data.ipapi_is?.is_mobile && 'Mobile',
+                              data.ipapi_is?.is_satellite && 'Satellite',
+                              data.ipapi_is?.is_abuser && 'Known Abuser',
+                            ].filter(Boolean).join(', ') || 'None detected'}
+                          </p>
+                          {data.ipapi_is?.is_vpn && data.ipapi_is?.vpn?.service && (
+                            <p className="text-xs text-gray-400 mt-1">VPN service: {data.ipapi_is.vpn.service}</p>
+                          )}
+                          {data.ipapi_is?.is_datacenter && data.ipapi_is?.datacenter?.datacenter && (
+                            <p className="text-xs text-gray-400 mt-1">Datacenter: {data.ipapi_is.datacenter.datacenter}</p>
+                          )}
+                        </div>
+                      )}
+                      {showIpapiIsField('abuse') && data.ipapi_is?.abuse && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Abuse Contact</p>
+                          <Row label="Email" value={data.ipapi_is.abuse.email} />
+                          <Row label="Phone" value={data.ipapi_is.abuse.phone} />
+                          <Row label="Name" value={data.ipapi_is.abuse.name} />
+                          <Row label="Address" value={data.ipapi_is.abuse.address} />
+                        </div>
+                      )}
+                    </div>
+                  )}
+              </div>
+              )}
+
+              {data.abuseipdb_enabled && (
+              <div>
+                <SectionTitle>ABUSEIPDB</SectionTitle>
                 {data.abuseipdb_error
                   ? <ProviderError msg={data.abuseipdb_error} />
                   : (
@@ -97,6 +282,37 @@ function IpInfoModal({ ip, onClose }: { ip: string; onClose: () => void }) {
                     </div>
                   )}
               </div>
+              )}
+
+              {data.mxtoolbox_enabled && (
+              <div>
+                <SectionTitle>MXTOOLBOX</SectionTitle>
+                {data.mxtoolbox_error
+                  ? <ProviderError msg={data.mxtoolbox_error} />
+                  : (
+                    <div className="space-y-3">
+                      {showMxtoolboxField('ptr') && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Reverse DNS (PTR)</p>
+                          <MxtoolboxSummary result={data.mxtoolbox?.ptr} error={data.mxtoolbox?.ptr_error} />
+                        </div>
+                      )}
+                      {showMxtoolboxField('asn') && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">ASN</p>
+                          <MxtoolboxSummary result={data.mxtoolbox?.asn} error={data.mxtoolbox?.asn_error} />
+                        </div>
+                      )}
+                      {showMxtoolboxField('blacklist') && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Blacklist Check</p>
+                          <MxtoolboxSummary result={data.mxtoolbox?.blacklist} error={data.mxtoolbox?.blacklist_error} />
+                        </div>
+                      )}
+                    </div>
+                  )}
+              </div>
+              )}
             </>
           )}
         </div>
