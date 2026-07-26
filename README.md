@@ -72,7 +72,7 @@ All settings in `config.example.yaml` can also be passed as `PKTFLOW_*` environm
 - **Geo Map** — Leaflet dark map with D3 SVG arc overlays; ip-api.com geo lookup; circle markers colored by configurable Site Groups; arc styling comes entirely from **Address Mappings** (private→public CIDR/IP topology, resolves RFC-1918 traffic to the correct physical site) + **Traffic Rules** (priority-ordered, drag-and-drop, matches on address mapping/destination CIDR/destination port to pick a Line Style) — see Settings → Geo Map; dynamic legend shows only the Traffic Rules actually on screen, labeled by rule name; both legs of a bidirectional conversation always merge into one arc
 - **Traffic by Port** (`/ports`) — protocol mix, top ports by bytes/flows, traffic-over-time chart, full port inventory table
 - **Sankey flow diagrams** — a network-wide src→dst view on Analytics, and a per-device top-talkers flow map on Device View
-- **IP Lookup** — any public (non-RFC1918) IP address shown in Flow Explorer, Device View, Topology, or Alerts is a clickable link that opens a modal combining ipinfo.io geolocation/ASN data with an AbuseIPDB reputation score, using each user's own API keys (see Settings → User Keys below).
+- **IP Lookup** — any public (non-RFC1918) IP address shown in Flow Explorer, Device View, Topology, or Alerts is a clickable link that opens a modal combining ipinfo.io (geolocation/ASN/org, plus company/privacy/abuse-contact on paid plans) and ipapi.is (geolocation, ASN/org, company, abuse contact, VPN/proxy/Tor/datacenter/abuser detection, all in one call) with an AbuseIPDB reputation score and MXToolbox reverse-DNS/ASN/blacklist data, using each user's own API keys (see Settings → User Keys below). MXToolbox's other commands — email/DNS record checks (SPF/DMARC/DKIM/MX/etc.) and active probes (ping/traceroute/TCP/HTTP/HTTPS/SMTP) — are reachable via the API but not surfaced in this modal yet.
 - **Internal IP Lookup (pktIPAM)** — private/RFC1918 IPs are also clickable (styled with a purple dashed underline + network icon instead of the public lookup's search icon): the modal calls out to a connected pktIPAM instance (see Settings → Security → Suite Integration → Sibling pkt Apps) and shows subnet/site, IP inventory status/hostname/MAC/owner, the active DHCP lease, DNS records, and last-seen ARP entry. If no pktIPAM connection is configured, the modal shows a link straight to that settings page instead of erroring. Addresses that aren't well-formed IPv4 (or are otherwise unparseable) still render as plain text.
 
 ### Alerting
@@ -444,7 +444,7 @@ Each channel has a "Send Test" button (`POST /api/settings/test-notification`) t
 
 ### User Keys
 
-Every logged-in user (not just admins) manages their **own** keys here for AbuseIPDB, ipinfo.io, and IPQualityScore — used by the public IP Lookup feature. Keys are scoped strictly to the owning user; nobody else, including admins, can see the value. Each field has a "Test" button that calls the real provider API with a harmless test IP before saving. Leaving a field blank and saving clears that key.
+Every logged-in user (not just admins) manages their **own** keys here for AbuseIPDB, ipinfo.io, ipapi.is, MXToolbox, and IPQualityScore — used by the public IP Lookup feature (IPQualityScore can be saved/tested but isn't consumed by the lookup yet). Keys are scoped strictly to the owning user; nobody else, including admins, can see the value. Each field has a "Test" button that calls the real provider API with a harmless test IP before saving. Leaving a field blank and saving clears that key.
 
 This tab also holds the app-wide **Lucidchart API token** (a Personal Access Token from lucid.co → Account → API Tokens), which enables "Export to Lucidchart" on the Topology page — this one setting is shared across all users, unlike the personal keys above it.
 
@@ -558,8 +558,12 @@ pktflow/
 │   │   ├── traffic_rules.py    Geo Map line-style rules (/api/traffic-rules)
 │   │   ├── geo_config.py   Site groups + line styles CRUD (/api/geo-config/*)
 │   │   ├── user_api_keys.py Per-user external API keys (/api/user-api-keys)
-│   │   ├── ip_info.py      Combined ipinfo.io + AbuseIPDB lookup (/api/ip-info); also
+│   │   ├── ip_info.py      Combined ipinfo.io + ipapi.is + AbuseIPDB + MXToolbox
+│   │   │                     (ptr/asn/blacklist) lookup (/api/ip-info); also
 │   │   │                     /api/ip-info/internal/{ip} — pktIPAM-backed internal IP lookup
+│   │   ├── mxtoolbox.py     Generic MXToolbox command passthrough (/api/mxtoolbox/lookup) —
+│   │   │                     DNS/email records + active probes, every command not already
+│   │   │                     auto-wired into ip_info.py above
 │   │   ├── integrations.py Outbound sibling-app connections, currently pktIPAM only (/api/integrations)
 │   │   ├── suite.py        Inbound pktHub Suite Integration token + /api/suite/whoami
 │   │   ├── system.py       Health, restart, port, SSL upload, cleanup, backup, test-connection
@@ -670,7 +674,7 @@ A Traffic Rule optionally matches an Address Mapping (or "Any"), a comma-separat
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/user-api-keys` | JWT | This user's own keys for `abuseipdb`, `ipinfo`, `ipqualityscore` |
+| `GET` | `/api/user-api-keys` | JWT | This user's own keys for `abuseipdb`, `ipinfo`, `ipapi_is`, `mxtoolbox`, `ipqualityscore` |
 | `PUT` | `/api/user-api-keys/{provider}` | JWT | Set (or clear, with an empty value) this user's key for a provider |
 | `POST` | `/api/user-api-keys/{provider}/test` | JWT | Validate a key against the real provider API using a harmless test IP |
 
@@ -680,8 +684,14 @@ Scoped strictly to the authenticated user (by username, not user id — pktHub s
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/ip-info/{ip}` | JWT | Combined ipinfo.io + AbuseIPDB lookup for a single public IP, using the caller's own stored keys. Returns 400 for private/loopback/link-local/reserved addresses. |
+| `GET` | `/api/ip-info/{ip}` | JWT | Combined ipinfo.io + ipapi.is + AbuseIPDB + MXToolbox (ptr/asn/blacklist, run concurrently) lookup for a single public IP, using the caller's own stored keys. Returns 400 for private/loopback/link-local/reserved addresses. |
 | `GET` | `/api/ip-info/internal/{ip}` | JWT | pktIPAM-backed lookup for a single private/loopback/link-local IP — subnet, IP inventory record, DHCP leases, DNS records, ARP entries. Returns 400 for public addresses. Returns `configured: false` (not an error) if no enabled pktIPAM connection exists yet. |
+
+### MXToolbox
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/mxtoolbox/lookup` | JWT | Generic passthrough to any MXToolbox `Lookup` command — `{command, argument, port?}`. Covers everything not already auto-wired into `/api/ip-info/{ip}`: email/DNS records (`mx`, `spf`, `dmarc`, `dkim`, `dns`, `txt`, `soa`, `bimi`, `mta-sts`, `tlsrpt`, `a`, `aaaa`) and active probes (`ping`, `trace`, `tcp`, `http`, `https`, `smtp`) that run from MXToolbox's own infrastructure against the target. `dkim` needs `domain:selector`; `tcp` needs `port`. Returns MXToolbox's raw JSON — no response modeling, since nothing in the UI consumes it yet. |
 
 ### Sibling pkt Apps (Integrations)
 

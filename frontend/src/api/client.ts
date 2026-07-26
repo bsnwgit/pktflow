@@ -244,8 +244,19 @@ export const api = {
     request<UserApiKey>(`/user-api-keys/${provider}`, { method: 'PUT', body: JSON.stringify({ api_key }) }),
   testUserApiKey: (provider: string, api_key: string) =>
     request<{ status: string; detail: string }>(`/user-api-keys/${provider}/test`, { method: 'POST', body: JSON.stringify({ api_key }) }),
+  setIpinfoFields: (enabled_fields: string[]) =>
+    request<UserApiKey>('/user-api-keys/ipinfo/fields', { method: 'PUT', body: JSON.stringify({ enabled_fields }) }),
+  setIpapiIsFields: (enabled_fields: string[]) =>
+    request<UserApiKey>('/user-api-keys/ipapi_is/fields', { method: 'PUT', body: JSON.stringify({ enabled_fields }) }),
+  setIpapiIsFreeTier: (free_tier: boolean) =>
+    request<UserApiKey>('/user-api-keys/ipapi_is/free-tier', { method: 'PUT', body: JSON.stringify({ free_tier }) }),
+  setMxtoolboxFields: (enabled_fields: string[]) =>
+    request<UserApiKey>('/user-api-keys/mxtoolbox/fields', { method: 'PUT', body: JSON.stringify({ enabled_fields }) }),
+  setProviderEnabled: (provider: string, enabled: boolean) =>
+    request<UserApiKey>(`/user-api-keys/${provider}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
   getIpInfo: (ip: string) => request<IpInfoResult>(`/ip-info/${ip}`),
   getInternalIpInfo: (ip: string) => request<InternalIpInfoResult>(`/ip-info/internal/${ip}`),
+  getAsnInfo: (asn: string) => request<AsnInfoResult>(`/ip-info/asn/${asn}`),
 
   getIntegrations: () => request<Integration[]>('/integrations'),
   createIntegration: (body: IntegrationInput) =>
@@ -595,8 +606,25 @@ export interface IpInfoResult {
   ip: string
   ipinfo: Record<string, any> | null
   ipinfo_error: string | null
+  ipinfo_enabled_fields: string[] | null
+  ipinfo_enabled: boolean
+  ipapi_is: Record<string, any> | null
+  ipapi_is_error: string | null
+  ipapi_is_enabled_fields: string[] | null
+  ipapi_is_enabled: boolean
   abuseipdb: Record<string, any> | null
   abuseipdb_error: string | null
+  abuseipdb_enabled: boolean
+  mxtoolbox: Record<string, any> | null
+  mxtoolbox_error: string | null
+  mxtoolbox_enabled_fields: string[] | null
+  mxtoolbox_enabled: boolean
+}
+
+export interface AsnInfoResult {
+  asn: string
+  ipinfo: Record<string, any> | null
+  ipinfo_error: string | null
 }
 
 export interface Integration {
@@ -635,6 +663,9 @@ export interface UserApiKey {
   label: string
   api_key: string
   updated_at: string | null
+  enabled_fields: string[] | null // ipinfo/ipapi_is/mxtoolbox only; null = not customized (all shown)
+  free_tier: boolean // ipapi_is only — use its keyless free tier instead of api_key
+  enabled: boolean // ipinfo/ipapi_is/abuseipdb/mxtoolbox only — show this provider's section in the IP Lookup modal at all
 }
 
 export interface SiteGroup {
