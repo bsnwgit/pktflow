@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Optional
 
-from app.models.flow import FlowRecord, TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge, PortStat
+from app.models.flow import FlowRecord, TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge, PortStat, NatTranslation
 
 
 class StorageBackend(ABC):
@@ -253,6 +253,20 @@ class StorageBackend(ABC):
         """Return compressed size of the named ClickHouse table in GB.
         Default implementation returns 0.0 (ClickHouse-only feature)."""
         return 0.0
+
+    async def get_nat_translations(
+        self,
+        start: datetime,
+        end: datetime,
+        sampler_ip: Optional[str] = None,
+        limit: int = 500,
+    ) -> list[NatTranslation]:
+        """Distinct (original address -> NAT'd address) pairs observed in
+        the window, aggregated from flows carrying NAT Information Elements.
+        Default implementation returns [] (only ClickHouseBackend currently
+        implements this — the nat_* columns are ClickHouse-schema-only, see
+        clickhouse/schema.sql)."""
+        return []
 
     @abstractmethod
     async def get_inter_site_top_contributors(
