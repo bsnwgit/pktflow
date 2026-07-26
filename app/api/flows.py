@@ -19,7 +19,7 @@ from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.dependencies import CurrentUser, AdminUser
-from app.models.flow import TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge, ProtocolStat, PortStat
+from app.models.flow import TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge, ProtocolStat, PortStat, NatTranslation
 from app.storage.factory import get_storage
 
 router = APIRouter()
@@ -140,6 +140,29 @@ async def top_talkers(
         s, e = _parse_window(window)
 
     return await get_storage().get_top_talkers(sampler_ip, s, e, limit)
+
+
+@router.get("/nat-translations", response_model=list[NatTranslation])
+async def nat_translations(
+    _: CurrentUser,
+    sampler_ip: Optional[str] = Query(None),
+    window: str = Query("24h"),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None),
+    limit: int = Query(500, ge=1, le=2000),
+):
+    """Observed (original address -> NAT'd address) mappings, aggregated
+    from flows carrying NAT Information Elements. Only populated for
+    exporters that send NAT event fields via the direct UDP NetFlow v9/
+    IPFIX listener (see clickhouse/schema.sql and
+    app/ingest/udp_listener.py) — most consumer/prosumer NAT gear does not
+    export these, so an empty result here is expected and not an error."""
+    if start and end:
+        s, e = start, end
+    else:
+        s, e = _parse_window(window)
+
+    return await get_storage().get_nat_translations(s, e, sampler_ip, limit)
 
 
 # ── Flow Explorer ─────────────────────────────────────────────────────────────
