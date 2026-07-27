@@ -77,8 +77,8 @@ function FlowDetail({ flow, onClose, onExploreIp }: {
         </div>
 
         <div className="px-5 py-4 space-y-1">
-          {/* Collector */}
-          <p className="text-xs font-medium text-white uppercase tracking-wider mb-2">Collector</p>
+          {/* Source */}
+          <p className="text-xs font-medium text-white uppercase tracking-wider mb-2">Source</p>
           <Field label="Sampler" value={`${flow.sampler_name || flow.sampler_ip}`} />
           <Field label="Sampler IP" value={flow.sampler_ip} mono />
 

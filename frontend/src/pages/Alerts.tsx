@@ -212,7 +212,7 @@ const RULE_DEFAULTS: Record<string, { name: string; description: string }> = {
   port_scan:          { name: 'Port scan detected',        description: 'Alert when a source IP hits an unusual number of distinct destination ports' },
   internal_spread:    { name: 'Internal spread detected',  description: 'Alert when a source IP reaches an unusual number of distinct destinations' },
   protocol_anomaly:   { name: 'Protocol anomaly',          description: 'Alert when unexpected protocol traffic is seen on a well-known port' },
-  data_gap:           { name: 'Collector data gap',        description: 'Alert when a known sampler stops sending flows for a set period' },
+  data_gap:           { name: 'Source data gap',           description: 'Alert when a known sampler stops sending flows for a set period' },
   new_host:           { name: 'Unknown sampler detected',  description: 'Fires when a host not in the device registry sends NetFlow data' },
   ingest_rate_low:    { name: 'Ingest rate too low',       description: 'Alert when the overall flow ingest rate drops below a minimum' },
   clickhouse_size:    { name: 'ClickHouse table too large', description: 'Alert when a ClickHouse table exceeds a storage size threshold' },
@@ -1465,31 +1465,28 @@ export default function Alerts() {
             <p className="text-sm text-white text-center py-8">No alerts match this filter</p>
           )}
           {filteredEvents.length > 0 && (
-            <Pagination page={activePageClamped} totalPages={activeTotalPages} onChange={setActivePage} />
+            <div className="flex items-center justify-center gap-6">
+              <Pagination page={activePageClamped} totalPages={activeTotalPages} onChange={setActivePage} />
+              <div className="flex items-center gap-2">
+                <label htmlFor="active-alerts-per-page" className="text-xs text-gray-400">Alerts per page:</label>
+                <select
+                  id="active-alerts-per-page"
+                  value={activePageSize}
+                  onChange={e => changeActivePageSize(Number(e.target.value))}
+                  className="text-sm bg-gray-800 border border-gray-700 text-white rounded-lg px-2 py-1 focus:outline-none focus:border-sky-500"
+                >
+                  {PAGE_SIZE_OPTIONS.map(size => (
+                    <option key={size} value={size}>{size}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
           )}
           {pagedEvents.map(e => <EventCard key={e.id} event={e} onAck={handleAck} />)}
           {filteredEvents.length > 0 && (
-            <div className="flex items-center justify-between text-xs text-gray-500 pt-1">
-              <span>
-                Showing {((activePageClamped - 1) * activePageSize + 1).toLocaleString()}–{((activePageClamped - 1) * activePageSize + pagedEvents.length).toLocaleString()} of {filteredEvents.length.toLocaleString()} alerts
-              </span>
-              <div className="flex items-center gap-6">
-                <Pagination page={activePageClamped} totalPages={activeTotalPages} onChange={setActivePage} />
-                <div className="flex items-center gap-2">
-                  <label htmlFor="active-alerts-per-page" className="text-xs text-gray-400">Alerts per page:</label>
-                  <select
-                    id="active-alerts-per-page"
-                    value={activePageSize}
-                    onChange={e => changeActivePageSize(Number(e.target.value))}
-                    className="text-sm bg-gray-800 border border-gray-700 text-white rounded-lg px-2 py-1 focus:outline-none focus:border-sky-500"
-                  >
-                    {PAGE_SIZE_OPTIONS.map(size => (
-                      <option key={size} value={size}>{size}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
+            <p className="text-xs text-gray-500 pt-1">
+              Showing {((activePageClamped - 1) * activePageSize + 1).toLocaleString()}–{((activePageClamped - 1) * activePageSize + pagedEvents.length).toLocaleString()} of {filteredEvents.length.toLocaleString()} alerts
+            </p>
           )}
         </div>
       )}
@@ -1528,31 +1525,28 @@ export default function Alerts() {
             <p className="text-sm text-white text-center py-8">No alerts match this filter</p>
           )}
           {filteredHistory.length > 0 && (
-            <Pagination page={historyPageClamped} totalPages={historyTotalPages} onChange={setHistoryPage} />
+            <div className="flex items-center justify-center gap-6">
+              <Pagination page={historyPageClamped} totalPages={historyTotalPages} onChange={setHistoryPage} />
+              <div className="flex items-center gap-2">
+                <label htmlFor="history-alerts-per-page" className="text-xs text-gray-400">Alerts per page:</label>
+                <select
+                  id="history-alerts-per-page"
+                  value={historyPageSize}
+                  onChange={e => changeHistoryPageSize(Number(e.target.value))}
+                  className="text-sm bg-gray-800 border border-gray-700 text-white rounded-lg px-2 py-1 focus:outline-none focus:border-sky-500"
+                >
+                  {PAGE_SIZE_OPTIONS.map(size => (
+                    <option key={size} value={size}>{size}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
           )}
           {pagedHistory.map(e => <EventCard key={e.id} event={e} onAck={handleAck} />)}
           {filteredHistory.length > 0 && (
-            <div className="flex items-center justify-between text-xs text-gray-500 pt-1">
-              <span>
-                Showing {((historyPageClamped - 1) * historyPageSize + 1).toLocaleString()}–{((historyPageClamped - 1) * historyPageSize + pagedHistory.length).toLocaleString()} of {filteredHistory.length.toLocaleString()} alerts
-              </span>
-              <div className="flex items-center gap-6">
-                <Pagination page={historyPageClamped} totalPages={historyTotalPages} onChange={setHistoryPage} />
-                <div className="flex items-center gap-2">
-                  <label htmlFor="history-alerts-per-page" className="text-xs text-gray-400">Alerts per page:</label>
-                  <select
-                    id="history-alerts-per-page"
-                    value={historyPageSize}
-                    onChange={e => changeHistoryPageSize(Number(e.target.value))}
-                    className="text-sm bg-gray-800 border border-gray-700 text-white rounded-lg px-2 py-1 focus:outline-none focus:border-sky-500"
-                  >
-                    {PAGE_SIZE_OPTIONS.map(size => (
-                      <option key={size} value={size}>{size}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
+            <p className="text-xs text-gray-500 pt-1">
+              Showing {((historyPageClamped - 1) * historyPageSize + 1).toLocaleString()}–{((historyPageClamped - 1) * historyPageSize + pagedHistory.length).toLocaleString()} of {filteredHistory.length.toLocaleString()} alerts
+            </p>
           )}
         </div>
       )}
