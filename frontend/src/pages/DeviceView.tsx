@@ -730,7 +730,7 @@ export default function DeviceView() {
           <HelpButton title="Device View — How It Works">
             <p>Everything on this page is scoped to <span className="text-gray-300 font-medium">one sampler at a time</span> — pick it from the dropdown, or land here directly via a device's row in Flow Explorer/Alerts.</p>
             <p>Top Talkers and the Sankey diagram are both <span className="text-gray-300 font-medium">click-to-drill-down</span> — clicking a talker or a Sankey node/link jumps into Flow Explorer pre-filtered to that specific src/dst pair.</p>
-            <p>Only devices in the <span className="text-gray-300 font-medium">device registry</span> (Settings → Collectors) appear in this dropdown — a sampler sending flows but not yet registered won't show up here until it's added and allowed.</p>
+            <p>Only devices in the <span className="text-gray-300 font-medium">device registry</span> (Settings → Sources) appear in this dropdown — a sampler sending flows but not yet registered won't show up here until it's added and allowed.</p>
           </HelpButton>
         </div>
 

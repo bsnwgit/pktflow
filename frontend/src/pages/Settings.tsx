@@ -351,7 +351,7 @@ const TABS: Array<{ id: TabId; label: string; adminOnly?: boolean; gapBefore?: b
   { id: 'data',          label: 'Data' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'apikeys',       label: 'User Keys' },
-  { id: 'devices',       label: 'Collectors', gapBefore: true },
+  { id: 'devices',       label: 'Sources', gapBefore: true },
   { id: 'vpnmappings',   label: 'Geo Map',    adminOnly: true },
   { id: 'ingest',        label: 'Ingest' },
 ]
@@ -1357,7 +1357,7 @@ export default function Settings() {
             content: <>
               <p><span className="text-gray-300 font-medium">HTTP POST</span> means one or more goflow2+Vector collector pipelines decode raw NetFlow/IPFIX/sFlow and push snake_case JSON batches to this app's <code className="text-gray-400">/api/ingest/flows</code> over HTTPS, authenticated by the Ingest token below. <span className="text-gray-300 font-medium">Direct UDP</span> skips the external collector and listens for raw NetFlow v5/v9/IPFIX/sFlow packets itself.</p>
               <p><span className="text-amber-500 font-medium">Changing Ingest method or either UDP port requires an actual service restart</span> to take effect — the UDP listener only starts or stops at process startup, so saving this form alone won't switch anything live.</p>
-              <p>Regardless of ingest path, a flow is only stored if its sampler IP is <span className="text-gray-300 font-medium">present and enabled in the device registry</span> (Collectors tab) — this settings page controls transport, not what's allowed through.</p>
+              <p>Regardless of ingest path, a flow is only stored if its sampler IP is <span className="text-gray-300 font-medium">present and enabled in the device registry</span> (Sources tab) — this settings page controls transport, not what's allowed through.</p>
               <p><span className="text-gray-300 font-medium">Stream raw flows</span> pushes every ingest batch to connected browsers over WebSocket for the live dashboard counter — harmless at normal volume, but worth disabling or capping (Max flows per push) on very high-throughput links.</p>
             </>,
           }}
