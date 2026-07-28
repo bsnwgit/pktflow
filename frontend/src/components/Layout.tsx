@@ -5,7 +5,6 @@ import { api } from '../api/client'
 import AiAssistant from './AiAssistant'
 import { AutoRefreshProvider, useAutoRefresh } from '../store/autoRefresh'
 import clsx from 'clsx'
-import lockupLogo from '../assets/logos/lockup-64h.png'
 
 // ─── Change Password Modal ────────────────────────────────────────────────────
 function ChangePasswordModal({ onClose }: { onClose: () => void }) {
@@ -124,7 +123,7 @@ function AutoRefreshControl() {
   )
 }
 
-export default function Layout({ children }: { children: ReactNode }) {
+export default function Layout({ children, chromeless = false }: { children: ReactNode; chromeless?: boolean }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [fps, setFps] = useState<number>(0)
@@ -132,6 +131,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [showChangePw, setShowChangePw] = useState(false)
 
   useEffect(() => {
+    if (chromeless) return
     const tick = async () => {
       try {
         const [rateData, events] = await Promise.all([
@@ -145,11 +145,21 @@ export default function Layout({ children }: { children: ReactNode }) {
     tick()
     const id = setInterval(tick, 10_000)
     return () => clearInterval(id)
-  }, [])
+  }, [chromeless])
 
   const handleLogout = async () => {
     await logout()
     navigate('/login')
+  }
+
+  if (chromeless) {
+    return (
+      <AutoRefreshProvider>
+        <div className="bg-gray-950 text-white min-h-screen p-5">
+          {children}
+        </div>
+      </AutoRefreshProvider>
+    )
   }
 
   return (
@@ -157,7 +167,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     <div className="flex h-screen bg-gray-950 text-white overflow-hidden">
       <aside className="w-52 flex-shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col">
         <div className="flex items-center px-4 py-4 border-b border-gray-800">
-          <img src={lockupLogo} alt="pktFlow" className="h-16 w-auto" />
+          <img src="logos/lockup-64h.png" alt="pktFlow" className="h-16 w-auto" />
         </div>
 
         <nav className="flex-1 px-2 py-4 space-y-0.5">

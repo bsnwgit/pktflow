@@ -51,7 +51,7 @@ against a real Anthropic API key in a production deployment.
 `app/storage/duckdb.py` implements the core query paths used by the main UI (search, top
 talkers/ports, protocol distribution, topology) and is selectable in Settings → Data → Storage.
 An earlier crash (missing `get_top_ports` abstract method) has been fixed. What's still
-incomplete, **deliberately**: 18 alert-engine detail-query methods (baselines, elephant-flow /
+incomplete, **deliberately**: 19 alert-engine detail-query methods (baselines, elephant-flow /
 threshold / port-scan / inter-site / asymmetric-flow lookups, etc.) raise `NotImplementedError`
 under DuckDB rather than being built out — so `threshold`, `rate_spike`, and similar alert rule
 types that depend on those queries won't evaluate correctly under DuckDB. ClickHouse remains the
@@ -61,41 +61,34 @@ confirmed.
 
 ---
 
-## SSL/TLS Auto-Detection — LIKELY BROKEN AGAINST THE CURRENT PROCESS ENTRYPOINT
+## SSL/TLS Auto-Detection — FIXED (was broken against the process entrypoint)
 
-This is a genuine, verified gap between documented and actual behavior, not just an untested
-feature — worth prioritizing over the others in this file.
+**This was a genuine, verified gap between documented and actual behavior — now fixed
+(commit `0f673e1`, "Fix SSL/TLS settings never reaching uvicorn at the real entrypoint").**
 
-The code that reads `ssl_enabled` / `ssl_certfile` / `ssl_keyfile` from the settings DB and passes
-them into `uvicorn.run()` lives in an `if __name__ == "__main__":` block at the bottom of
-`app/main.py`. That block only executes when `app/main.py` is run directly as a script
-(`python -m app.main`). Neither of the two ways this app has actually been started reach it:
+Previously, the code that read `ssl_enabled` / `ssl_certfile` / `ssl_keyfile` from the settings DB
+and passed them into `uvicorn.run()` lived in an `if __name__ == "__main__":` block at the bottom
+of `app/main.py`, which only executes when `app/main.py` is run directly as a script — something
+neither the systemd `ExecStart` (`python -m app.server`, which imports `app.main` as a module) nor
+a direct `uvicorn app.main:app ...` CLI invocation actually does.
 
-- The current systemd unit's `ExecStart` runs `python -m app.server`, and `app/server.py`'s own
-  `main()` calls `uvicorn.run("app.main:app", host=..., port=..., workers=1, ...)` — this
-  **imports** `app.main` as a module (so its `__main__` block never runs) and does not forward
-  any SSL kwargs of its own.
-- The previously-committed unit ran `uvicorn app.main:app --host ... --port 8766 ...` via the
-  `uvicorn` CLI directly — same problem, `app.main` is imported, not executed as `__main__`.
+**Fix applied:** the SSL-settings read + forwarding logic was moved into `app/server.py::main()`
+— the function the systemd unit actually calls. It reads the same three settings keys from
+SQLite before calling `uvicorn.run()` and passes `ssl_certfile`/`ssl_keyfile` through when a cert
+is enabled and both paths resolve. The orphaned `start.sh` wrapper (which built the same uvicorn
+args correctly but was never referenced by `install.sh` or `pktflow.service`) was deleted as part
+of the same commit, since its logic now lives in the real entrypoint instead.
 
-`start.sh` in the repo root *does* build the `--ssl-certfile`/`--ssl-keyfile` uvicorn arguments
-correctly by checking for cert files on disk — but it is not referenced by `install.sh` or by
-either version of `pktflow.service`, so it appears to be orphaned.
-
-**Net effect:** uploading a cert via Settings → Security → SSL/TLS and restarting the service may
-not actually cause the running process to serve HTTPS. This needs to be confirmed end-to-end
-(upload → restart → curl the port over HTTPS) against a real deployment before anyone relies on
-it, and is likely worth fixing in `app/server.py` (read the same three settings keys there,
-same as the dead code in `app/main.py` already does) rather than restoring `start.sh`.
+**What's still unverified:** the code path is now confirmed correct by inspection, but nobody has
+run the full loop (upload a cert via Settings → Security → SSL/TLS → restart → `curl -k
+https://localhost:<port>/api/health`) against a live deployment in this environment to confirm
+uvicorn actually binds in HTTPS mode end-to-end. Worth a quick real-world check before fully
+trusting it in production, but this is no longer a known code-level gap.
 
 ---
 
 ## IP Lookup Gaps — DELIBERATE, NOT REGRESSIONS
 
-- **Reverse DNS (PTR) lookup** for public IPs — not built. Was in the original plan as a
-  no-API-key-needed third data point alongside ipinfo.io/AbuseIPDB in the public IP Lookup modal;
-  never added. (The separate internal/pktIPAM lookup modal does show hostname via DHCP/DNS
-  records, but that's a different code path.)
 - **Geo Map IP lookup** — deliberately not wired. Geo Map's IPs render through raw Leaflet HTML
   tooltip strings and native SVG `<title>` elements, neither of which can host the `IpLink` React
   component without a different architecture. Geo Map's click-to-explore already routes into Flow
@@ -114,14 +107,16 @@ same as the dead code in `app/main.py` already does) rather than restoring `star
 | Slack / Email / PagerDuty / Webhook / Tracecat notifications | ✅ Written | ✅ Settings UI + Send Test | ❌ Not confirmed against a live service |
 | AI assistant | ✅ Written | ✅ Written | ❌ Not confirmed with a live API key |
 | DuckDB backend | ✅ Core paths | N/A | ⚠️ Alert-engine gaps by design; production volume unconfirmed |
-| SSL/TLS auto-detect | ⚠️ Likely broken against current entrypoint | ✅ Settings UI | ❌ Needs end-to-end verification |
+| SSL/TLS auto-detect | ✅ Fixed — wired into `app/server.py`'s real entrypoint | ✅ Settings UI | ⚠️ Code path confirmed correct; live cert-upload+restart not confirmed in this environment |
 | Storage Test Connection | ✅ Built (`/api/system/test-connection`) | ✅ UI button | ✅ Yes |
 | Topology node click → flow drill-down | ✅ Built | ✅ Built | ✅ Yes |
 | Traffic by Port page | ✅ Built | ✅ Built (URL-only, not in sidebar nav) | ✅ Yes |
 | Sankey flow diagrams | ✅ Built (Analytics + Device View) | ✅ Built | ✅ Yes |
+| NAT Translations | ✅ Built (direct UDP path only) | ✅ Built | ✅ Yes, empty table expected unless exporter+ingest-mode support NAT event fields |
 | Internal IP Lookup (pktIPAM) | ✅ Built | ✅ Built | ✅ Yes, pending a configured pktIPAM connection |
 | Default admin / auto-login | ✅ Built | ✅ Built | ✅ Yes |
-| Reverse DNS (PTR) lookup | ❌ Not built | ❌ Not built | — |
+| Reverse DNS (PTR) lookup | ✅ Built (MXToolbox `ptr` command) | ✅ Built | ✅ Yes |
+| ASN lookup (`AsnLink`) | ✅ Built | ✅ Built | ✅ Yes |
 | Geo Map IP lookup | ❌ Not built (deliberate) | ❌ Not built (deliberate) | — |
 
 ---
