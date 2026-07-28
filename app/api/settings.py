@@ -101,6 +101,9 @@ DEFAULTS: dict[str, Any] = {
     # Live updates (WebSocket)
     "ws_stream_raw_flows": False,  # Push raw FlowRecord batch to WS clients after each flush
     "ws_max_raw_flows": 100,       # Max flows per push (capped to prevent flooding)
+
+    # Suite integration
+    "hub_settings_managed": False,  # Set by pktHub on register/deregister via /api/suite/settings-lock — not user-editable.
 }
 
 
