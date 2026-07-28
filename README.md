@@ -68,13 +68,13 @@ All settings in `config.example.yaml` can also be passed as `PKTFLOW_*` environm
 - **Real-time dashboard** — flows/sec counter with live WebSocket updates (green dot = live, falls back to polling)
 - **Analytics** — traffic timeseries charts; short-range (REST) and long-range (hourly/daily rollup) views
 - **Device View** — per-sampler traffic history, top talkers table, protocol distribution
-- **Flow Explorer** — search and filter flows by IP, port, protocol, time range; **Any direction** toggle turns Source/Destination IP into an either-side match (one IP set matches it on either side; both set matches the full two-way conversation between them, regardless of which leg recorded which direction); server-side pagination with a sliding page-number bar (Prev/Next, `1 ..` / `.. N` jump shortcuts); CSV/JSON/PCAP export (all respect the any-direction filter); any public source/destination IP is a clickable link to the IP Lookup modal (see below)
+- **Flow Explorer** — search and filter flows by IP, port, protocol, time range; **Any direction** toggle turns Source/Destination IP into an either-side match (one IP set matches it on either side; both set matches the full two-way conversation between them, regardless of which leg recorded which direction); server-side pagination with a sliding page-number bar (Prev/Next, `1 ..` / `.. N` jump shortcuts) and a page-size selector (25/50/75/100, default 25); CSV/JSON/PCAP export (all respect the any-direction filter); any public source/destination IP is a clickable link to the IP Lookup modal (see below)
 - **Network Topology** — two layouts, toggled per view. **Hierarchical** (default) is a fixed 3-band diagram per NetFlow sampler: private devices grouped into labeled `/24` subnet boxes at top, a single generic **L3** pivot node in the middle (deliberately no IP/stats — it represents the network boundary itself, not a guessed router), external destinations at bottom. A destination reached by several internal hosts renders once with several lines converging on it, never duplicated or chained through unrelated conversations; private↔private traffic (which never crosses the L3 boundary) draws as a direct dashed line instead. Hovering a device highlights its own line plus only the specific peers it actually reaches, in a brighter accent color; hovering L3 lights up everything that sampler observed. Clicking a device (or a private↔private link) deep-links into Flow Explorer, any-direction-filtered to that traffic for the current window. **Force** keeps the original free-floating D3 graph with site clustering. Export to PNG, SVG, JSON, DOT, Draw.io, or Lucidchart (Lucidchart mirrors the same 3-band structure)
 - **Geo Map** — Leaflet dark map with D3 SVG arc overlays; ip-api.com geo lookup; circle markers colored by configurable Site Groups; arc styling comes entirely from **Address Mappings** (private→public CIDR/IP topology, resolves RFC-1918 traffic to the correct physical site) + **Traffic Rules** (priority-ordered, drag-and-drop, matches on address mapping/destination CIDR/destination port to pick a Line Style) — see Settings → Geo Map; dynamic legend shows only the Traffic Rules actually on screen, labeled by rule name; both legs of a bidirectional conversation always merge into one arc
 - **Traffic by Port** (`/ports`) — protocol mix, top ports by bytes/flows, traffic-over-time chart, full port inventory table
 - **NAT Translations** (`/nat-translations`) — table of observed original-address → NAT'd-address mappings (e.g. a VLAN or subnet egressing through a different public IP than the rest of the network, even via the same physical WAN interface), aggregated from flows carrying NAT Information Elements. This is real flow-telemetry data, not device configuration or a vendor-specific integration — it works for any exporter that sends standard NAT event fields, with no vendor-specific code. Two hard requirements: (1) the sending device must be configured to export NAT event data — this is a Cisco ASA/ISR (NSEL), Juniper SRX, or pfSense/OPNsense-with-NAT-logging-class capability; most consumer/prosumer routers (including most UniFi/EdgeOS gear) don't support it at all, so an empty table is expected on many networks, not a bug; (2) the sampler must be pointed at pktFlow's **direct UDP listener** (Settings → Ingest → "Ingest method" = `udp` or `both`) — the goflow2/Vector HTTP ingestion path normalizes everything into goflow2's own fixed protobuf schema, which has no NAT fields, so NAT data sent through that path is silently unavailable regardless of what the exporter sends. Filterable by sampler and time window; each row shows direction (source/egress vs. destination/inbound NAT), byte/flow counts, and last-seen time.
 - **Sankey flow diagrams** — a network-wide src→dst view on Analytics, and a per-device top-talkers flow map on Device View
-- **IP Lookup** — any public (non-RFC1918) IP address shown in Flow Explorer, Device View, Topology, or Alerts is a clickable link that opens a modal combining ipinfo.io (geolocation/ASN/org, plus company/privacy/abuse-contact on paid plans) and ipapi.is (geolocation, ASN/org, company, abuse contact, VPN/proxy/Tor/datacenter/abuser detection, all in one call) with an AbuseIPDB reputation score and MXToolbox reverse-DNS/ASN/blacklist data, using each user's own API keys (see Settings → User Keys below). MXToolbox's other commands — email/DNS record checks (SPF/DMARC/DKIM/MX/etc.) and active probes (ping/traceroute/TCP/HTTP/HTTPS/SMTP) — are reachable via the API but not surfaced in this modal yet.
+- **IP Lookup** — any public (non-RFC1918) IP address shown in Flow Explorer, Device View, Topology, or Alerts is a clickable link that opens a modal combining ipinfo.io (geolocation/ASN/org, plus company/privacy/abuse-contact on paid plans), ipapi.is (geolocation, ASN/org, company, abuse contact, VPN/proxy/Tor/datacenter/abuser detection — usable with no API key at all via a "use free tier" toggle, ~1,000 lookups/day), AbuseIPDB reputation score, and MXToolbox reverse-DNS/ASN/blacklist data, using each user's own API keys (see Settings → User Keys below). Each provider can be shown/hidden in the modal independently (per-provider on/off toggle), and ipinfo.io/ipapi.is further break down into per-field checkboxes (geolocation, ASN/org, company, privacy/threat detection, abuse contact, hosted domains) so a user can hide sections they don't want to see. Any `ASxxxx` shown in the modal is itself a clickable link (`AsnLink` component) that opens a second modal with ipinfo.io's ASN-level details. MXToolbox's other commands — email/DNS record checks (SPF/DMARC/DKIM/MX/etc.) and active probes (ping/traceroute/TCP/HTTP/HTTPS/SMTP) — are reachable via the API but not surfaced in this modal yet.
 - **Internal IP Lookup (pktIPAM)** — private/RFC1918 IPs are also clickable (styled with a purple dashed underline + network icon instead of the public lookup's search icon): the modal calls out to a connected pktIPAM instance (see Settings → Security → Suite Integration → Sibling pkt Apps) and shows subnet/site, IP inventory status/hostname/MAC/owner, the active DHCP lease, DNS records, and last-seen ARP entry. If no pktIPAM connection is configured, the modal shows a link straight to that settings page instead of erroring. Addresses that aren't well-formed IPv4 (or are otherwise unparseable) still render as plain text.
 
 ### Alerting
@@ -89,7 +89,7 @@ All settings in `config.example.yaml` can also be passed as `PKTFLOW_*` environm
 - **Bulk rule provisioning** — Export CSV / Import CSV / template-download on the Rules tab; `conditions` round-trips as a JSON object string (shape depends on `rule_type`), `channels` as a comma-separated column
 - **Investigate button** — every active/history alert card deep-links straight to Flow Explorer, pre-filtered to the alert's time window plus whatever sampler/src IP/dst port/protocol its details carry
 - **Active/History time-range filter** — both alert tabs share the same search + severity + time-range filter bar as Application Logs (below)
-- **Active/History pagination** — both tabs paginate client-side at 25 events/page with the same sliding page-number bar (Prev/Next, `1 ..` / `.. N` jump shortcuts) used elsewhere in the app; filtering by text/severity/time-range resets back to page 1
+- **Active/History pagination** — both tabs paginate client-side (default 25 events/page, selectable 25/50/75/100 independently per tab) with the same sliding page-number bar (Prev/Next, `1 ..` / `.. N` jump shortcuts) used elsewhere in the app; filtering by text/severity/time-range resets back to page 1
 
 ### Authentication & Users
 - **Local auth** — JWT + bcrypt, configurable token lifetime
@@ -112,7 +112,7 @@ All configuration is managed via the Settings UI (no file edits required after i
 
 ### Infrastructure
 - **Device registry** — name, IP, site per sampler; CSV import/export + downloadable template; live stats per device; **acts as an ingest allowlist, not just labeling** — flows from a sampler IP not present and enabled in the registry are dropped before storage, not just missing metadata. The allowlist is an in-memory cache (`app/ingest/normalizer.py`'s `_device_cache`) that's now warmed from the registry at process startup (`app/main.py` lifespan) — previously it was only ever populated reactively by device create/edit/delete through the UI, so **every service restart silently dropped all incoming flow data** as "unregistered" until someone happened to edit a device afterward, even though the registry itself was correct the whole time
-- **Application Logs** — search + level filter, plus a time-range dropdown (1h/6h/24h/7d/30d/All time/Custom range) for narrowing down a large log history; custom range validates the end is after the start and disallows future times. The table paginates server-side (50 rows/page) with a sliding page-number bar above it — Next/Prev move the visible window of 5 page numbers along with you, plus `1 ..` / `.. N` shortcuts to jump straight to the first/last page
+- **Application Logs** — search + level filter, plus a time-range dropdown (1h/6h/24h/7d/30d/All time/Custom range) for narrowing down a large log history; custom range validates the end is after the start and disallows future times. The table paginates server-side (default 25 rows/page, selectable 25/50/75/100) with a sliding page-number bar above it — Next/Prev move the visible window of 5 page numbers along with you, plus `1 ..` / `.. N` shortcuts to jump straight to the first/last page
 - Alert-event and last-login timestamps are normalized to UTC before parsing so they display correctly regardless of the browser's local timezone
 - **Unknown samplers** — IPs sending flows but not in the registry raise an alert (with a one-click link to pre-fill registration) and appear in Settings → Devices with dismiss support; their flows are not persisted until registered
 - **Data retention** — configurable TTL for ClickHouse flows (default 90 days); manual cleanup trigger
@@ -337,9 +337,9 @@ Log in at `http://<server-ip>:8766` with the `admin_user`/`admin_password` from 
 
 ## SSL / HTTPS
 
-pktFlow is designed to auto-detect SSL on startup: if `ssl/server.crt` and `ssl/server.key` exist under the data directory, it should start in HTTPS mode; otherwise HTTP.
+pktFlow auto-detects SSL at process startup: `app/server.py`'s `main()` (the actual systemd entrypoint — `ExecStart=... python -m app.server`) reads `ssl_enabled`/`ssl_certfile`/`ssl_keyfile` directly from the SQLite settings table before calling `uvicorn.run()`, and passes `ssl_certfile`/`ssl_keyfile` through to uvicorn when a cert is enabled and both paths are present.
 
-> **Verify this before relying on it in production.** The code that reads the SSL settings and forwards them to uvicorn currently lives in a code path (`if __name__ == "__main__":` in `app/main.py`) that does not appear to be reached by either the current systemd `ExecStart` (`python -m app.server`) or the previously-committed one (`uvicorn app.main:app ...`) — both import `app.main` as a module rather than executing it directly. See [Known Issues & Quirks](#known-issues--quirks) item 7 for the full trace. Confirm with a real cert upload + restart + `curl -k https://localhost:<port>/api/health` before depending on this.
+> This was previously broken — the SSL-reading logic lived in a dead `if __name__ == "__main__":` block in `app/main.py` that neither the systemd unit nor a direct `uvicorn app.main:app ...` invocation ever executed, since both import `app.main` as a module. Fixed by moving the logic into `app/server.py::main()`; the orphaned `start.sh` wrapper (which built the SSL args correctly but was never referenced by `install.sh` or the systemd unit) was removed as part of the same fix. Still worth a real cert upload + restart + `curl -k https://localhost:<port>/api/health` to confirm end-to-end in your own environment, but the code path is no longer dead.
 
 **To enable HTTPS:** go to **Settings → Security → SSL / TLS**, drag-and-drop a PFX/P12 bundle (with passphrase) or separate PEM cert + key files, then restart the service. The restart button is in **Settings → General**.
 
@@ -349,7 +349,7 @@ pktFlow is designed to auto-detect SSL on startup: if `ssl/server.crt` and `ssl/
 
 ## Application Settings
 
-All settings are in the browser UI at `/settings`. Changes take effect immediately (no restart needed unless otherwise noted). The top-level tab bar is: **General · Security · Data · Notifications · User Keys · Collectors · Geo Map · Ingest**. Security and Data each have their own left-hand sub-tab strip.
+All settings are in the browser UI at `/settings`. Changes take effect immediately (no restart needed unless otherwise noted). The top-level tab bar is: **General · Security · Data · Notifications · User Keys · Sources · Geo Map · Ingest**. Security and Data each have their own left-hand sub-tab strip.
 
 ### General
 
@@ -416,7 +416,7 @@ Left-hand sub-tabs: **Storage** · **Backups**.
 | Manual cleanup | Trigger immediate retention cleanup |
 | Test Connection | `POST /api/system/test-connection` — verifies the currently configured backend is reachable |
 
-> DuckDB implements the core query paths (search, top talkers/ports, protocol distribution, topology). A handful of alert-engine detail queries (baselines, elephant-flow/threshold/port-scan/inter-site/asymmetric-flow lookups — 18 methods in `app/storage/duckdb.py`) deliberately raise `NotImplementedError` under DuckDB rather than being built out — those specific alert rule types are ClickHouse-only for now.
+> DuckDB implements the core query paths (search, top talkers/ports, protocol distribution, topology). A handful of alert-engine detail queries (baselines, elephant-flow/threshold/port-scan/inter-site/asymmetric-flow lookups — 19 methods in `app/storage/duckdb.py`) deliberately raise `NotImplementedError` under DuckDB rather than being built out — those specific alert rule types are ClickHouse-only for now.
 
 #### Data → Backups
 
@@ -429,6 +429,8 @@ Left-hand sub-tabs: **Storage** · **Backups**.
 | Include ClickHouse | Also export the `flows` table to CSV alongside the SQLite snapshot |
 
 Each run creates a timestamped `pktflow-backup-<UTC timestamp>/` directory containing a consistent copy of `pktflow.db` (via SQLite's own backup API, safe to run against a live database) and, if enabled, `flows.csv`. Trigger manually from Settings → Data → Backups → **Run Backup Now**, or via `POST /api/system/backup`.
+
+Each listed snapshot has a **Restore…** link that restores directly from that on-server snapshot — no need to download and re-upload it. Expanding it shows a checkbox per file present in the snapshot (`pktflow.db`, `config.yaml`, `flows.csv`/`flows.csv.gz`), so you can restore just one piece instead of always restoring everything together; the same per-file selection is available on the bundle-upload restore. Every restore requires confirmation and, for `config.yaml` changes, a service restart to take effect.
 
 ### Notifications
 
@@ -448,11 +450,13 @@ Each channel has a "Send Test" button (`POST /api/settings/test-notification`) t
 
 Every logged-in user (not just admins) manages their **own** keys here for AbuseIPDB, ipinfo.io, ipapi.is, MXToolbox, and IPQualityScore — used by the public IP Lookup feature (IPQualityScore can be saved/tested but isn't consumed by the lookup yet). Keys are scoped strictly to the owning user; nobody else, including admins, can see the value. Each field has a "Test" button that calls the real provider API with a harmless test IP before saving. Leaving a field blank and saving clears that key.
 
+For ipinfo.io, ipapi.is, AbuseIPDB, and MXToolbox — the four providers actually wired into the IP Lookup modal — a checkbox toggles the whole provider's section on/off in the modal, and ipinfo.io/ipapi.is additionally expose per-field checkboxes (geolocation, ASN/org, company, privacy/threat detection, abuse contact, hosted domains) to hide individual pieces of data. ipapi.is also has a "Use free tier" toggle that skips the API key requirement entirely (~1,000 lookups/day, no key needed).
+
 This tab also holds the app-wide **Lucidchart API token** (a Personal Access Token from lucid.co → Account → API Tokens), which enables "Export to Lucidchart" on the Topology page — this one setting is shared across all users, unlike the personal keys above it.
 
-### Collectors (Devices)
+### Sources (Devices)
 
-The device registry maps sampler IPs to human-readable names and sites. Devices appear on Device View and the sampler dropdown throughout the UI.
+The device registry maps sampler IPs to human-readable names and sites. Devices appear on Device View and the sampler dropdown throughout the UI. (Sidebar/Settings tab label is "Sources" — not to be confused with the goflow2/Vector "collector" hosts described under [Collector Configuration](#collector-configuration) below, which is a different meaning of "collector".)
 
 - Add devices manually or **import from CSV** (columns: `name`, `ip`, `site`, `description`)
 - **Unknown Samplers** panel shows IPs sending flows that are not in the registry; dismiss to suppress the `new_host` alert without adding to the registry
@@ -596,14 +600,18 @@ pktflow/
 │   ├── main.py             App factory, lifespan, router registration
 │   └── server.py           Process entrypoint (`python -m app.server`) — reads host/port from
 │                             config.yaml at startup so Settings → General → Port takes effect
-│                             on the next restart without a systemd unit edit
+│                             on the next restart without a systemd unit edit; also reads
+│                             ssl_enabled/ssl_certfile/ssl_keyfile from the settings DB and
+│                             forwards them to uvicorn.run() (see SSL / HTTPS below)
 ├── clickhouse/schema.sql   flows + rollup tables + materialized views
 ├── frontend/src/
 │   ├── pages/              Analytics (dashboard + timeseries), DeviceView, FlowExplorer,
-│   │                         Topology, GeoMap, Ports, Alerts, Logs, Settings
+│   │                         Topology, GeoMap, Ports, NatTranslations, Alerts, Logs, Settings
 │   ├── components/         Layout, AiAssistant, Pagination, IpLink (public + internal/pktIPAM
 │   │                         lookup modals; also exports linkifyIps, used to auto-link IPs
-│   │                         embedded in alert message text), HelpButton (app-wide contextual help)
+│   │                         embedded in alert message text), AsnLink (ASxxxx click-through
+│   │                         to an ipinfo.io ASN-details modal), HelpButton (app-wide
+│   │                         contextual help)
 │   ├── api/client.ts       Typed API client + getToken() for WebSocket
 │   ├── hooks/useWebSocket.ts  WebSocket hook
 │   └── utils/               protocols.ts (protocol name map), ip.ts (RFC1918 private-range
@@ -614,8 +622,6 @@ pktflow/
 ├── config.example.yaml     Config file template
 ├── pktflow.service         systemd unit template (placeholders filled in by install.sh);
 │                             ExecStart runs `python -m app.server`, not a raw uvicorn command
-├── start.sh                SSL-aware startup wrapper — present in the repo but not currently
-│                             referenced by install.sh or pktflow.service (see Known Issues & Quirks)
 └── requirements.txt
 ```
 
@@ -686,8 +692,9 @@ Scoped strictly to the authenticated user (by username, not user id — pktHub s
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/ip-info/{ip}` | JWT | Combined ipinfo.io + ipapi.is + AbuseIPDB + MXToolbox (ptr/asn/blacklist, run concurrently) lookup for a single public IP, using the caller's own stored keys. Returns 400 for private/loopback/link-local/reserved addresses. |
+| `GET` | `/api/ip-info/{ip}` | JWT | Combined ipinfo.io + ipapi.is + AbuseIPDB + MXToolbox (ptr/asn/blacklist, run concurrently) lookup for a single public IP, using the caller's own stored keys (or ipapi.is's keyless free tier, if enabled). Returns 400 for private/loopback/link-local/reserved addresses. |
 | `GET` | `/api/ip-info/internal/{ip}` | JWT | pktIPAM-backed lookup for a single private/loopback/link-local IP — subnet, IP inventory record, DHCP leases, DNS records, ARP entries. Returns 400 for public addresses. Returns `configured: false` (not an error) if no enabled pktIPAM connection exists yet. |
+| `GET` | `/api/ip-info/asn/{asn}` | JWT | ipinfo.io's ASN API for a given `ASxxxx` number — backs the `AsnLink` click-through from `ASxxxx` text in the IP Lookup modal. |
 
 ### MXToolbox
 
@@ -787,7 +794,7 @@ After pktFlow restarts, Vector detects the connection reset and immediately retr
 4. **ClickHouse threading** — `clickhouse-driver` is not thread-safe. All calls are serialized with `threading.Lock()` in `clickhouse.py`.
 5. **passlib/bcrypt on Python 3.12+** — Pin `passlib==1.7.4` and `bcrypt==4.0.1` to avoid attribute errors.
 6. **Direct UDP ingest depends on a `netflow` library workaround** — the third-party `netflow` package (`bitkeks/python-netflow-v9-softflowd`) initializes its own template cache as a list, but its NetFlow v9 parser then indexes into that same object using the exporter's raw Template ID (commonly ≥256 for real hardware) as a dict-style key — this raises `IndexError` for any realistic Template ID, silently dropping every flow record after the first template arrives. `app/ingest/udp_listener.py` works around this by pre-seeding the template cache as `{"netflow": {}, "ipfix": {}}` (dicts) before the library ever gets a chance to install its own broken list default. If you upgrade the `netflow` dependency, re-verify this workaround is still needed (or still effective) against a real capture before relying on direct UDP ingest.
-7. **SSL/TLS auto-detection needs verification against the current entrypoint** — the code that reads `ssl_enabled`/`ssl_certfile`/`ssl_keyfile` from the settings DB and passes them to uvicorn lives in an `if __name__ == "__main__":` block in `app/main.py`. Neither the shipped `pktflow.service` (`ExecStart=... python -m app.server`, and `app/server.py`'s own `uvicorn.run()` call does not forward SSL kwargs) nor the older direct `uvicorn app.main:app ...` CLI invocation actually executes that block — both import `app.main` as a module rather than running it as `__main__`. `start.sh` (which does build the `--ssl-certfile`/`--ssl-keyfile` uvicorn args correctly) is not referenced by `install.sh` or `pktflow.service`. Before relying on the Settings → Security → SSL/TLS panel to actually serve HTTPS in production, confirm end-to-end that a live process picks up an uploaded cert after a restart — this looks like a real gap between the documented behavior and what the current startup path executes, not just a docs lag.
+7. **SSL/TLS auto-detection — fixed, no longer a dead code path.** Previously the code that read `ssl_enabled`/`ssl_certfile`/`ssl_keyfile` from the settings DB and passed them to uvicorn lived in an `if __name__ == "__main__":` block in `app/main.py` that neither the systemd entrypoint (`python -m app.server`) nor a direct `uvicorn app.main:app ...` invocation ever executed. This is now fixed: `app/server.py::main()` (the real entrypoint) reads those three settings itself and forwards `ssl_certfile`/`ssl_keyfile` to `uvicorn.run()`. The orphaned `start.sh` wrapper was removed since its logic is now in the actual entrypoint. Still worth confirming end-to-end (upload cert → restart → `curl -k https://localhost:<port>/api/health`) in your own environment before depending on it in production.
 
 ---
 
@@ -800,7 +807,7 @@ This list is kept in sync with [FEATURES.md](FEATURES.md), which is the canonica
 | Notification channels (Slack, Email, PagerDuty, Webhook, Tracecat) | Code written, including a real `POST /api/settings/test-notification` behind the "Send Test" buttons — not yet confirmed fired against a live service in production |
 | AI assistant | Code written (`app/api/ai.py`, `AiAssistant.tsx`); `anthropic` is now a declared dependency in `requirements.txt` — not yet confirmed used with a live API key in production |
 | Okta OIDC | **Deliberately dropped, not pending** — `app/auth/okta.py` is an intentional no-op; SAML 2.0 covers Okta SSO |
-| SSL/TLS auto-detection | **Needs verification** — the code that wires an uploaded cert into uvicorn on startup lives in a code path that the current process entrypoint doesn't appear to execute; see Known Issues & Quirks above |
+| SSL/TLS auto-detection | **Done, not pending** — the code that wires an uploaded cert into uvicorn now lives in `app/server.py`'s actual entrypoint (previously dead code in `app/main.py`); see Known Issues & Quirks above |
 | `ingest_http_port` Settings field | Vestigial — displayed in Settings → Ingest but not read anywhere in the backend; the real listen port is Settings → General → Port |
 | App-wide contextual help | **Done, not pending** — the "?" → modal `HelpButton` pattern originally built for Address Mappings/Traffic Rules is now on every main nav page and every Settings section |
 
