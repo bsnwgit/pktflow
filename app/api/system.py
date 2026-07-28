@@ -16,6 +16,7 @@ import tarfile
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import aiosqlite
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -292,18 +293,87 @@ This inserts historical flows on top of any new flows already collected.
         raise
 
 
+def _restore_from_dir(src_dir: Path, cfg, files: Optional[set[str]]) -> dict:
+    """
+    Restore whatever of {pktflow.db, config.yaml, flows.csv[.gz]} is present in
+    src_dir and selected by `files` (None means restore everything present — the
+    original all-or-nothing behavior). Upload bundles ship flows.csv.gz; on-server
+    snapshots ship flows.csv uncompressed — both are handled.
+    """
+    result: dict = {}
+
+    def wanted(name: str) -> bool:
+        return files is None or name in files
+
+    # ── SQLite ────────────────────────────────────────────────────────────────
+    db_src = src_dir / "pktflow.db"
+    if wanted("pktflow.db"):
+        if db_src.exists():
+            shutil.copy2(str(db_src), cfg.db_path)
+            result["pktflow.db"] = "restored"
+        else:
+            result["pktflow.db"] = "not found in backup"
+
+    # ── config.yaml ───────────────────────────────────────────────────────────
+    cfg_src = src_dir / "config.yaml"
+    if wanted("config.yaml"):
+        if cfg_src.exists():
+            shutil.copy2(str(cfg_src), str(_install_dir() / "config.yaml"))
+            result["config.yaml"] = "restored (restart required)"
+        else:
+            result["config.yaml"] = "not found in backup"
+
+    # ── ClickHouse flows ──────────────────────────────────────────────────────
+    flows_gz = src_dir / "flows.csv.gz"
+    flows_plain = src_dir / "flows.csv"
+    flows_name = "flows.csv.gz" if flows_gz.exists() else "flows.csv"
+    if wanted(flows_name):
+        if flows_gz.exists() and flows_gz.stat().st_size > 100:
+            try:
+                cmd = (
+                    f"gunzip -c '{flows_gz}' | clickhouse-client "
+                    f"--host localhost --database {cfg.clickhouse_database} "
+                    f"--query 'INSERT INTO flows FORMAT CSVWithNames'"
+                )
+                proc = subprocess.run(cmd, shell=True, capture_output=True, timeout=600, text=True)
+                result[flows_name] = "imported" if proc.returncode == 0 else f"error: {proc.stderr[:300]}"
+            except Exception as e:
+                result[flows_name] = f"error: {e}"
+        elif flows_plain.exists() and flows_plain.stat().st_size > 0:
+            try:
+                cmd = (
+                    f"clickhouse-client --host localhost --database {cfg.clickhouse_database} "
+                    f"--query 'INSERT INTO flows FORMAT CSVWithNames' < '{flows_plain}'"
+                )
+                proc = subprocess.run(cmd, shell=True, capture_output=True, timeout=600, text=True)
+                result[flows_name] = "imported" if proc.returncode == 0 else f"error: {proc.stderr[:300]}"
+            except Exception as e:
+                result[flows_name] = f"error: {e}"
+        else:
+            result[flows_name] = "not present in backup"
+
+    return result
+
+
+def _parse_files_param(files: Optional[str]) -> Optional[set[str]]:
+    if not files:
+        return None
+    return {f.strip() for f in files.split(",") if f.strip()}
+
+
 @router.post("/import", dependencies=[Depends(require_admin)])
-async def import_bundle(file: UploadFile = File(...)):
+async def import_bundle(file: UploadFile = File(...), files: Optional[str] = Form(None)):
     """
     Restore from a pktflow export bundle (.tar.gz).
-    Restores: SQLite DB, config.yaml, and optionally imports ClickHouse flows.
+    `files` is an optional comma-separated subset of {pktflow.db, config.yaml,
+    flows.csv.gz} — omit to restore everything present in the bundle.
     Requires a service restart after restore for config changes to take effect.
     """
     cfg = get_settings()
     data = await file.read()
+    wanted = _parse_files_param(files)
 
     def _do_restore(raw: bytes) -> dict:
-        result: dict = {}
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             archive_path = tmp_path / "upload.tar.gz"
@@ -315,49 +385,7 @@ async def import_bundle(file: UploadFile = File(...)):
             except Exception as e:
                 return {"error": f"Failed to extract archive: {e}"}
 
-            # ── SQLite ────────────────────────────────────────────────────────
-            db_src = tmp_path / "pktflow.db"
-            if db_src.exists():
-                shutil.copy2(str(db_src), cfg.db_path)
-                result["sqlite"] = "restored"
-            else:
-                result["sqlite"] = "not found in bundle"
-
-            # ── config.yaml ───────────────────────────────────────────────────
-            cfg_src = tmp_path / "config.yaml"
-            cfg_dest = _install_dir() / "config.yaml"
-            if cfg_src.exists():
-                shutil.copy2(str(cfg_src), str(cfg_dest))
-                result["config"] = "restored (restart required)"
-            else:
-                result["config"] = "not found in bundle"
-
-            # ── ClickHouse flows ──────────────────────────────────────────────
-            flows_gz = tmp_path / "flows.csv.gz"
-            if flows_gz.exists() and flows_gz.stat().st_size > 100:
-                try:
-                    cmd = (
-                        f"gunzip -c '{flows_gz}' | clickhouse-client "
-                        f"--host localhost --database {cfg.clickhouse_database} "
-                        f"--query 'INSERT INTO flows FORMAT CSVWithNames'"
-                    )
-                    proc = subprocess.run(
-                        cmd,
-                        shell=True,
-                        capture_output=True,
-                        timeout=600,
-                        text=True,
-                    )
-                    if proc.returncode == 0:
-                        result["flows"] = "imported"
-                    else:
-                        result["flows"] = f"error: {proc.stderr[:300]}"
-                except Exception as e:
-                    result["flows"] = f"error: {e}"
-            else:
-                result["flows"] = "not present in bundle"
-
-        return result
+            return _restore_from_dir(tmp_path, cfg, wanted)
 
     result = await asyncio.to_thread(_do_restore, data)
     return result
@@ -378,6 +406,30 @@ async def list_backups() -> list:
     from app.backup import list_backups_sync
     cfg = get_settings()
     return await asyncio.to_thread(list_backups_sync, cfg.db_path)
+
+
+@router.post("/backup/restore/{snapshot_name}", dependencies=[Depends(require_admin)])
+async def restore_from_snapshot(snapshot_name: str, files: Optional[str] = None) -> dict:
+    """
+    Restore directly from an on-server backup snapshot — no download/upload round trip.
+    `files` is an optional comma-separated subset of {pktflow.db, config.yaml,
+    flows.csv} — omit to restore everything present in the snapshot.
+    """
+    from app.backup import _SNAPSHOT_PREFIX, _backup_root
+
+    if not re.fullmatch(rf"{re.escape(_SNAPSHOT_PREFIX)}\d{{8}}T\d{{6}}Z", snapshot_name):
+        raise HTTPException(status_code=400, detail="Invalid snapshot name")
+
+    cfg = get_settings()
+    backup_root = await asyncio.to_thread(_backup_root, cfg.db_path)
+    backup_root = backup_root.resolve()
+    snap_dir = (backup_root / snapshot_name).resolve()
+    if snap_dir.parent != backup_root or not snap_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    wanted = _parse_files_param(files)
+    result = await asyncio.to_thread(_restore_from_dir, snap_dir, cfg, wanted)
+    return result
 
 
 @router.post("/test-connection", dependencies=[Depends(require_admin)])

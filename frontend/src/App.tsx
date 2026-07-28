@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './store/auth'
 import Layout from './components/Layout'
 import Login from './pages/Login'
+import AppErrorBoundary from './components/AppErrorBoundary'
 
 import { lazy, Suspense } from 'react'
 const Analytics    = lazy(() => import('./pages/Analytics'))
@@ -22,14 +23,22 @@ function PageFallback() {
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth()
+  const isChromeless = new URLSearchParams(window.location.search).get('chromeless') === '1'
   if (isLoading) return <PageFallback />
   if (!user) return <Navigate to="/login" replace />
-  return <Layout>{children}</Layout>
+  return <Layout chromeless={isChromeless}>{children}</Layout>
 }
+
+// When loaded through pkthub's proxy, the browser's real path is
+// /proxy/<app_id>/... — react-router needs that as its basename or every
+// route fails to match and falls through to the "*" redirect (Dashboard).
+const proxyPrefixMatch = window.location.pathname.match(/^\/proxy\/\d+/)
+const routerBasename = proxyPrefixMatch ? proxyPrefixMatch[0] : undefined
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <AppErrorBoundary>
+    <BrowserRouter basename={routerBasename}>
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -93,5 +102,6 @@ export default function App() {
         </Routes>
       </AuthProvider>
     </BrowserRouter>
+    </AppErrorBoundary>
   )
 }
