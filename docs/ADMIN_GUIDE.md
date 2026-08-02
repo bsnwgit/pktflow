@@ -93,7 +93,15 @@ Settings → Sources (Devices): name, IP, site per sampler, with CSV import/expo
 
 ## Alert engine
 
-Rule types: `data_gap` (silent sampler), `new_host` (unregistered/new sampler), `threshold` (bytes/packets/flows over a window), `rate_spike` (vs. 7-day rolling baseline), `port_protocol` (specific port/protocol/direction match). Alerts auto-resolve when the condition clears on the next evaluation; analysts/admins can acknowledge without closing. Bulk-provision rules via CSV export/import/template on the Rules tab. Alert retention (days before old events purge) is set on Data → Storage alongside other retention settings, not on the Alerts page itself.
+Rule types, grouped as they appear in the New Rule picker:
+
+| Group | Rule types |
+|---|---|
+| Traffic | Threshold, Rate spike (vs. 7-day rolling baseline), Top talker, Elephant flow, Inter-site traffic |
+| Security | Port / protocol, Connection burst, Port scan, Internal spread, Protocol anomaly |
+| Infrastructure | Data gap (silent sampler), Unknown sampler detected, Ingest rate low |
+
+Alerts auto-resolve when the condition clears on the next evaluation; analysts/admins can acknowledge without closing. Bulk-provision rules via CSV export/import/template on the Rules tab. Alert retention (days before old events purge) is set on Data → Storage alongside other retention settings, not on the Alerts page itself. Note some Traffic-group detail lookups (baselines, elephant-flow/port-scan/inter-site/asymmetric-flow) are ClickHouse-only — see Storage backend below.
 
 Enabling a notification channel under Notifications doesn't send anything by itself — it just makes the channel available to a rule. Each channel has a **Send Test** button that performs a real dispatch with whatever's currently filled in, even unsaved.
 

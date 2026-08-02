@@ -29,6 +29,7 @@ from app.api import user_api_keys as user_api_keys_router
 from app.api import ip_info       as ip_info_router
 from app.api import mxtoolbox     as mxtoolbox_router
 from app.api import integrations  as integrations_router
+from app.api import docs          as docs_router
 
 settings = get_settings()
 log = logging.getLogger("pktflow")
@@ -182,6 +183,7 @@ app.include_router(user_api_keys_router.router, prefix="/api/user-api-keys", tag
 app.include_router(ip_info_router.router,       prefix="/api/ip-info",       tags=["ip-info"])
 app.include_router(mxtoolbox_router.router,     prefix="/api/mxtoolbox",     tags=["mxtoolbox"])
 app.include_router(integrations_router.router,  prefix="/api/integrations",  tags=["integrations"])
+app.include_router(docs_router.router,          prefix="/api/docs-content",  tags=["docs"])
 
 # ── Health check ──────────────────────────────────────────────────────────────
 
