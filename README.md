@@ -70,7 +70,7 @@ All settings in `config.example.yaml` can also be passed as `PKTFLOW_*` environm
 - **Device View** — per-sampler traffic history, top talkers table, protocol distribution
 - **Flow Explorer** — search and filter flows by IP, port, protocol, time range; **Any direction** toggle turns Source/Destination IP into an either-side match (one IP set matches it on either side; both set matches the full two-way conversation between them, regardless of which leg recorded which direction); server-side pagination with a sliding page-number bar (Prev/Next, `1 ..` / `.. N` jump shortcuts) and a page-size selector (25/50/75/100, default 25); CSV/JSON/PCAP export (all respect the any-direction filter); any public source/destination IP is a clickable link to the IP Lookup modal (see below)
 - **Network Topology** — two layouts, toggled per view. **Hierarchical** (default) is a fixed 3-band diagram per NetFlow sampler: private devices grouped into labeled `/24` subnet boxes at top, a single generic **L3** pivot node in the middle (deliberately no IP/stats — it represents the network boundary itself, not a guessed router), external destinations at bottom. A destination reached by several internal hosts renders once with several lines converging on it, never duplicated or chained through unrelated conversations; private↔private traffic (which never crosses the L3 boundary) draws as a direct dashed line instead. Hovering a device highlights its own line plus only the specific peers it actually reaches, in a brighter accent color; hovering L3 lights up everything that sampler observed. Clicking a device (or a private↔private link) deep-links into Flow Explorer, any-direction-filtered to that traffic for the current window. **Force** keeps the original free-floating D3 graph with site clustering. Export to PNG, SVG, JSON, DOT, Draw.io, or Lucidchart (Lucidchart mirrors the same 3-band structure)
-- **Geo Map** — Leaflet dark map with D3 SVG arc overlays; ip-api.com geo lookup; circle markers colored by configurable Site Groups; arc styling comes entirely from **Address Mappings** (private→public CIDR/IP topology, resolves RFC-1918 traffic to the correct physical site) + **Traffic Rules** (priority-ordered, drag-and-drop, matches on address mapping/destination CIDR/destination port to pick a Line Style) — see Settings → Geo Map; dynamic legend shows only the Traffic Rules actually on screen, labeled by rule name; both legs of a bidirectional conversation always merge into one arc
+- **Geo Map** — Leaflet dark map with D3 SVG arc overlays; ip-api.com geo lookup; circle markers colored by configurable **Sites** — a Site's IP/CIDR field colors the remote end of a flow by direct IP/CIDR match, while **NAT Mappings** (private→public CIDR/IP topology, renamed from Address Mappings; multiple rows may share the same private/public CIDR, priority order resolves conflicts) color the local end by resolving RFC-1918 traffic to the correct physical site; a NAT Mapping's own optional Destination CIDR/Port lets the SAME private range resolve to a DIFFERENT public CIDR depending on the flow's destination (e.g. a firewall NATing DNS out one IP and everything else out another) — resolved per flow pair, so the same private IP can legitimately produce two map markers if its real NAT genuinely varies; an **ISP DHCP** toggle handles networks with no static public IP by locking all mappings and substituting one synthetic catch-all; every install has one locked-key **Default** site that new NAT Mappings fall back to; arc styling comes entirely from NAT Mappings + **Traffic Rules** (priority-ordered, drag-and-drop, matches on NAT mapping / destination (typed CIDR or a Site — mutually exclusive, locked once set) / destination port to pick a Line Style) — see Settings → Geo Map; dynamic, clickable legend shows only the Traffic Rules/Sites/NAT Mappings actually present on screen (Sites/NAT Mappings additionally gated on "show in legend"), labeled by rule/site/mapping name — click any entry to filter the map to it plus everything it connects to, multiple selections union across categories, a Reset row appears once something's selected, and the filter clears automatically on the next refresh; both legs of a bidirectional conversation resolve against the same normalized service port and always merge into one arc
 - **Traffic by Port** (`/ports`) — protocol mix, top ports by bytes/flows, traffic-over-time chart, full port inventory table
 - **NAT Translations** (`/nat-translations`) — table of observed original-address → NAT'd-address mappings (e.g. a VLAN or subnet egressing through a different public IP than the rest of the network, even via the same physical WAN interface), aggregated from flows carrying NAT Information Elements. This is real flow-telemetry data, not device configuration or a vendor-specific integration — it works for any exporter that sends standard NAT event fields, with no vendor-specific code. Two hard requirements: (1) the sending device must be configured to export NAT event data — this is a Cisco ASA/ISR (NSEL), Juniper SRX, or pfSense/OPNsense-with-NAT-logging-class capability; most consumer/prosumer routers (including most UniFi/EdgeOS gear) don't support it at all, so an empty table is expected on many networks, not a bug; (2) the sampler must be pointed at pktFlow's **direct UDP listener** (Settings → Ingest → "Ingest method" = `udp` or `both`) — the goflow2/Vector HTTP ingestion path normalizes everything into goflow2's own fixed protobuf schema, which has no NAT fields, so NAT data sent through that path is silently unavailable regardless of what the exporter sends. Filterable by sampler and time window; each row shows direction (source/egress vs. destination/inbound NAT), byte/flow counts, and last-seen time.
 - **Sankey flow diagrams** — a network-wide src→dst view on Analytics, and a per-device top-talkers flow map on Device View
@@ -463,7 +463,7 @@ The device registry maps sampler IPs to human-readable names and sites. Devices 
 
 ### Geo Map
 
-Admin-only tab covering Address Mappings, Traffic Rules, Site Groups, and Line Styles — see [Geo Map](#dashboards--visualization) under Features above for what each does.
+Admin-only tab covering Sites, NAT Mappings, Traffic Rules, and Line Styles — see [Geo Map](#dashboards--visualization) under Features above for what each does.
 
 ### Ingest
 
@@ -560,9 +560,9 @@ pktflow/
 │   │   ├── devices.py      Device registry CRUD + unknown samplers
 │   │   ├── settings.py     App settings CRUD + notification test
 │   │   ├── users.py        User management
-│   │   ├── address_mappings.py Private↔public CIDR topology (/api/address-mappings)
+│   │   ├── nat_mappings.py Private↔public CIDR topology (/api/nat-mappings)
 │   │   ├── traffic_rules.py    Geo Map line-style rules (/api/traffic-rules)
-│   │   ├── geo_config.py   Site groups + line styles CRUD (/api/geo-config/*)
+│   │   ├── geo_config.py   Sites + line styles CRUD (/api/geo-config/*)
 │   │   ├── user_api_keys.py Per-user external API keys (/api/user-api-keys)
 │   │   ├── ip_info.py      Combined ipinfo.io + ipapi.is + AbuseIPDB + MXToolbox
 │   │   │                     (ptr/asn/blacklist) lookup (/api/ip-info); also
@@ -656,26 +656,32 @@ pktflow/
 
 Common query parameters: `sampler_ip`, `src_ip`, `dst_ip`, `src_port`, `dst_port`, `protocol`, `site`, `start`, `end`, `limit`, `offset`.
 
-### Address Mappings & Traffic Rules
+### NAT Mappings & Traffic Rules
 
-Replaced the old VPN Site Mappings / WAN Addresses / Traffic Types design. Address Mappings are pure network topology (private CIDR/IP → representative public CIDR/IP, for correct geo placement); Traffic Rules are the sole source of Geo Map line styling (priority-ordered, first-match-wins).
+Replaced the old VPN Site Mappings / WAN Addresses / Traffic Types design. NAT Mappings (renamed from Address Mappings) are network topology (private CIDR/IP → representative public CIDR/IP, for correct geo placement) plus a `show_in_legend` flag for the Geo Map legend; Traffic Rules are the sole source of Geo Map line styling (priority-ordered, first-match-wins). Multiple NAT Mappings may share the same private and/or public CIDR — priority order resolves which one wins.
+
+A NAT Mapping also carries its own optional `dst_cidrs`/`dst_ports` (same comma-separated format as Traffic Rules', blank = any destination) — this is what lets the SAME `private_cidr` resolve to a DIFFERENT `public_cidr` depending on the flow's destination, modeling a firewall that NATs the same internal range out different public IPs by destination. `get_geo_data()` in `app/api/flows.py` resolves this **per flow pair**, not once per unique IP — see its docstring and the `_match_nat_mapping`/`_resolve_side` helpers for the exact mechanics, including why the same private IP can now legitimately produce two separate map markers.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET/POST` | `/api/address-mappings` | JWT / Admin JWT | List / create address mappings |
-| `PUT/DELETE` | `/api/address-mappings/{id}` | Admin JWT | Update / delete a mapping |
-| `POST` | `/api/address-mappings/reorder` | Admin JWT | Rewrite priority order from a client-supplied ordered id list |
+| `GET/POST` | `/api/nat-mappings` | JWT / Admin JWT | List / create NAT mappings |
+| `PUT/DELETE` | `/api/nat-mappings/{id}` | Admin JWT | Update / delete a mapping — rejected with 400 while `isp_dhcp_enabled` is on |
+| `POST` | `/api/nat-mappings/reorder` | Admin JWT | Rewrite priority order from a client-supplied ordered id list — rejected while `isp_dhcp_enabled` is on |
 | `GET/POST` | `/api/traffic-rules` | JWT / Admin JWT | List / create traffic rules |
-| `PUT/DELETE` | `/api/traffic-rules/{id}` | Admin JWT | Update / delete a rule |
+| `PUT/DELETE` | `/api/traffic-rules/{id}` | Admin JWT | Update / delete a rule — PUT rejects switching `dst_cidrs`↔`dst_site_key` on an existing rule with a 400 |
 | `POST` | `/api/traffic-rules/reorder` | Admin JWT | Rewrite priority order from a client-supplied ordered id list |
 
-A Traffic Rule optionally matches an Address Mapping (or "Any"), a comma-separated list of destination CIDRs/IPs, and/or a comma-separated list of destination ports/ranges — at least one filter is required. `/api/flows/geo` resolves each arc's Address Mapping first (for geolocation), then its Traffic Rule (for color/dash style + legend label).
+A Traffic Rule optionally matches a NAT Mapping (or "Any"), a destination — either `dst_cidrs` (typed, comma-separated) or `dst_site_key` (a live reference to a Site's `ip_cidr`, resolved at request time; mutually exclusive with `dst_cidrs`, enforced by a CHECK constraint) — and/or a comma-separated list of destination ports/ranges. At least one filter is required. `/api/flows/geo` resolves each arc's NAT Mapping first (for geolocation), then its Traffic Rule (for color/dash style + legend label).
+
+**Canonical example** (also documented in ADMIN_GUIDE.md): a firewall NATs `10.1.157.141` to `104.62.87.92` for destination port 53 and to `104.62.87.89` for everything else. To make the Geo Map reflect that: two NAT Mappings, same `private_cidr=10.1.157.141/32` — one with `dst_ports=53` → `public_cidr=104.62.87.92` (higher priority), one with no destination filter → `public_cidr=104.62.87.89` (lower priority, catch-all). A Traffic Rule scoped to the port-53 mapping only ever matches port-53 traffic; traffic on any other port resolves through the catch-all mapping and gets a different marker location, correctly falling through to the neutral gray default line if no rule is scoped to that mapping.
+
+**ISP DHCP mode** — `PUT /api/settings/isp_dhcp_enabled` with `true`/`false` toggles it, same generic settings endpoint as everything else in Settings; the side effect lives in `app/api/settings.py`, not `nat_mappings.py`. Enabling creates one `nat_mappings` row (`name='Default'`, `site_key='default'`, `private_cidr='0.0.0.0/0'`, `public_cidr=''`) and records its id in the internal `isp_dhcp_mapping_id` setting; `app/api/flows.py`'s `get_geo_data()` then ignores every other NAT mapping while the flag is on. Disabling deletes that row — `traffic_rules.nat_mapping_id` is `ON DELETE CASCADE`, so any rule scoped to it is deleted too.
 
 ### Geo Map Config
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET/POST/PUT/DELETE` | `/api/geo-config/site-groups` | Admin JWT | Site group definitions (marker color, badge color, "show in legend" toggle) |
+| `GET/POST/PUT/DELETE` | `/api/geo-config/sites` | Admin JWT | Site definitions (marker color, badge color, IP/CIDR for remote-end matching, "show in legend" toggle); the Default site's key is immutable and it can't be deleted |
 | `GET/POST/PUT/DELETE` | `/api/geo-config/line-styles` | Admin JWT | Arc line style catalog (color + dash pattern), picked by Traffic Rules |
 
 ### User API Keys
