@@ -41,7 +41,11 @@ Export to PNG, SVG, JSON, DOT, Draw.io, or Lucidchart (if your admin has configu
 
 ## Geo Map
 
-A dark-themed world map with traffic arcs, colored by configurable site groups, built from your admin's Address Mappings and Traffic Rules. The legend only shows the rules actually present on screen.
+A dark-themed world map with traffic arcs, colored by configurable Sites, built from your admin's Private/Public NAT Mapping and Traffic Rules settings. A Site's marker color shows up on the local end of a flow via a NAT Mapping, and on the remote end too if the Site has an IP/CIDR configured that matches the remote address. Every legend section — Line Styles, Sites, and NAT Mappings — only lists entries actually present in the traffic currently on screen (plus, for Sites/NAT Mappings, only ones your admin has checked "show in legend"); it recomputes on every refresh, so an entry with no current traffic simply isn't offered.
+
+**The legend is clickable.** Click any entry — a Line Style, a Site, or a NAT Mapping — to filter the map down to just that item and whatever it connects to (e.g. clicking a Site shows that Site's markers plus every arc touching them, still in their real colors). Click more entries to add them to the filter — everything currently selected shows, in any combination. A **Reset** button appears at the bottom of the legend whenever something's selected; click it (or just wait for the next auto-refresh) to go back to showing everything. The filter always clears on refresh, since a selected item might not even exist in the new data.
+
+If your network's own IP shows up as more than one marker on the map, that's not a bug — a NAT Mapping can be configured to translate the same private range to a different public IP depending on where the traffic is headed (e.g. DNS queries going out one public IP, everything else out another), and each real-world identity gets its own marker.
 
 ## Traffic by Port
 

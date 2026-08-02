@@ -22,7 +22,7 @@ Open the app port in your firewall (`sudo ufw allow 8766/tcp`), then log in with
 2. **Set Base URL** (Settings → General) to the app's real externally-reachable address *before* configuring SSO or notifications — SAML ACS URLs and notification links are built from it.
 3. **Point your NetFlow exporters** at pktFlow — either via a goflow2+Vector collector pipeline (recommended, HTTP POST with bearer token to `/api/ingest/flows`) or the built-in direct UDP listener (Settings → Ingest). See [Collector Configuration](../README.md#collector-configuration) in the README for the goflow2/Vector pipeline setup.
 4. **Register your devices/samplers** (Settings → Devices) — this is an ingest allowlist, not just labeling; flows from an unregistered sampler IP are dropped, not just unlabeled.
-5. **Set up Address Mappings and Traffic Rules** (Settings → Geo Map) if you want the Geo Map's arcs to reflect your real site topology.
+5. **Set up Sites, NAT Mappings, and Traffic Rules** (Settings → Geo Map) if you want the Geo Map's arcs and markers to reflect your real site topology.
 6. **Configure alert rules and notification channels** so the team gets paged.
 7. **Set up backups** (Data → Backups) and confirm a manual run succeeds.
 8. **Create accounts** for your team with appropriate roles.
@@ -53,9 +53,30 @@ Top-level tabs: **General · Security · Data · Notifications · User Keys · S
 | Notifications | — | Slack/Email/PagerDuty/Webhook/Tracecat channels | no |
 | User Keys | — | Per-user lookup API keys + Lucidchart token (per-user, private) | no |
 | Sources | — | Device/sampler registry (CSV import/export) | no |
-| Geo Map | — | Address Mappings, Traffic Rules, Site Groups | no |
+| Geo Map | — | Sites, Private/Public NAT Mapping, Traffic Rules, Line Style Catalog | no |
 
 **Restart Service** (General tab) tries `sudo systemctl restart pktflow` first; if the service account lacks passwordless sudo for that (the common case), it falls back to sending itself SIGTERM and relying on systemd to bring it back up — which only works if the unit has `Restart=always` (the shipped template does). If you've customized the systemd unit, keep that setting or set up passwordless sudo for this button to keep working.
+
+**Sites** (Settings → Geo Map → Sites) color the Geo Map's circle markers. Every install has one **Default** site (key `default`) that new NAT Mappings fall back to — its key is locked and it can't be deleted, but display name, colors, and IP/CIDR stay editable. A Site's **IP/CIDR** field (comma-separated) colors the *remote* end of a flow directly — if a flow's public IP falls inside it, that IP gets the site's marker color even with no NAT Mapping involved. This is separate from NAT Mappings, which color the *local* end by mapping a private CIDR to a representative public IP for geolocation. Use the clone icon on a Sites row to pre-fill the add form from that row (key left blank, since it must be unique) instead of starting blank.
+
+**Private/Public NAT Mapping** (Settings → Geo Map → Private/Public NAT Mapping, renamed from Address Mappings) — same private→public CIDR topology as before, plus:
+- Multiple rows may now share the same private and/or public CIDR; priority order (drag-and-drop, same as before) resolves which one wins when more than one matches.
+- A **Show in legend** checkbox per row controls whether it appears in the Geo Map legend's new NAT Mappings section (name + a swatch in its Site's color).
+- An **ISP DHCP** checkbox (left of the Add Mapping button) for networks with no static public IP. Checking it locks every existing mapping — Add is disabled, and edit/clone/delete icons disappear from every row, matching the backend, which stops matching any of them — and creates one synthetic **Default** mapping (`0.0.0.0/0` private CIDR, no public CIDR, tagged with a "DHCP" badge in the table) so Traffic Rules still has something to scope to. That row won't place anything on the map by itself since a DHCP-assigned public IP can't be geolocated. Unchecking it deletes the synthetic mapping and unlocks everything else — **if you built a Traffic Rule scoped to that Default mapping while DHCP was on, deleting it cascades and deletes that rule too**, same as manually deleting any other NAT Mapping.
+- **Destination CIDR/Port** (optional, per row) — lets the same Private CIDR resolve to a *different* Public CIDR depending on the flow's destination. Blank on both = applies to any destination (the common case). This is how you model a firewall that NATs the same internal range out different public IPs depending on where the traffic is headed.
+
+**Worked example — NAT that varies by destination port.** Say your firewall NATs `10.1.157.141` to `104.62.87.92` when the destination port is 53, and to `104.62.87.89` for every other port. To make the Geo Map (and any Traffic Rule) reflect that correctly, you need **two** NAT Mapping rows, not one:
+
+| Name | Private CIDR | Destination Port | Public CIDR | Priority |
+|---|---|---|---|---|
+| Work-DNS | `10.1.157.141/32` | `53` | `104.62.87.92` | higher (drag above) |
+| Work-Default | `10.1.157.141/32` | *(blank — any)* | `104.62.87.89` | lower (catch-all) |
+
+A Traffic Rule with NAT Mapping = **Work-DNS**, Destination = `1.1.1.1`, Port = *(blank/any)*, Line Style = Solid Blue then behaves exactly as you'd expect: traffic from `10.1.157.141` to `1.1.1.1:53` matches Work-DNS first (its own Destination Port filter is satisfied), so the rule fires and the arc draws Solid Blue from `104.62.87.92`. Traffic from the same PC to `1.1.1.1:80` doesn't match Work-DNS (wrong port), falls through to Work-Default instead, and since no Traffic Rule is scoped to Work-Default, that flow draws as the neutral gray default line from `104.62.87.89` — a different marker location, correctly reflecting the real NAT. **Scope your Traffic Rule to the specific mapping row that represents the NAT you're trying to isolate** (Work-DNS here), not a generic single mapping covering the whole private range — that's the part that's easy to get backwards.
+
+A NAT Mapping's own Destination CIDR/Port is resolved **per flow pair**, not once per private IP — so the same private IP can legitimately show as two separate markers on the map if its real-world NAT genuinely differs by destination, which is the whole point.
+
+**Traffic Rules** (Settings → Geo Map → Traffic Rules) — Destination can now be **manual entry** (as before) or a **Site** picked from a dropdown, populated from Settings → Geo Map → Sites and resolved against that Site's `ip_cidr` live at request time (editing the Site's IP/CIDR later automatically updates every rule pointing at it). One or the other, never both, and **once a rule is created with one mode it's locked to it** — the edit form only shows that mode, and the backend rejects a PUT that tries to switch. Delete and recreate the rule to change modes. Rows support clone-to-prefill (pre-fills whichever mode the source rule uses) in addition to edit/delete.
 
 ## Ingest configuration
 
