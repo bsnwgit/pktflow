@@ -350,15 +350,33 @@ async def get_geo_data(
     Geolocate the top IP flows from flow data and return locations + colored arcs
     for the geo traffic map.
 
-    Private IPs are resolved against address_mappings (private CIDR -> a
+    Private IPs are resolved against nat_mappings (private CIDR -> a
     representative public CIDR/IP) so RFC-1918 traffic appears at the correct
-    physical site instead of being dropped from the map — address_mappings
+    physical site instead of being dropped from the map — a NAT mapping
     carries no line style of its own. traffic_rules is the only source of
-    visual styling: a rule scoped to that address mapping (with or without a
-    destination CIDR/IP and/or port filter) supplies the line style, first
-    match wins in priority order. When both ends of a flow match a different
-    address mapping, the one with the better (lower) priority is used to look
-    up rules. Flows matching no rule at all fall back to a neutral gray line.
+    visual styling: a rule scoped to that NAT mapping (with or without a
+    destination CIDR/IP, Site, and/or port filter) supplies the line style,
+    first match wins in priority order. When both ends of a flow match a
+    different NAT mapping, the one with the better (lower) priority is used
+    to look up rules. Flows matching no rule at all fall back to a neutral
+    gray line.
+
+    A NAT mapping's own dst_cidrs/dst_ports let the SAME private_cidr resolve
+    to a DIFFERENT public_cidr depending on the flow's destination — modeling
+    a firewall that NATs the same internal range out different public IPs
+    depending on where the traffic is headed (e.g. DNS out one IP, everything
+    else out another). Resolution therefore happens per flow pair, not once
+    per unique IP: the same private IP can legitimately produce two separate
+    map markers if its effective public identity genuinely varies by
+    destination. Both legs of a bidirectional conversation resolve against
+    the same normalized service port (see pair_service_port below) so they
+    still merge into one arc instead of splitting on direction alone.
+
+    Any IP not resolved via nat_mappings (this is normally the remote/public
+    end of a flow) is additionally checked against every site's ip_cidr
+    field — a site can list the real-world IP/CIDR(s) it's reached at so its
+    marker color shows up on the remote end too, not just the local end via
+    a NAT mapping.
 
     Uses ip-api.com batch (free, no key required).
     """
@@ -370,39 +388,43 @@ async def get_geo_data(
 
     DEFAULT_LINE = {"color_hex": "#6b7280", "dash_pattern": ""}  # unmapped public<->public traffic
 
-    # ── Load address mappings, traffic rules, and the line style catalog ───────
-    address_mappings_list: list[dict] = []
+    # ── Load NAT mappings, traffic rules, sites, and the line style catalog ────
+    nat_mappings_list: list[dict] = []
     traffic_rules_list: list[dict] = []
+    sites_list: list[dict] = []
+    all_sites_list: list[dict] = []
     line_styles_map: dict[int, dict] = {}
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT * FROM address_mappings ORDER BY priority, id") as cur:
-                address_mappings_list = [dict(r) for r in await cur.fetchall()]
+            async with db.execute("SELECT * FROM nat_mappings ORDER BY priority, id") as cur:
+                nat_mappings_list = [dict(r) for r in await cur.fetchall()]
+            # ISP DHCP mode: every other mapping is grayed out/unused in the
+            # UI, and the same restriction applies here — only the single
+            # synthetic "Default" mapping (tracked by id) is actually matched.
+            async with db.execute("SELECT value FROM settings WHERE key = 'isp_dhcp_enabled'") as cur:
+                row = await cur.fetchone()
+            if row and json.loads(row[0]):
+                async with db.execute("SELECT value FROM settings WHERE key = 'isp_dhcp_mapping_id'") as cur:
+                    id_row = await cur.fetchone()
+                dhcp_mapping_id = json.loads(id_row[0]) if id_row else None
+                nat_mappings_list = [m for m in nat_mappings_list if m["id"] == dhcp_mapping_id]
             async with db.execute("SELECT * FROM traffic_rules ORDER BY priority, id") as cur:
                 traffic_rules_list = [dict(r) for r in await cur.fetchall()]
+            # Unfiltered — sites_by_name below needs every site (including
+            # ones with no ip_cidr yet, so a Traffic Rule's dst_site_key can
+            # still resolve to "nothing to match" rather than a KeyError).
+            # sites_list (ip_cidr-only) is the remote-IP fallback match in
+            # _match_site, which only ever cares about sites that have one.
+            async with db.execute("SELECT * FROM sites ORDER BY id") as cur:
+                all_sites_list = [dict(r) for r in await cur.fetchall()]
+            sites_list = [s for s in all_sites_list if s["ip_cidr"]]
             async with db.execute("SELECT * FROM line_styles") as cur:
                 line_styles_map = {r["id"]: dict(r) for r in await cur.fetchall()}
     except Exception:
         pass  # tables may not exist on older deploys — degrade gracefully
 
-    def _match_cidr_or_ip(ip: str, mappings: list[dict], key: str) -> Optional[dict]:
-        """Return the first row in `mappings` (already priority-ordered) whose
-        `key` field (CIDR or single IP) covers ip."""
-        try:
-            addr = ipaddress.ip_address(ip)
-        except ValueError:
-            return None
-        for m in mappings:
-            try:
-                network = ipaddress.ip_network(m[key], strict=False)
-                if addr in network:
-                    return m
-            except ValueError:
-                # value is a single host IP, not a CIDR
-                if ip == m[key]:
-                    return m
-        return None
+    sites_by_name: dict[str, dict] = {s["name"]: s for s in all_sites_list}
 
     def _cidr_to_query_ip(cidr_or_ip: str) -> str:
         """Resolve a /32 or a broader CIDR block to a single representative IP for geolocation."""
@@ -448,14 +470,44 @@ async def get_geo_data(
                     continue
         return False
 
+    def _match_nat_mapping(ip: str, remote_ip: str, dst_port: Optional[int]) -> Optional[dict]:
+        """First priority-ordered nat_mappings row whose private_cidr covers ip,
+        and whose own dst_cidrs/dst_ports (if set) match the flow's remote_ip
+        and dst_port — lets the same private range resolve to a different
+        public_cidr depending on destination (e.g. DNS out one NAT, everything
+        else out another)."""
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return None
+        for m in nat_mappings_list:
+            try:
+                covers = addr in ipaddress.ip_network(m["private_cidr"], strict=False)
+            except ValueError:
+                covers = (ip == m["private_cidr"])  # single host IP, not a CIDR
+            if not covers:
+                continue
+            if m["dst_cidrs"] and not _cidr_list_matches(remote_ip, m["dst_cidrs"]):
+                continue
+            if m["dst_ports"] and not _port_list_matches(dst_port, m["dst_ports"]):
+                continue
+            return m
+        return None
+
     def _match_rule(mapping_id: Optional[int], remote_ip: str, dst_port: Optional[int]) -> Optional[dict]:
         """First traffic_rules row (already priority-ordered) matching this
-        address mapping (or scoped to 'any'), destination IP, and destination port."""
+        NAT mapping (or scoped to 'any'), destination (CIDR or Site), and
+        destination port."""
         for r in traffic_rules_list:
-            if r["address_mapping_id"] is not None and r["address_mapping_id"] != mapping_id:
+            if r["nat_mapping_id"] is not None and r["nat_mapping_id"] != mapping_id:
                 continue
-            if r["dst_cidrs"] and not _cidr_list_matches(remote_ip, r["dst_cidrs"]):
-                continue
+            if r["dst_cidrs"]:
+                if not _cidr_list_matches(remote_ip, r["dst_cidrs"]):
+                    continue
+            elif r["dst_site_key"]:
+                site = sites_by_name.get(r["dst_site_key"])
+                if not site or not site["ip_cidr"] or not _cidr_list_matches(remote_ip, site["ip_cidr"]):
+                    continue
             if r["dst_ports"] and not _port_list_matches(dst_port, r["dst_ports"]):
                 continue
             return r
@@ -464,7 +516,7 @@ async def get_geo_data(
     def _resolve_line(meta: Optional[dict], remote_ip: str, dst_port: Optional[int]) -> Optional[tuple]:
         """Return (priority, line_style_id, rule_name) for one side of a flow, or None if
         unmapped. line_style_id/rule_name are None (falls back to the neutral default) if
-        no rule matches — address_mappings itself carries no style, only traffic_rules does."""
+        no rule matches — a NAT mapping itself carries no style, only traffic_rules does."""
         if not meta:
             return None
         rule = _match_rule(meta["id"], remote_ip, dst_port)
@@ -472,31 +524,92 @@ async def get_geo_data(
             return (meta["priority"], rule["line_style_id"], rule["name"])
         return (meta["priority"], None, None)
 
-    # ── Build effective IP mapping ─────────────────────────────────────────────
-    # ip_to_effective : original_ip -> ip to actually send to ip-api.com
-    # ip_to_site_meta : original_ip -> matched address_mappings row
-    ip_to_effective: dict[str, str] = {}
-    ip_to_site_meta: dict[str, dict] = {}
+    def _match_site(ip: str) -> Optional[dict]:
+        """First sites row (in id order) whose ip_cidr list covers ip. Used only to
+        color the marker for an end of a flow that nat_mappings didn't match —
+        sites carry no line style, so this never feeds into _resolve_line."""
+        for site in sites_list:
+            if _cidr_list_matches(ip, site["ip_cidr"]):
+                return site
+        return None
 
+    # ── Normalize a shared destination port per undirected endpoint pair ───────
+    # Aggregation and matching below both treat a request leg (A→B) and its
+    # response leg (B→A) as one relationship, not two directional ones —
+    # without normalizing dst_port here they'd resolve NAT mappings and
+    # Traffic Rules inconsistently (and, before this, draw as two separate
+    # arcs bowing opposite ways). get_top_ip_pairs groups by (src, dst,
+    # dst_port), so a request leg (A->B, dst_port=443) and its response leg
+    # (B->A, dst_port=<A's ephemeral port>) arrive as separate rows carrying
+    # different dst_port values. Use the lower port seen across both
+    # directions of a pair as the shared "service port" so both legs resolve
+    # identically — same NAT mapping, same rule, same arc.
+    pair_service_port: dict[tuple, int] = {}
     for p in pairs:
-        for field in ("src_ip", "dst_ip"):
-            ip = p[field]
-            if ip in ip_to_effective:
-                continue
-            if _is_private_ip(ip):
-                am = _match_cidr_or_ip(ip, address_mappings_list, "private_cidr")
-                if am:
-                    ip_to_effective[ip] = _cidr_to_query_ip(am["public_cidr"])
-                    ip_to_site_meta[ip] = am
-                # else: private, no mapping → skip
-            else:
-                ip_to_effective[ip] = ip  # public → query directly
+        dp = p.get("dst_port")
+        if dp is None:
+            continue
+        ep = tuple(sorted((p["src_ip"], p["dst_ip"])))
+        if ep not in pair_service_port or dp < pair_service_port[ep]:
+            pair_service_port[ep] = dp
 
-    if not ip_to_effective:
+    def _resolve_side(ip: str, remote_ip: str, dst_port: Optional[int]) -> Optional[tuple]:
+        """Resolve one IP in the context of a specific flow (its remote IP and
+        the pair's normalized service port). Returns (key, effective_ip, meta)
+        or None if this IP can't be placed at all (private with no matching
+        NAT mapping). `key` — (ip, matched nat_mapping id) for private IPs,
+        (ip, None) for public ones — is what the same private IP resolves to
+        differently across pairs when a NAT mapping's own dst_cidrs/dst_ports
+        make it apply to some destinations and not others."""
+        if _is_private_ip(ip):
+            m = _match_nat_mapping(ip, remote_ip, dst_port)
+            if not m:
+                return None
+            return ((ip, m["id"]), _cidr_to_query_ip(m["public_cidr"]), m)
+        return ((ip, None), ip, None)
+
+    # resolved_pairs mirrors `pairs`, each entry annotated with its src/dst
+    # resolution — computed once and reused for geolocation, aggregation, and
+    # arc building so all three agree on the same per-pair NAT identity.
+    resolved_pairs: list[tuple] = []
+    for p in pairs:
+        ep = tuple(sorted((p["src_ip"], p["dst_ip"])))
+        dst_port = pair_service_port.get(ep, p.get("dst_port"))
+        src_side = _resolve_side(p["src_ip"], p["dst_ip"], dst_port)
+        dst_side = _resolve_side(p["dst_ip"], p["src_ip"], dst_port)
+        resolved_pairs.append((p, src_side, dst_side))
+
+    # ── Build effective-key mapping ─────────────────────────────────────────────
+    # key_to_effective : resolution key -> ip to actually send to ip-api.com
+    # key_to_meta      : resolution key -> matched nat_mappings row (private only)
+    key_to_effective: dict[tuple, str] = {}
+    key_to_meta: dict[tuple, dict] = {}
+    for _p, src_side, dst_side in resolved_pairs:
+        for side in (src_side, dst_side):
+            if not side:
+                continue
+            key, eff, meta = side
+            if key not in key_to_effective:
+                key_to_effective[key] = eff
+                if meta:
+                    key_to_meta[key] = meta
+
+    # key_to_site_match : resolution key -> matched sites row, for any key
+    # nat_mappings didn't already claim (normally the remote/public end).
+    key_to_site_match: dict[tuple, dict] = {}
+    if sites_list:
+        for key in key_to_effective:
+            if key in key_to_meta:
+                continue
+            site = _match_site(key[0])
+            if site:
+                key_to_site_match[key] = site
+
+    if not key_to_effective:
         return {"locations": [], "arcs": []}
 
     # ── Geolocate unique effective IPs via ip-api.com ──────────────────────────
-    unique_effective = list(set(ip_to_effective.values()))[:100]
+    unique_effective = list(set(key_to_effective.values()))[:100]
     geo_map: dict[str, dict] = {}  # effective_ip -> {lat, lng, city, country, ...}
     try:
         body = json.dumps([
@@ -526,68 +639,55 @@ async def get_geo_data(
     if not geo_map:
         return {"locations": [], "arcs": []}
 
-    # ── Aggregate bytes/flows per original IP ──────────────────────────────────
-    ip_bytes: dict[str, int] = {}
-    ip_flows: dict[str, int] = {}
-    for p in pairs:
-        for field in ("src_ip", "dst_ip"):
-            ip = p[field]
-            eff = ip_to_effective.get(ip)
-            if eff and eff in geo_map:
-                ip_bytes[ip] = ip_bytes.get(ip, 0) + p["bytes"]
-                ip_flows[ip] = ip_flows.get(ip, 0) + p["flows"]
+    # ── Aggregate bytes/flows per resolution key ────────────────────────────────
+    key_bytes: dict[tuple, int] = {}
+    key_flows: dict[tuple, int] = {}
+    for p, src_side, dst_side in resolved_pairs:
+        for side in (src_side, dst_side):
+            if not side:
+                continue
+            key, eff, _meta = side
+            if eff in geo_map:
+                key_bytes[key] = key_bytes.get(key, 0) + p["bytes"]
+                key_flows[key] = key_flows.get(key, 0) + p["flows"]
 
     # ── Build locations ────────────────────────────────────────────────────────
+    # A private IP whose NAT mapping genuinely varies by destination produces
+    # one location entry per distinct resolution key — i.e. more than one
+    # marker for the same IP if it really does egress differently depending
+    # on where the traffic is headed.
     locations: list[dict] = []
-    for ip, eff in ip_to_effective.items():
+    for key, eff in key_to_effective.items():
         g = geo_map.get(eff)
         if not g:
             continue
-        meta = ip_to_site_meta.get(ip)
+        meta = key_to_meta.get(key)
+        site = key_to_site_match.get(key)
         locations.append({
-            "ip":           ip,
+            "ip":           key[0],
             "lat":          g["lat"],
             "lng":          g["lng"],
             "city":         g["city"],
             "country":      g["country"],
             "country_code": g["country_code"],
-            "bytes":        ip_bytes.get(ip, 0),
-            "flows":        ip_flows.get(ip, 0),
-            "site_name":    meta["name"]       if meta else "",
-            "group":        meta["group_name"] if meta else "",
+            "bytes":        key_bytes.get(key, 0),
+            "flows":        key_flows.get(key, 0),
+            "site_name":    meta["name"]         if meta else (site["display_name"] if site else ""),
+            "site_key":     meta["site_key"]     if meta else (site["name"]          if site else ""),
         })
 
     # ── Build arcs ─────────────────────────────────────────────────────────────
-    # Aggregated by (unordered endpoint pair, resolved line style) rather than
-    # directional (src, dst): a request leg (A→B) and its response leg (B→A)
-    # are the same visual line between the same two points, just opposite
-    # NetFlow directions — without normalizing direction here they'd draw as
-    # two separate arcs bowing opposite ways for what's really one relationship.
-    # Traffic on different ports to the same destination still collapses into
-    # one arc too, but a port/destination a rule singles out gets its own.
-    # get_top_ip_pairs groups by (src, dst, dst_port), so a request leg (A->B,
-    # dst_port=443) and its response leg (B->A, dst_port=<A's ephemeral port>)
-    # arrive as separate rows carrying different dst_port values. Rule-matching
-    # each row against its own dst_port makes the response leg miss the
-    # port-specific rule the request leg matched, resolving a different line
-    # style and defeating the endpoint_pair merge below. Use the lower port
-    # seen across both directions of a pair as the shared "service port" so
-    # both legs resolve identically.
-    pair_service_port: dict[tuple, int] = {}
-    for p in pairs:
-        dp = p.get("dst_port")
-        if dp is None:
-            continue
-        ep = tuple(sorted((p["src_ip"], p["dst_ip"])))
-        if ep not in pair_service_port or dp < pair_service_port[ep]:
-            pair_service_port[ep] = dp
-
+    # Aggregated by (unordered resolved-key pair, resolved line style) rather
+    # than directional (src, dst) — a request leg and its response leg are
+    # the same visual line between the same two points, just opposite NetFlow
+    # directions. Sorting by str() rather than the tuples directly sidesteps
+    # comparing a None second element against an int across mismatched keys.
     arc_agg: dict[tuple, dict] = {}
-    for p in pairs:
-        src_eff = ip_to_effective.get(p["src_ip"])
-        dst_eff = ip_to_effective.get(p["dst_ip"])
-        if not src_eff or not dst_eff:
+    for p, src_side, dst_side in resolved_pairs:
+        if not src_side or not dst_side:
             continue
+        src_key, src_eff, src_meta = src_side
+        dst_key, dst_eff, dst_meta = dst_side
         sg = geo_map.get(src_eff)
         dg = geo_map.get(dst_eff)
         if not sg or not dg:
@@ -595,8 +695,8 @@ async def get_geo_data(
 
         ep = tuple(sorted((p["src_ip"], p["dst_ip"])))
         dst_port = pair_service_port.get(ep, p.get("dst_port"))
-        src_res = _resolve_line(ip_to_site_meta.get(p["src_ip"]), p["dst_ip"], dst_port)
-        dst_res = _resolve_line(ip_to_site_meta.get(p["dst_ip"]), p["src_ip"], dst_port)
+        src_res = _resolve_line(src_meta, p["dst_ip"], dst_port)
+        dst_res = _resolve_line(dst_meta, p["src_ip"], dst_port)
         if src_res and dst_res:
             winning = src_res if src_res[0] <= dst_res[0] else dst_res
         else:
@@ -605,7 +705,8 @@ async def get_geo_data(
         rule_name = winning[2] if winning else None
         style = line_styles_map.get(line_style_id, DEFAULT_LINE)
 
-        key = (ep, line_style_id)
+        arc_ep = tuple(sorted((src_key, dst_key), key=str))
+        key = (arc_ep, line_style_id)
         if key not in arc_agg:
             arc_agg[key] = {
                 "src_ip":  p["src_ip"],
