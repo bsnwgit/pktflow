@@ -49,6 +49,20 @@ def _load_yaml() -> dict:
 _yaml_cfg = _load_yaml()
 
 
+def _default_install_dir() -> Path:
+    """The app root — used for locating files like VERSION that live at the
+    repo/install root. Not wired through the rest of this file's path
+    defaults (those already have their own defaults); this exists so
+    app/version.py (shared verbatim across pkt* apps) has somewhere to look."""
+    env_dir = os.environ.get("PKTFLOW_INSTALL_DIR")
+    if env_dir:
+        return Path(env_dir)
+    return Path.cwd()
+
+
+_INSTALL_DIR = _default_install_dir()
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PKTFLOW_",
@@ -63,6 +77,9 @@ class Settings(BaseSettings):
     port: int = Field(default=_yaml_cfg.get("port", 8766))
     workers: int = Field(default=_yaml_cfg.get("workers", 2))
     debug: bool = Field(default=_yaml_cfg.get("debug", False))
+
+    # ── App root — used by app/version.py to locate the VERSION file ───────────
+    install_dir: str = Field(default=_yaml_cfg.get("install_dir", str(_INSTALL_DIR)))
 
     # ── App database (SQLite sidecar) ──────────────────────────────────────────
     db_path: str = Field(
