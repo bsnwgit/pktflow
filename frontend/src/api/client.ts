@@ -329,16 +329,16 @@ export const api = {
     return res.json()
   },
 
-  getAddressMappings: () =>
-    request<AddressMapping[]>('/address-mappings/'),
-  createAddressMapping: (body: AddressMappingIn) =>
-    request<AddressMapping>('/address-mappings/', { method: 'POST', body: JSON.stringify(body) }),
-  updateAddressMapping: (id: number, body: AddressMappingIn) =>
-    request<AddressMapping>(`/address-mappings/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-  reorderAddressMappings: (ids: number[]) =>
-    request<AddressMapping[]>('/address-mappings/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
-  deleteAddressMapping: (id: number) =>
-    request(`/address-mappings/${id}`, { method: 'DELETE' }),
+  getNatMappings: () =>
+    request<NatMapping[]>('/nat-mappings/'),
+  createNatMapping: (body: NatMappingIn) =>
+    request<NatMapping>('/nat-mappings/', { method: 'POST', body: JSON.stringify(body) }),
+  updateNatMapping: (id: number, body: NatMappingIn) =>
+    request<NatMapping>(`/nat-mappings/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  reorderNatMappings: (ids: number[]) =>
+    request<NatMapping[]>('/nat-mappings/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
+  deleteNatMapping: (id: number) =>
+    request(`/nat-mappings/${id}`, { method: 'DELETE' }),
 
   getTrafficRules: () =>
     request<TrafficRule[]>('/traffic-rules/'),
@@ -352,14 +352,14 @@ export const api = {
     request(`/traffic-rules/${id}`, { method: 'DELETE' }),
 
   // ── Geo Map config ─────────────────────────────────────────────────────────
-  getSiteGroups: () =>
-    request<SiteGroup[]>('/geo-config/site-groups'),
-  createSiteGroup: (body: SiteGroupIn) =>
-    request<SiteGroup>('/geo-config/site-groups', { method: 'POST', body: JSON.stringify(body) }),
-  updateSiteGroup: (id: number, body: SiteGroupIn) =>
-    request<SiteGroup>(`/geo-config/site-groups/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-  deleteSiteGroup: (id: number) =>
-    request(`/geo-config/site-groups/${id}`, { method: 'DELETE' }),
+  getSites: () =>
+    request<Site[]>('/geo-config/sites'),
+  createSite: (body: SiteIn) =>
+    request<Site>('/geo-config/sites', { method: 'POST', body: JSON.stringify(body) }),
+  updateSite: (id: number, body: SiteIn) =>
+    request<Site>(`/geo-config/sites/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteSite: (id: number) =>
+    request(`/geo-config/sites/${id}`, { method: 'DELETE' }),
 
   getLineStyles: () =>
     request<LineStyle[]>('/geo-config/line-styles'),
@@ -569,8 +569,8 @@ export interface GeoLocation {
   ip: string; lat: number; lng: number
   city: string; country: string; country_code: string
   bytes: number; flows: number
-  site_name?: string   // set when the IP matched an Address Mapping (e.g. "Site A", "Cloud AWS")
-  group?: string       // site group name (configured in Settings → Geo Map → Site Groups), or "" when unmapped
+  site_name?: string   // set when the IP matched an Address Mapping or a Site's ip_cidr (e.g. "Site A", "Cloud AWS")
+  site_key?: string    // site key (configured in Settings → Geo Map → Sites), or "" when unmapped
 }
 export interface GeoArc {
   src_ip: string; src_lat: number; src_lng: number
@@ -585,29 +585,36 @@ export interface GeoDataResponse {
   arcs: GeoArc[]
 }
 
-export interface AddressMapping {
-  id:            number
-  name:          string
-  group_name:    string
-  category:      'wan' | 'vpn'   // display badge only, no effect on matching
-  private_cidr:  string
-  public_cidr:   string
-  priority:      number          // lower wins on conflict; managed via reorderAddressMappings, not edited directly
-  created_at:    string
+export interface NatMapping {
+  id:             number
+  name:           string
+  site_key:       string
+  category:       'wan' | 'vpn'   // display badge only, no effect on matching
+  private_cidr:   string
+  public_cidr:    string
+  dst_cidrs:      string | null   // comma-separated IPs/CIDRs; blank = any destination — lets this private_cidr resolve differently by destination
+  dst_ports:      string | null   // comma-separated ports/ranges; blank = any port
+  priority:       number          // lower wins on conflict; managed via reorderNatMappings, not edited directly
+  show_in_legend: boolean
+  created_at:     string
 }
-export interface AddressMappingIn {
-  name:          string
-  group_name:    string
-  category:      'wan' | 'vpn'
-  private_cidr:  string
-  public_cidr:   string
+export interface NatMappingIn {
+  name:           string
+  site_key:       string
+  category:       'wan' | 'vpn'
+  private_cidr:   string
+  public_cidr:    string
+  dst_cidrs:      string | null
+  dst_ports:      string | null
+  show_in_legend: boolean
 }
 
 export interface TrafficRule {
   id:                  number
   name:                string
-  address_mapping_id:  number | null   // null = applies to any address mapping
-  dst_cidrs:           string | null   // comma-separated IPs/CIDRs, e.g. "1.1.1.1,9.9.9.9"
+  nat_mapping_id:      number | null   // null = applies to any NAT mapping
+  dst_cidrs:           string | null   // comma-separated IPs/CIDRs, e.g. "1.1.1.1,9.9.9.9" — mutually exclusive with dst_site_key
+  dst_site_key:        string | null   // live reference to a Site's ip_cidr — mutually exclusive with dst_cidrs; locked once set (see PUT /api/traffic-rules/{id})
   dst_ports:           string | null   // comma-separated ports/ranges, e.g. "53,8000-9000"
   line_style_id:       number | null
   priority:            number          // lower wins; managed via reorderTrafficRules, not edited directly
@@ -615,8 +622,9 @@ export interface TrafficRule {
 }
 export interface TrafficRuleIn {
   name:               string
-  address_mapping_id: number | null
+  nat_mapping_id:     number | null
   dst_cidrs:          string | null
+  dst_site_key:       string | null
   dst_ports:          string | null
   line_style_id:      number | null
 }
@@ -687,18 +695,19 @@ export interface UserApiKey {
   enabled: boolean // ipinfo/ipapi_is/abuseipdb/mxtoolbox only — show this provider's section in the IP Lookup modal at all
 }
 
-export interface SiteGroup {
+export interface Site {
   id:             number
-  name:           string
+  name:           string   // key — immutable for the Default site (name === 'default')
   display_name:   string
   fill_color:     string
   stroke_color:   string
   badge_bg:       string
   badge_text:     string
   show_in_legend: boolean
+  ip_cidr:        string   // comma-separated IP/CIDR list; matches remote (public) traffic to this site
   created_at:     string
 }
-export interface SiteGroupIn {
+export interface SiteIn {
   name:           string
   display_name:   string
   fill_color:     string
@@ -706,6 +715,7 @@ export interface SiteGroupIn {
   badge_bg:       string
   badge_text:     string
   show_in_legend: boolean
+  ip_cidr:        string
 }
 
 export interface LineStyle {

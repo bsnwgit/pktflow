@@ -1,13 +1,19 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { api, DeviceSummary, User, UserIn, SslStatus, AddressMapping, AddressMappingIn, TrafficRule, TrafficRuleIn, SiteGroup, SiteGroupIn, LineStyle, LineStyleIn, UserApiKey, Integration, IntegrationInput } from '../api/client'
+import { api, DeviceSummary, User, UserIn, SslStatus, NatMapping, NatMappingIn, TrafficRule, TrafficRuleIn, Site, SiteIn, LineStyle, LineStyleIn, UserApiKey, Integration, IntegrationInput } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import { useAuth } from '../store/auth'
 import HelpButton from '../components/HelpButton'
+import Pagination from '../components/Pagination'
 import { copyToClipboard } from '../utils/clipboard'
 
 // ── Generic helpers ────────────────────────────────────────────────────────────
 type Settings = Record<string, unknown>
+
+// Shared row cap for the four Geo Map tables (Sites, NAT Mappings, Traffic
+// Rules, Line Style Catalog) — each paginates independently with its own
+// Pagination control, not one pager for the whole Settings page.
+const GEO_TABLE_PAGE_SIZE = 10
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -2787,45 +2793,55 @@ function LineSvg({ color, dash }: { color: string; dash: string }) {
   )
 }
 
-// ── Site Groups Section ───────────────────────────────────────────────────────
-function SiteGroupsSection({ isAdmin }: { isAdmin: boolean }) {
-  const [groups,   setGroups]   = useState<SiteGroup[]>([])
+// ── Sites Section ───────────────────────────────────────────────────────────
+function SitesSection({ isAdmin }: { isAdmin: boolean }) {
+  const [sites,    setSites]    = useState<Site[]>([])
   const [loading,  setLoading]  = useState(true)
   const [showAdd,  setShowAdd]  = useState(false)
   const [editId,   setEditId]   = useState<number | null>(null)
-  const blank: SiteGroupIn = { name: '', display_name: '', fill_color: '#60a5fa', stroke_color: '#93c5fd', badge_bg: '#374151', badge_text: '#d1d5db', show_in_legend: true }
-  const [form,     setForm]     = useState<SiteGroupIn>(blank)
-  const [editForm, setEditForm] = useState<SiteGroupIn>(blank)
+  const blank: SiteIn = { name: '', display_name: '', fill_color: '#60a5fa', stroke_color: '#93c5fd', badge_bg: '#374151', badge_text: '#d1d5db', show_in_legend: true, ip_cidr: '' }
+  const [form,     setForm]     = useState<SiteIn>(blank)
+  const [editForm, setEditForm] = useState<SiteIn>(blank)
   const [saving,   setSaving]   = useState(false)
   const [error,    setError]    = useState('')
+  const [page,     setPage]     = useState(1)
 
   useEffect(() => {
-    api.getSiteGroups().then(setGroups).catch(() => {}).finally(() => setLoading(false))
+    api.getSites().then(setSites).catch(() => {}).finally(() => setLoading(false))
   }, [])
 
+  const totalPages = Math.max(1, Math.ceil(sites.length / GEO_TABLE_PAGE_SIZE))
+  const pageNum     = Math.min(page, totalPages)
+  const pageSites    = sites.slice((pageNum - 1) * GEO_TABLE_PAGE_SIZE, pageNum * GEO_TABLE_PAGE_SIZE)
+
   async function handleAdd() {
-    if (!form.name.trim() || !form.display_name.trim()) { setError('Name and Display Name are required'); return }
+    if (!form.name.trim() || !form.display_name.trim()) { setError('Key and Display Name are required'); return }
     setSaving(true); setError('')
     try {
-      const g = await api.createSiteGroup(form)
-      setGroups(prev => [...prev, g])
+      const s = await api.createSite(form)
+      setSites(prev => [...prev, s])
       setForm(blank); setShowAdd(false)
     } catch (e: any) { setError(e.message ?? 'Failed') } finally { setSaving(false) }
   }
   async function handleUpdate() {
-    if (!editForm.name.trim() || !editForm.display_name.trim()) { setError('Name and Display Name are required'); return }
+    if (!editForm.name.trim() || !editForm.display_name.trim()) { setError('Key and Display Name are required'); return }
     setSaving(true); setError('')
     try {
-      const updated = await api.updateSiteGroup(editId!, editForm)
-      setGroups(prev => prev.map(g => g.id === editId ? updated : g))
+      const updated = await api.updateSite(editId!, editForm)
+      setSites(prev => prev.map(s => s.id === editId ? updated : s))
       setEditId(null)
     } catch (e: any) { setError(e.message ?? 'Failed') } finally { setSaving(false) }
   }
   async function handleDelete(id: number) {
     try {
-      await api.deleteSiteGroup(id)
-      setGroups(prev => prev.filter(g => g.id !== id))
+      await api.deleteSite(id)
+      setSites(prev => prev.filter(s => s.id !== id))
     } catch {}
+  }
+  function handleClone(s: Site) {
+    setEditId(null); setError('')
+    setForm({ name: '', display_name: s.display_name, fill_color: s.fill_color, stroke_color: s.stroke_color, badge_bg: s.badge_bg, badge_text: s.badge_text, show_in_legend: s.show_in_legend, ip_cidr: s.ip_cidr })
+    setShowAdd(true)
   }
 
   const inp = 'bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500'
@@ -2835,22 +2851,95 @@ function SiteGroupsSection({ isAdmin }: { isAdmin: boolean }) {
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <p className="text-sm font-semibold text-white">Site Groups</p>
-            <HelpButton title="Site Groups — How It Works">
-              <p>A Site Group's <span className="text-gray-300 font-medium">Key</span> is what an Address Mapping's <code className="text-gray-400">group_name</code> field references — renaming the key here without updating existing mappings will leave them pointing at a group that no longer matches.</p>
-              <p>Each group carries <span className="text-gray-300 font-medium">two independent color pairs</span>: fill/stroke controls the Geo Map circle marker for that site, while badge background/text controls how the group's name is displayed as a pill elsewhere in Settings — they don't have to match.</p>
-              <p><span className="text-gray-300 font-medium">Show in legend</span> only affects the Geo Map's Sites legend section — a group with it off still renders on the map, it just isn't listed as a key.</p>
+            <p className="text-sm font-semibold text-white">Sites</p>
+            <HelpButton title="Sites — How It Works">
+              <p>A Site's <span className="text-gray-300 font-medium">Key</span> is what a NAT Mapping's <code className="text-gray-400">site_key</code> field references — renaming the key here without updating existing mappings will leave them pointing at a site that no longer matches.</p>
+              <p>Every install has one <span className="text-gray-300 font-medium">Default</span> site (key <code className="text-gray-400">default</code>) that new NAT Mappings fall back to. Its key is locked, but the display name, colors, and IP/CIDR stay fully editable, and it can't be deleted.</p>
+              <p><span className="text-gray-300 font-medium">IP/CIDR</span> (comma-separated) places this site's color on the <span className="text-gray-300 font-medium">remote</span> end of a flow on the Geo Map — if a flow's public IP falls inside it, that IP gets this site's marker color even without a NAT Mapping. This is separate from NAT Mappings, which color the <span className="text-gray-300 font-medium">local</span> end.</p>
+              <p>Each site carries <span className="text-gray-300 font-medium">two independent color pairs</span>: fill/stroke controls the Geo Map circle marker for that site, while badge background/text controls how the site's name is displayed as a pill elsewhere in Settings — they don't have to match.</p>
+              <p><span className="text-gray-300 font-medium">Show in legend</span> only affects the Geo Map's Sites legend section — a site with it off still renders on the map, it just isn't listed as a key.</p>
             </HelpButton>
           </div>
-          <p className="text-xs text-gray-400 mt-0.5">Define the group names and colours for Geo Map circle markers and Settings badges.</p>
+          <p className="text-xs text-gray-400 mt-0.5">Define sites, their colours, and IP/CIDR matching for Geo Map circle markers and Settings badges.</p>
         </div>
         {isAdmin && !showAdd && !editId && (
           <button onClick={() => setShowAdd(true)}
             className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
-            + Add Group
+            + Add Site
           </button>
         )}
       </div>
+
+      {showAdd && isAdmin && (
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+          <p className="text-sm font-medium text-white">New Site</p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Key (stored)</label>
+              <input placeholder="e.g. corporate" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Display Name</label>
+              <input placeholder="e.g. Corporate" value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Fill Color</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={form.fill_color} onChange={e => setForm(f => ({ ...f, fill_color: e.target.value }))}
+                  className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
+                <span className="text-xs text-gray-400 font-mono">{form.fill_color}</span>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Stroke Color</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={form.stroke_color} onChange={e => setForm(f => ({ ...f, stroke_color: e.target.value }))}
+                  className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
+                <span className="text-xs text-gray-400 font-mono">{form.stroke_color}</span>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Badge Background Color</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={form.badge_bg} onChange={e => setForm(f => ({ ...f, badge_bg: e.target.value }))}
+                  className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
+                <span className="text-xs text-gray-400 font-mono">{form.badge_bg}</span>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Badge Text Color</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={form.badge_text} onChange={e => setForm(f => ({ ...f, badge_text: e.target.value }))}
+                  className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
+                <span className="text-xs text-gray-400 font-mono">{form.badge_text}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 pt-5">
+              <input type="checkbox" id="sg_legend" checked={form.show_in_legend} onChange={e => setForm(f => ({ ...f, show_in_legend: e.target.checked }))}
+                className="w-4 h-4 rounded border-gray-600" />
+              <label htmlFor="sg_legend" className="text-sm text-gray-300">Show in Geo Map legend</label>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">IP/CIDR (comma-separated, optional)</label>
+            <input placeholder="e.g. 1.2.3.4,5.6.0.0/16" value={form.ip_cidr} onChange={e => setForm(f => ({ ...f, ip_cidr: e.target.value }))}
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          <div className="flex gap-3">
+            <button onClick={handleAdd} disabled={saving}
+              className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg disabled:opacity-50">
+              {saving ? 'Saving…' : 'Add Site'}
+            </button>
+            <button onClick={() => { setShowAdd(false); setError('') }}
+              className="px-4 py-2 text-sm text-gray-400 hover:text-white">Cancel</button>
+          </div>
+        </div>
+      )}
 
       {loading ? <p className="text-xs text-gray-500 py-4 text-center">Loading…</p> : (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
@@ -2859,17 +2948,23 @@ function SiteGroupsSection({ isAdmin }: { isAdmin: boolean }) {
               <tr className="border-b border-gray-800">
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Key</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Display Name</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">IP/CIDR</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Map Color</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">Badge</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase tracking-wider">In Legend</th>
-                {isAdmin && <th className="pl-2 pr-6 py-2.5 w-20" />}
+                {isAdmin && <th className="pl-2 pr-6 py-2.5 w-28" />}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
-              {groups.map(g => editId === g.id ? (
-                <tr key={g.id} className="bg-gray-800/60">
-                  <td className="px-2 py-2"><input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} className={`${inp} w-24`} /></td>
+              {pageSites.map(s => editId === s.id ? (
+                <tr key={s.id} className="bg-gray-800/60">
+                  <td className="px-2 py-2">
+                    <input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                      disabled={s.name === 'default'} title={s.name === 'default' ? "The Default site's key can't be changed" : undefined}
+                      className={`${inp} w-24 disabled:opacity-50 disabled:cursor-not-allowed`} />
+                  </td>
                   <td className="px-2 py-2"><input value={editForm.display_name} onChange={e => setEditForm(f => ({ ...f, display_name: e.target.value }))} className={`${inp} w-28`} /></td>
+                  <td className="px-2 py-2"><input value={editForm.ip_cidr} onChange={e => setEditForm(f => ({ ...f, ip_cidr: e.target.value }))} placeholder="e.g. 1.2.3.4,5.6.0.0/16" className={`${inp} w-40 font-mono text-xs`} /></td>
                   <td className="px-2 py-2">
                     <div className="flex items-center gap-2">
                       <input type="color" value={editForm.fill_color} onChange={e => setEditForm(f => ({ ...f, fill_color: e.target.value }))}
@@ -2905,36 +3000,55 @@ function SiteGroupsSection({ isAdmin }: { isAdmin: boolean }) {
                   </td>
                 </tr>
               ) : (
-                <tr key={g.id} className="group hover:bg-gray-800/50 transition-colors">
-                  <td className="px-4 py-2.5 font-mono text-xs text-gray-300">{g.name}</td>
-                  <td className="px-4 py-2.5 text-white">{g.display_name}</td>
+                <tr key={s.id} className="group hover:bg-gray-800/50 transition-colors">
+                  <td className="px-4 py-2.5 font-mono text-xs text-gray-300">
+                    {s.name}
+                    {s.name === 'default' && (
+                      <span title="Default site — key is locked" className="inline-block ml-1.5 -mt-0.5">
+                        <svg className="w-3 h-3 inline text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 text-white">{s.display_name}</td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-gray-400">{s.ip_cidr || '—'}</td>
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
                       <div className="w-5 h-5 rounded-full border-2 flex-shrink-0"
-                        style={{ background: g.fill_color, borderColor: g.stroke_color }} />
-                      <span className="text-xs text-gray-400 font-mono">{g.fill_color}</span>
+                        style={{ background: s.fill_color, borderColor: s.stroke_color }} />
+                      <span className="text-xs text-gray-400 font-mono">{s.fill_color}</span>
                     </div>
                   </td>
                   <td className="px-4 py-2.5">
-                    <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: g.badge_bg, color: g.badge_text }}>
-                      {g.display_name}
+                    <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: s.badge_bg, color: s.badge_text }}>
+                      {s.display_name}
                     </span>
                   </td>
                   <td className="px-4 py-2.5">
-                    {g.show_in_legend
+                    {s.show_in_legend
                       ? <span className="text-green-400 text-sm" title="Shown in Geo Map legend">✓</span>
                       : <span className="text-gray-600 text-sm" title="Hidden from Geo Map legend">—</span>}
                   </td>
                   {isAdmin && (
                     <td className="pl-2 pr-6 py-2.5">
                       <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => { setEditId(g.id); setEditForm({ name: g.name, display_name: g.display_name, fill_color: g.fill_color, stroke_color: g.stroke_color, badge_bg: g.badge_bg, badge_text: g.badge_text, show_in_legend: g.show_in_legend }); setError('') }}
-                          className="text-gray-500 hover:text-blue-400 transition-colors">
+                        <button onClick={() => { setEditId(s.id); setEditForm({ name: s.name, display_name: s.display_name, fill_color: s.fill_color, stroke_color: s.stroke_color, badge_bg: s.badge_bg, badge_text: s.badge_text, show_in_legend: s.show_in_legend, ip_cidr: s.ip_cidr }); setError('') }}
+                          title="Edit site" className="text-gray-500 hover:text-blue-400 transition-colors">
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
                         </button>
-                        <button onClick={() => handleDelete(g.id)} className="text-gray-500 hover:text-red-400 transition-colors">
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        <button onClick={() => handleClone(s)} title="Clone site" className="text-gray-500 hover:text-emerald-400 transition-colors">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
                         </button>
+                        {s.name === 'default' ? (
+                          <span title="The Default site can't be deleted" className="text-gray-700 cursor-not-allowed">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                          </span>
+                        ) : (
+                          <button onClick={() => handleDelete(s.id)} title="Delete site" className="text-gray-500 hover:text-red-400 transition-colors">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                          </button>
+                        )}
                       </div>
                     </td>
                   )}
@@ -2944,70 +3058,9 @@ function SiteGroupsSection({ isAdmin }: { isAdmin: boolean }) {
           </table>
         </div>
       )}
-
-      {showAdd && isAdmin && (
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
-          <p className="text-sm font-medium text-white">New Site Group</p>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Key (stored)</label>
-              <input placeholder="e.g. corporate" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Display Name</label>
-              <input placeholder="e.g. Corporate" value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Fill Color</label>
-              <div className="flex items-center gap-2">
-                <input type="color" value={form.fill_color} onChange={e => setForm(f => ({ ...f, fill_color: e.target.value }))}
-                  className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
-                <span className="text-xs text-gray-400 font-mono">{form.fill_color}</span>
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Stroke Color</label>
-              <div className="flex items-center gap-2">
-                <input type="color" value={form.stroke_color} onChange={e => setForm(f => ({ ...f, stroke_color: e.target.value }))}
-                  className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
-                <span className="text-xs text-gray-400 font-mono">{form.stroke_color}</span>
-              </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Badge Background Color</label>
-              <div className="flex items-center gap-2">
-                <input type="color" value={form.badge_bg} onChange={e => setForm(f => ({ ...f, badge_bg: e.target.value }))}
-                  className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
-                <span className="text-xs text-gray-400 font-mono">{form.badge_bg}</span>
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Badge Text Color</label>
-              <div className="flex items-center gap-2">
-                <input type="color" value={form.badge_text} onChange={e => setForm(f => ({ ...f, badge_text: e.target.value }))}
-                  className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
-                <span className="text-xs text-gray-400 font-mono">{form.badge_text}</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 pt-5">
-              <input type="checkbox" id="sg_legend" checked={form.show_in_legend} onChange={e => setForm(f => ({ ...f, show_in_legend: e.target.checked }))}
-                className="w-4 h-4 rounded border-gray-600" />
-              <label htmlFor="sg_legend" className="text-sm text-gray-300">Show in Geo Map legend</label>
-            </div>
-          </div>
-          {error && <p className="text-xs text-red-400">{error}</p>}
-          <div className="flex gap-3">
-            <button onClick={handleAdd} disabled={saving}
-              className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg disabled:opacity-50">
-              {saving ? 'Saving…' : 'Add Group'}
-            </button>
-            <button onClick={() => { setShowAdd(false); setError('') }}
-              className="px-4 py-2 text-sm text-gray-400 hover:text-white">Cancel</button>
-          </div>
+      {totalPages > 1 && (
+        <div className="flex justify-end">
+          <Pagination page={pageNum} totalPages={totalPages} onChange={setPage} />
         </div>
       )}
     </div>
@@ -3025,10 +3078,15 @@ function LineStylesSection({ isAdmin }: { isAdmin: boolean }) {
   const [editForm, setEditForm] = useState<LineStyleIn>(blank)
   const [saving,   setSaving]   = useState(false)
   const [error,    setError]    = useState('')
+  const [page,     setPage]     = useState(1)
 
   useEffect(() => {
     api.getLineStyles().then(setStyles).catch(() => {}).finally(() => setLoading(false))
   }, [])
+
+  const totalPages = Math.max(1, Math.ceil(styles.length / GEO_TABLE_PAGE_SIZE))
+  const pageNum      = Math.min(page, totalPages)
+  const pageStyles    = styles.slice((pageNum - 1) * GEO_TABLE_PAGE_SIZE, pageNum * GEO_TABLE_PAGE_SIZE)
 
   async function handleAdd() {
     if (!form.name.trim() || !form.label.trim()) { setError('Name and Label are required'); return }
@@ -3077,6 +3135,46 @@ function LineStylesSection({ isAdmin }: { isAdmin: boolean }) {
         )}
       </div>
 
+      {showAdd && isAdmin && (
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+          <p className="text-sm font-medium text-white">New Line Style</p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Key (stored)</label>
+              <input placeholder="e.g. ipsec_line" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Label</label>
+              <input placeholder="e.g. Dotted (Purple)" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Color</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={form.color_hex} onChange={e => setForm(f => ({ ...f, color_hex: e.target.value }))}
+                  className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
+                <LineSvg color={form.color_hex} dash={form.dash_pattern} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Dash Pattern (SVG)</label>
+              <input placeholder="10,5 (blank = solid)" value={form.dash_pattern} onChange={e => setForm(f => ({ ...f, dash_pattern: e.target.value }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          <div className="flex gap-3">
+            <button onClick={handleAdd} disabled={saving}
+              className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg disabled:opacity-50">
+              {saving ? 'Saving…' : 'Add Style'}
+            </button>
+            <button onClick={() => { setShowAdd(false); setError('') }}
+              className="px-4 py-2 text-sm text-gray-400 hover:text-white">Cancel</button>
+          </div>
+        </div>
+      )}
+
       {loading ? <p className="text-xs text-gray-500 py-4 text-center">Loading…</p> : (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
           <table className="w-full text-sm">
@@ -3090,7 +3188,7 @@ function LineStylesSection({ isAdmin }: { isAdmin: boolean }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
-              {styles.map(s => editId === s.id ? (
+              {pageStyles.map(s => editId === s.id ? (
                 <tr key={s.id} className="bg-gray-800/60">
                   <td className="px-2 py-2"><input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} className={`${inp} w-24 font-mono text-xs`} /></td>
                   <td className="px-2 py-2"><input value={editForm.label} onChange={e => setEditForm(f => ({ ...f, label: e.target.value }))} className={`${inp} w-32`} /></td>
@@ -3145,44 +3243,9 @@ function LineStylesSection({ isAdmin }: { isAdmin: boolean }) {
           </table>
         </div>
       )}
-
-      {showAdd && isAdmin && (
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
-          <p className="text-sm font-medium text-white">New Line Style</p>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Key (stored)</label>
-              <input placeholder="e.g. ipsec_line" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Label</label>
-              <input placeholder="e.g. Dotted (Purple)" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Color</label>
-              <div className="flex items-center gap-2">
-                <input type="color" value={form.color_hex} onChange={e => setForm(f => ({ ...f, color_hex: e.target.value }))}
-                  className="w-10 h-10 rounded cursor-pointer bg-transparent border-0 p-0" />
-                <LineSvg color={form.color_hex} dash={form.dash_pattern} />
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Dash Pattern (SVG)</label>
-              <input placeholder="10,5 (blank = solid)" value={form.dash_pattern} onChange={e => setForm(f => ({ ...f, dash_pattern: e.target.value }))}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-          </div>
-          {error && <p className="text-xs text-red-400">{error}</p>}
-          <div className="flex gap-3">
-            <button onClick={handleAdd} disabled={saving}
-              className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg disabled:opacity-50">
-              {saving ? 'Saving…' : 'Add Style'}
-            </button>
-            <button onClick={() => { setShowAdd(false); setError('') }}
-              className="px-4 py-2 text-sm text-gray-400 hover:text-white">Cancel</button>
-          </div>
+      {totalPages > 1 && (
+        <div className="flex justify-end">
+          <Pagination page={pageNum} totalPages={totalPages} onChange={setPage} />
         </div>
       )}
     </div>
@@ -3195,9 +3258,9 @@ function GeoMapTab() {
   const isAdmin = _me?.role === 'admin'
   return (
     <div className="space-y-10">
-      <SiteGroupsSection isAdmin={isAdmin} />
+      <SitesSection isAdmin={isAdmin} />
       <div className="border-t border-gray-800" />
-      <AddressMappingsSection isAdmin={isAdmin} />
+      <NatMappingsSection isAdmin={isAdmin} />
       <div className="border-t border-gray-800" />
       <TrafficRulesSection isAdmin={isAdmin} />
       <div className="border-t border-gray-800" />
@@ -3206,16 +3269,16 @@ function GeoMapTab() {
   )
 }
 
-// ── Address Mappings Section ──────────────────────────────────────────────────
+// ── NAT Mappings Section ──────────────────────────────────────────────────────
 // Merges what used to be two separate boxes (VPN Site Mappings + WAN
 // Addresses) — both mapped a private CIDR/IP to a representative external
 // CIDR/IP for geolocation, differing only in label. `category` keeps that as
 // a cosmetic badge. Order (drag-and-drop) sets `priority`: when both ends of
 // a flow match a different entry, whichever is higher in this list wins.
-const ADDRESS_GROUP_BADGE: Record<string, string> = {
+const NAT_SITE_BADGE: Record<string, string> = {
   group_a: 'bg-violet-800 text-violet-200',
   group_b: 'bg-emerald-800 text-emerald-200',
-  other:   'bg-gray-700 text-gray-300',
+  default: 'bg-gray-700 text-gray-300',
 }
 const CATEGORY_BADGE: Record<string, string> = {
   wan: 'bg-red-900 text-red-200',
@@ -3242,37 +3305,60 @@ function LineStylePreview({ lineStyles, id }: { lineStyles: LineStyle[]; id: num
   )
 }
 
-function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
-  const [mappings,   setMappings]   = useState<AddressMapping[]>([])
+function NatMappingsSection({ isAdmin }: { isAdmin: boolean }) {
+  const [mappings,   setMappings]   = useState<NatMapping[]>([])
   const [loading,    setLoading]    = useState(true)
   const [showAdd,    setShowAdd]    = useState(false)
   const [editingId,  setEditingId]  = useState<number | null>(null)
-  const blank: AddressMappingIn = { name: '', group_name: 'other', category: 'wan', private_cidr: '', public_cidr: '' }
-  const [editForm,   setEditForm]   = useState<AddressMappingIn>(blank)
-  const [form,       setForm]       = useState<AddressMappingIn>(blank)
+  const blank: NatMappingIn = { name: '', site_key: 'default', category: 'wan', private_cidr: '', public_cidr: '', dst_cidrs: null, dst_ports: null, show_in_legend: true }
+  const [editForm,   setEditForm]   = useState<NatMappingIn>(blank)
+  const [form,       setForm]       = useState<NatMappingIn>(blank)
   const [saving,       setSaving]       = useState(false)
   const [editSaving,   setEditSaving]   = useState(false)
   const [error,        setError]        = useState('')
   const [editError,    setEditError]    = useState('')
-  const [siteGroups,   setSiteGroups]   = useState<SiteGroup[]>([])
+  const [sites,       setSites]       = useState<Site[]>([])
+  const [ispDhcp,          setIspDhcp]          = useState(false)
+  const [ispDhcpMappingId, setIspDhcpMappingId] = useState<number | null>(null)
+  const [ispDhcpSaving,    setIspDhcpSaving]    = useState(false)
+  const [page,             setPage]             = useState(1)
   const dragId = useRef<number | null>(null)
-  const siteGroupOptions = siteGroups.length
-    ? siteGroups.map(g => ({ value: g.name, label: g.display_name }))
-    : [{ value: 'group_a', label: 'Group A' }, { value: 'group_b', label: 'Group B' }, { value: 'other', label: 'Other' }]
+  const siteOptions = sites.length
+    ? sites.map(s => ({ value: s.name, label: s.display_name }))
+    : [{ value: 'default', label: 'Default' }, { value: 'group_a', label: 'Group A' }, { value: 'group_b', label: 'Group B' }]
+
+  const totalPages  = Math.max(1, Math.ceil(mappings.length / GEO_TABLE_PAGE_SIZE))
+  const pageNum       = Math.min(page, totalPages)
+  const pageMappings   = mappings.slice((pageNum - 1) * GEO_TABLE_PAGE_SIZE, pageNum * GEO_TABLE_PAGE_SIZE)
 
   function load() {
     setLoading(true)
     Promise.all([
-      api.getAddressMappings(),
-      api.getSiteGroups(),
-    ]).then(([m, g]) => { setMappings(m); setSiteGroups(g) })
+      api.getNatMappings(),
+      api.getSites(),
+      api.getSettings(),
+    ]).then(([m, s, settings]) => {
+      setMappings(m); setSites(s)
+      setIspDhcp(Boolean(settings.isp_dhcp_enabled))
+      setIspDhcpMappingId((settings.isp_dhcp_mapping_id as number | null) ?? null)
+    })
       .catch(() => {})
       .finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [])
 
-  function refreshSiteGroups() {
-    api.getSiteGroups().then(setSiteGroups).catch(() => {})
+  function refreshSites() {
+    api.getSites().then(setSites).catch(() => {})
+  }
+
+  async function handleToggleIspDhcp(checked: boolean) {
+    setIspDhcpSaving(true)
+    try {
+      await api.updateSetting('isp_dhcp_enabled', checked)
+      load()
+    } catch {
+      setIspDhcpSaving(false)
+    }
   }
 
   async function handleAdd() {
@@ -3281,7 +3367,7 @@ function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
     }
     setSaving(true); setError('')
     try {
-      const m = await api.createAddressMapping(form)
+      const m = await api.createNatMapping(form)
       setMappings(prev => [...prev, m])
       setForm(blank)
       setShowAdd(false)
@@ -3290,12 +3376,18 @@ function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
     } finally { setSaving(false) }
   }
 
-  function startEdit(m: AddressMapping) {
+  function startEdit(m: NatMapping) {
     setEditingId(m.id)
-    setEditForm({ name: m.name, group_name: m.group_name, category: m.category, private_cidr: m.private_cidr, public_cidr: m.public_cidr })
+    setEditForm({ name: m.name, site_key: m.site_key, category: m.category, private_cidr: m.private_cidr, public_cidr: m.public_cidr, dst_cidrs: m.dst_cidrs, dst_ports: m.dst_ports, show_in_legend: m.show_in_legend })
     setEditError('')
   }
   function cancelEdit() { setEditingId(null); setEditError('') }
+
+  function handleClone(m: NatMapping) {
+    setEditingId(null); setError('')
+    setForm({ name: '', site_key: m.site_key, category: m.category, private_cidr: m.private_cidr, public_cidr: m.public_cidr, dst_cidrs: m.dst_cidrs, dst_ports: m.dst_ports, show_in_legend: m.show_in_legend })
+    setShowAdd(true)
+  }
 
   async function handleUpdate() {
     if (!editForm.name.trim() || !editForm.private_cidr.trim() || !editForm.public_cidr.trim()) {
@@ -3303,7 +3395,7 @@ function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
     }
     setEditSaving(true); setEditError('')
     try {
-      const updated = await api.updateAddressMapping(editingId!, editForm)
+      const updated = await api.updateNatMapping(editingId!, editForm)
       setMappings(prev => prev.map(m => m.id === editingId ? updated : m))
       setEditingId(null)
     } catch (e: any) {
@@ -3313,7 +3405,7 @@ function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
 
   async function handleDelete(id: number) {
     try {
-      await api.deleteAddressMapping(id)
+      await api.deleteNatMapping(id)
       setMappings(prev => prev.filter(m => m.id !== id))
     } catch {}
   }
@@ -3332,7 +3424,7 @@ function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
     reordered.splice(to, 0, dragged)
     setMappings(prev => reordered.map(id => prev.find(m => m.id === id)!))
     try {
-      const updated = await api.reorderAddressMappings(reordered)
+      const updated = await api.reorderNatMappings(reordered)
       setMappings(updated)
     } catch { load() }
   }
@@ -3343,27 +3435,39 @@ function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold text-white">Address Mappings</h2>
-          <HelpButton title="Address Mappings — How It Works">
+          <h2 className="text-lg font-semibold text-white">Private/Public NAT Mapping</h2>
+          <HelpButton title="Private/Public NAT Mapping — How It Works">
             <p>Tells the Geo Map "this private range is really at this location" — nothing more. This section has <span className="text-gray-300 font-medium">no effect on line colors or styling</span>; that all happens in Traffic Rules below, which references these entries by name.</p>
             <p><span className="text-gray-300 font-medium">Private CIDR/IP is required</span> — it's the only thing that makes an entry match real traffic (a flow's private-side IP falling inside it). <span className="text-gray-300 font-medium">Public/External CIDR or IP</span> is what gets geolocated to place it on the map: a single firewall IP for a site (e.g. <code className="text-gray-400">10.10.0.0/16</code> → <code className="text-gray-400">23.92.28.254/32</code>), or a whole block if a site's traffic egresses from a range (e.g. a VPN exit node's <code className="text-gray-400">/24</code>). If you're trying to classify traffic to some external service instead of mapping one of your own ranges, you want a Traffic Rule, not an entry here — see the "Any" option there.</p>
-            <p>Drag rows to reorder. Order only matters for the rare case where <span className="text-gray-300 font-medium">both ends</span> of a flow match a different entry here (e.g. two of your own sites talking site-to-site) — whichever entry is higher in this list is the one whose Traffic Rules get checked for that arc's style.</p>
+            <p>Multiple entries may share the same private and/or public CIDR — drag rows to reorder; whichever entry is higher in this list wins when more than one matches the same flow, and is also the one whose Traffic Rules get checked for that arc's style.</p>
+            <p><span className="text-gray-300 font-medium">Destination CIDR/IP and Port</span> (optional) scope this mapping to only apply when the flow's remote end matches — this is what lets the SAME private range resolve to a DIFFERENT public CIDR depending on where the traffic is headed. E.g. a firewall that NATs DNS traffic (port 53) out one public IP and everything else out another: two entries, same Private CIDR, one with Destination Port <code className="text-gray-400">53</code> above the other (blank Destination Port) in priority order. Leave both blank to match any destination — the common case.</p>
+            <p><span className="text-gray-300 font-medium">Show in legend</span> controls whether this entry appears in the Geo Map's NAT Mappings legend section.</p>
+            <p><span className="text-gray-300 font-medium">ISP DHCP</span> is for networks with no static public IP: checking it locks every mapping here (nothing below is editable or used) and creates a single synthetic "Default" mapping that catches all private traffic instead, with no fixed map placement of its own since the public IP isn't fixed. Unchecking it deletes that synthetic mapping and restores everything else — if you built a Traffic Rule scoped to it while DHCP was on, that rule is deleted along with it.</p>
           </HelpButton>
         </div>
-        {isAdmin && !showAdd && (
-          <button
-            onClick={() => setShowAdd(true)}
-            className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors"
-          >
-            + Add Mapping
-          </button>
-        )}
+        <div className="flex items-center gap-4">
+          <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+            <input type="checkbox" checked={ispDhcp} disabled={!isAdmin || ispDhcpSaving}
+              onChange={e => handleToggleIspDhcp(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-600" />
+            ISP DHCP
+          </label>
+          {isAdmin && !showAdd && (
+            <button
+              onClick={() => setShowAdd(true)}
+              disabled={ispDhcp}
+              className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+            >
+              + Add Mapping
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Add form */}
-      {showAdd && isAdmin && (
+      {showAdd && isAdmin && !ispDhcp && (
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
-          <h3 className="text-sm font-medium text-white">New Address Mapping</h3>
+          <h3 className="text-sm font-medium text-white">New NAT Mapping</h3>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div>
               <label className="block text-xs text-gray-400 mb-1">Name</label>
@@ -3373,10 +3477,10 @@ function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
             </div>
             <div>
               <label className="block text-xs text-gray-400 mb-1">Site</label>
-              <select value={form.group_name} onChange={e => setForm(f => ({ ...f, group_name: e.target.value }))}
-                onFocus={refreshSiteGroups}
+              <select value={form.site_key} onChange={e => setForm(f => ({ ...f, site_key: e.target.value }))}
+                onFocus={refreshSites}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                {siteGroupOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                {siteOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
             <div>
@@ -3399,6 +3503,23 @@ function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
                 onChange={e => setForm(f => ({ ...f, public_cidr: e.target.value }))}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Destination CIDR/IP (optional)</label>
+              <input placeholder="e.g. 1.1.1.1,9.9.9.9" value={form.dst_cidrs ?? ''}
+                onChange={e => setForm(f => ({ ...f, dst_cidrs: e.target.value || null }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Destination Port (optional)</label>
+              <input placeholder="e.g. 53,8000-9000" value={form.dst_ports ?? ''}
+                onChange={e => setForm(f => ({ ...f, dst_ports: e.target.value || null }))}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div className="flex items-center gap-2 pt-5">
+              <input type="checkbox" id="nm_legend" checked={form.show_in_legend} onChange={e => setForm(f => ({ ...f, show_in_legend: e.target.checked }))}
+                className="w-4 h-4 rounded border-gray-600" />
+              <label htmlFor="nm_legend" className="text-sm text-gray-300">Show in Geo Map legend</label>
+            </div>
           </div>
           {error && <p className="text-xs text-red-400">{error}</p>}
           <div className="flex gap-3 pt-1">
@@ -3419,7 +3540,7 @@ function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
         <p className="text-sm text-gray-500 text-center py-8">Loading…</p>
       ) : mappings.length === 0 ? (
         <div className="text-center py-12 text-gray-500">
-          <p className="text-sm">No address mappings configured.</p>
+          <p className="text-sm">No NAT mappings configured.</p>
           <p className="text-xs mt-1">Add one to plot that traffic at the correct location on the Geo Map.</p>
         </div>
       ) : (
@@ -3433,18 +3554,24 @@ function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Category</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Private CIDR / IP</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Public / External</th>
-                {isAdmin && <th className="pl-2 pr-6 py-3 w-20 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Actions</th>}
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Destination</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Port</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">In Legend</th>
+                {isAdmin && <th className="pl-2 pr-6 py-3 w-28 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
-              {mappings.map(m => editingId === m.id ? (
+              {pageMappings.map(m => {
+                const isDhcpRow = ispDhcp && m.id === ispDhcpMappingId
+                const isLocked  = ispDhcp && !isDhcpRow
+                return editingId === m.id ? (
                 /* ── Edit row ── */
                 <tr key={m.id} className="bg-gray-800/60">
                   {isAdmin && <td />}
                   <td className="px-2 py-2"><input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} className={inp} /></td>
                   <td className="px-2 py-2">
-                    <select value={editForm.group_name} onChange={e => setEditForm(f => ({ ...f, group_name: e.target.value }))} onFocus={refreshSiteGroups} className={inp}>
-                      {siteGroupOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    <select value={editForm.site_key} onChange={e => setEditForm(f => ({ ...f, site_key: e.target.value }))} onFocus={refreshSites} className={inp}>
+                      {siteOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </td>
                   <td className="px-2 py-2">
@@ -3455,6 +3582,12 @@ function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
                   </td>
                   <td className="px-2 py-2"><input value={editForm.private_cidr} onChange={e => setEditForm(f => ({ ...f, private_cidr: e.target.value }))} className={`${inp} font-mono`} /></td>
                   <td className="px-2 py-2"><input value={editForm.public_cidr} onChange={e => setEditForm(f => ({ ...f, public_cidr: e.target.value }))} className={`${inp} font-mono`} /></td>
+                  <td className="px-2 py-2"><input value={editForm.dst_cidrs ?? ''} onChange={e => setEditForm(f => ({ ...f, dst_cidrs: e.target.value || null }))} placeholder="any" className={`${inp} w-32 font-mono text-xs`} /></td>
+                  <td className="px-2 py-2"><input value={editForm.dst_ports ?? ''} onChange={e => setEditForm(f => ({ ...f, dst_ports: e.target.value || null }))} placeholder="any" className={`${inp} w-24 font-mono text-xs`} /></td>
+                  <td className="px-2 py-2">
+                    <input type="checkbox" checked={editForm.show_in_legend} onChange={e => setEditForm(f => ({ ...f, show_in_legend: e.target.checked }))}
+                      className="w-4 h-4 rounded border-gray-600" />
+                  </td>
                   <td className="pl-2 pr-6 py-2">
                     {editError && <p className="text-xs text-red-400 mb-1">{editError}</p>}
                     <div className="flex items-center gap-2 justify-end">
@@ -3471,16 +3604,19 @@ function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
               ) : (
                 /* ── Display row ── */
                 <tr key={m.id}
-                  draggable={isAdmin}
+                  draggable={isAdmin && !ispDhcp}
                   onDragStart={() => handleDragStart(m.id)}
                   onDragOver={e => e.preventDefault()}
                   onDrop={() => handleDrop(m.id)}
-                  className="group hover:bg-gray-800/50 transition-colors">
-                  {isAdmin && <td className="pl-3"><DragHandle /></td>}
-                  <td className="px-4 py-3 text-white font-medium">{m.name}</td>
+                  className={`group hover:bg-gray-800/50 transition-colors ${isLocked ? 'opacity-40' : ''}`}>
+                  {isAdmin && <td className="pl-3">{!ispDhcp && <DragHandle />}</td>}
+                  <td className="px-4 py-3 text-white font-medium">
+                    {m.name}
+                    {isDhcpRow && <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-900 text-blue-200 align-middle">DHCP</span>}
+                  </td>
                   <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${ADDRESS_GROUP_BADGE[m.group_name] ?? ADDRESS_GROUP_BADGE.other}`}>
-                      {m.group_name.charAt(0).toUpperCase() + m.group_name.slice(1)}
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${NAT_SITE_BADGE[m.site_key] ?? NAT_SITE_BADGE.default}`}>
+                      {m.site_key.charAt(0).toUpperCase() + m.site_key.slice(1)}
                     </span>
                   </td>
                   <td className="px-4 py-3">
@@ -3489,29 +3625,49 @@ function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
                     </span>
                   </td>
                   <td className="px-4 py-3 font-mono text-gray-300">{m.private_cidr}</td>
-                  <td className="px-4 py-3 font-mono text-gray-300">{m.public_cidr}</td>
+                  <td className="px-4 py-3 font-mono text-gray-300">{m.public_cidr || '—'}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-400">{m.dst_cidrs || 'any'}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-400">{m.dst_ports || 'any'}</td>
+                  <td className="px-4 py-3">
+                    {m.show_in_legend
+                      ? <span className="text-green-400 text-sm" title="Shown in Geo Map legend">✓</span>
+                      : <span className="text-gray-600 text-sm" title="Hidden from Geo Map legend">—</span>}
+                  </td>
                   {isAdmin && (
                     <td className="pl-2 pr-6 py-3">
-                      <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => startEdit(m)} title="Edit mapping"
-                          className="text-gray-500 hover:text-blue-400 transition-colors">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
-                          </svg>
-                        </button>
-                        <button onClick={() => handleDelete(m.id)} title="Delete mapping"
-                          className="text-gray-500 hover:text-red-400 transition-colors">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                          </svg>
-                        </button>
-                      </div>
+                      {!ispDhcp && (
+                        <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => startEdit(m)} title="Edit mapping"
+                            className="text-gray-500 hover:text-blue-400 transition-colors">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                            </svg>
+                          </button>
+                          <button onClick={() => handleClone(m)} title="Clone mapping"
+                            className="text-gray-500 hover:text-emerald-400 transition-colors">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                            </svg>
+                          </button>
+                          <button onClick={() => handleDelete(m.id)} title="Delete mapping"
+                            className="text-gray-500 hover:text-red-400 transition-colors">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                            </svg>
+                          </button>
+                        </div>
+                      )}
                     </td>
                   )}
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
+        </div>
+      )}
+      {totalPages > 1 && (
+        <div className="flex justify-end">
+          <Pagination page={pageNum} totalPages={totalPages} onChange={setPage} />
         </div>
       )}
     </div>
@@ -3521,39 +3677,57 @@ function AddressMappingsSection({ isAdmin }: { isAdmin: boolean }) {
 // ── Traffic Rules Section ─────────────────────────────────────────────────────
 function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
   const [rules,      setRules]      = useState<TrafficRule[]>([])
-  const [mappings,   setMappings]   = useState<AddressMapping[]>([])
+  const [mappings,   setMappings]   = useState<NatMapping[]>([])
+  const [sites,      setSites]      = useState<Site[]>([])
   const [lineStyles, setLineStyles] = useState<LineStyle[]>([])
   const [loading,    setLoading]    = useState(true)
   const [showAdd,    setShowAdd]    = useState(false)
   const [editingId,  setEditingId]  = useState<number | null>(null)
-  const blank: TrafficRuleIn = { name: '', address_mapping_id: null, dst_cidrs: '', dst_ports: '', line_style_id: null }
+  const blank: TrafficRuleIn = { name: '', nat_mapping_id: null, dst_cidrs: '', dst_site_key: null, dst_ports: '', line_style_id: null }
   const [editForm,   setEditForm]   = useState<TrafficRuleIn>(blank)
   const [form,       setForm]       = useState<TrafficRuleIn>(blank)
+  // Destination mode: 'cidr' (manual entry) or 'site' (dropdown). The Add
+  // form lets the admin pick either, freely, until something's typed. The
+  // Edit form's mode is fixed from the rule's existing data the moment
+  // editing starts — see startEdit — matching the backend's PUT guard that
+  // rejects switching an existing rule between the two.
+  const [addDestMode,  setAddDestMode]  = useState<'cidr' | 'site'>('cidr')
+  const [editDestMode, setEditDestMode] = useState<'cidr' | 'site' | 'none'>('none')
   const [saving,       setSaving]       = useState(false)
   const [editSaving,   setEditSaving]   = useState(false)
   const [error,        setError]        = useState('')
   const [editError,    setEditError]    = useState('')
+  const [page,         setPage]         = useState(1)
   const dragId = useRef<number | null>(null)
+  const siteOptions = sites.map(s => ({ value: s.name, label: s.display_name }))
+
+  const totalPages = Math.max(1, Math.ceil(rules.length / GEO_TABLE_PAGE_SIZE))
+  const pageNum     = Math.min(page, totalPages)
+  const pageRules    = rules.slice((pageNum - 1) * GEO_TABLE_PAGE_SIZE, pageNum * GEO_TABLE_PAGE_SIZE)
 
   function load() {
     setLoading(true)
     Promise.all([
       api.getTrafficRules(),
-      api.getAddressMappings(),
+      api.getNatMappings(),
+      api.getSites(),
       api.getLineStyles(),
-    ]).then(([r, m, ls]) => { setRules(r); setMappings(m); setLineStyles(ls) })
+    ]).then(([r, m, s, ls]) => { setRules(r); setMappings(m); setSites(s); setLineStyles(ls) })
       .catch(() => {})
       .finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [])
 
   function refreshMappings() {
-    api.getAddressMappings().then(setMappings).catch(() => {})
+    api.getNatMappings().then(setMappings).catch(() => {})
+  }
+  function refreshSites() {
+    api.getSites().then(setSites).catch(() => {})
   }
 
   async function handleAdd() {
-    if (!form.name.trim() || (form.address_mapping_id == null && !form.dst_cidrs?.trim() && !form.dst_ports?.trim())) {
-      setError('Name is required, and at least one of Address Mapping, Destination IPs/CIDRs, or Destination Ports'); return
+    if (!form.name.trim() || (form.nat_mapping_id == null && !form.dst_cidrs?.trim() && !form.dst_site_key && !form.dst_ports?.trim())) {
+      setError('Name is required, and at least one of NAT Mapping, Destination (IPs/CIDRs or Site), or Destination Ports'); return
     }
     setSaving(true); setError('')
     try {
@@ -3561,6 +3735,7 @@ function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
       const r = await api.createTrafficRule(body)
       setRules(prev => [...prev, r])
       setForm(blank)
+      setAddDestMode('cidr')
       setShowAdd(false)
     } catch (e: any) {
       setError(e.message ?? 'Failed to save')
@@ -3569,14 +3744,22 @@ function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
 
   function startEdit(r: TrafficRule) {
     setEditingId(r.id)
-    setEditForm({ name: r.name, address_mapping_id: r.address_mapping_id, dst_cidrs: r.dst_cidrs ?? '', dst_ports: r.dst_ports ?? '', line_style_id: r.line_style_id })
+    setEditForm({ name: r.name, nat_mapping_id: r.nat_mapping_id, dst_cidrs: r.dst_cidrs ?? '', dst_site_key: r.dst_site_key, dst_ports: r.dst_ports ?? '', line_style_id: r.line_style_id })
+    setEditDestMode(r.dst_site_key ? 'site' : r.dst_cidrs ? 'cidr' : 'none')
     setEditError('')
   }
   function cancelEdit() { setEditingId(null); setEditError('') }
 
+  function handleClone(r: TrafficRule) {
+    setEditingId(null); setError('')
+    setForm({ name: '', nat_mapping_id: r.nat_mapping_id, dst_cidrs: r.dst_cidrs, dst_site_key: r.dst_site_key, dst_ports: r.dst_ports, line_style_id: r.line_style_id })
+    setAddDestMode(r.dst_site_key ? 'site' : 'cidr')
+    setShowAdd(true)
+  }
+
   async function handleUpdate() {
-    if (!editForm.name.trim() || (editForm.address_mapping_id == null && !editForm.dst_cidrs?.trim() && !editForm.dst_ports?.trim())) {
-      setEditError('Name is required, and at least one of Address Mapping, Destination IPs/CIDRs, or Destination Ports'); return
+    if (!editForm.name.trim() || (editForm.nat_mapping_id == null && !editForm.dst_cidrs?.trim() && !editForm.dst_site_key && !editForm.dst_ports?.trim())) {
+      setEditError('Name is required, and at least one of NAT Mapping, Destination (IPs/CIDRs or Site), or Destination Ports'); return
     }
     setEditSaving(true); setEditError('')
     try {
@@ -3623,11 +3806,12 @@ function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-semibold text-white">Traffic Rules</h2>
           <HelpButton title="Traffic Rules — How It Works">
-            <p>This is the <span className="text-gray-300 font-medium">only</span> place a line color/style gets chosen for the Geo Map. Address Mappings above just supplies locations — a rule decides what a matching flow looks like.</p>
-            <p><span className="text-gray-300 font-medium">Matching is top-to-bottom, first hit wins.</span> Each rule can filter on any combination of: which Address Mapping the traffic belongs to ("Any" = every mapping), Destination IPs/CIDRs, and Destination Ports. At least one filter is required. Rules are checked in the order shown below — as soon as one matches, its Line Style is used and nothing else is checked.</p>
+            <p>This is the <span className="text-gray-300 font-medium">only</span> place a line color/style gets chosen for the Geo Map. NAT Mappings above just supplies locations — a rule decides what a matching flow looks like.</p>
+            <p><span className="text-gray-300 font-medium">Matching is top-to-bottom, first hit wins.</span> Each rule can filter on any combination of: which NAT Mapping the traffic belongs to ("Any" = every mapping), Destination IPs/CIDRs, and Destination Ports. At least one filter is required. Rules are checked in the order shown below — as soon as one matches, its Line Style is used and nothing else is checked.</p>
             <p><span className="text-gray-300 font-medium">Multiple values:</span> list several IPs/CIDRs or ports/ranges in one rule by separating them with commas — a destination matching <span className="text-gray-300">any</span> listed value counts as a match. Destinations: <code className="text-gray-400">1.1.1.1, 9.9.9.9</code>. Ports: <code className="text-gray-400">53, 8000-9000</code> (ranges use a dash and are inclusive on both ends).</p>
-            <p><span className="text-gray-300 font-medium">Examples:</span> Address Mapping = "Site A", Destinations = <code className="text-gray-400">1.1.1.1, 9.9.9.9</code>, Ports = blank → "Site A's traffic to Cloudflare or Quad9 DNS, any port." Address Mapping = "Any", Destinations = blank, Ports = <code className="text-gray-400">53</code> → "any DNS traffic, from anywhere I've mapped, to anywhere." Address Mapping = "Site A", Destinations = blank, Ports = blank → "everything else from Site A" — a catch-all/default for that one mapping.</p>
-            <p><span className="text-amber-500 font-medium">Ordering matters most for catch-alls:</span> a rule with no Destination or Port filter matches everything for that Address Mapping, so it will shadow any more specific rule listed below it. Always drag your specific rules (like the DNS example) above a catch-all for the same mapping, or the catch-all wins first and the specific one never gets reached.</p>
+            <p><span className="text-gray-300 font-medium">Destination: manual entry or a Site.</span> Type CIDRs/IPs directly, or pick a Site instead — matching then uses that Site's own IP/CIDR field, live (edit the Site later and every rule pointing at it picks up the change automatically). One or the other, never both. Once a rule is created with one, it's locked to that mode — delete and recreate it to switch.</p>
+            <p><span className="text-gray-300 font-medium">Examples:</span> NAT Mapping = "Site A", Destinations = <code className="text-gray-400">1.1.1.1, 9.9.9.9</code>, Ports = blank → "Site A's traffic to Cloudflare or Quad9 DNS, any port." NAT Mapping = "Any", Destinations = blank, Ports = <code className="text-gray-400">53</code> → "any DNS traffic, from anywhere I've mapped, to anywhere." NAT Mapping = "Site A", Destinations = blank, Ports = blank → "everything else from Site A" — a catch-all/default for that one mapping.</p>
+            <p><span className="text-amber-500 font-medium">Ordering matters most for catch-alls:</span> a rule with no Destination or Port filter matches everything for that NAT Mapping, so it will shadow any more specific rule listed below it. Always drag your specific rules (like the DNS example) above a catch-all for the same mapping, or the catch-all wins first and the specific one never gets reached.</p>
             <p>Traffic that matches no rule at all falls back to a plain gray line.</p>
           </HelpButton>
         </div>
@@ -3653,8 +3837,8 @@ function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Address Mapping</label>
-              <select value={form.address_mapping_id ?? ''} onChange={e => setForm(f => ({ ...f, address_mapping_id: e.target.value ? Number(e.target.value) : null }))}
+              <label className="block text-xs text-gray-400 mb-1">NAT Mapping</label>
+              <select value={form.nat_mapping_id ?? ''} onChange={e => setForm(f => ({ ...f, nat_mapping_id: e.target.value ? Number(e.target.value) : null }))}
                 onFocus={refreshMappings}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option value="">Any</option>
@@ -3670,10 +3854,31 @@ function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
               </select>
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Destination IPs/CIDRs (optional, comma-separated)</label>
-              <input placeholder="e.g. 1.1.1.1, 9.9.9.9" value={form.dst_cidrs ?? ''}
-                onChange={e => setForm(f => ({ ...f, dst_cidrs: e.target.value }))}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs text-gray-400">Destination (optional)</label>
+                <div className="flex rounded overflow-hidden border border-gray-600 text-[10px]">
+                  <button type="button" onClick={() => { setAddDestMode('cidr'); setForm(f => ({ ...f, dst_site_key: null })) }}
+                    className={`px-2 py-0.5 ${addDestMode === 'cidr' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:text-gray-200'}`}>
+                    Manual
+                  </button>
+                  <button type="button" onClick={() => { setAddDestMode('site'); setForm(f => ({ ...f, dst_cidrs: '' })) }}
+                    className={`px-2 py-0.5 ${addDestMode === 'site' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:text-gray-200'}`}>
+                    Site
+                  </button>
+                </div>
+              </div>
+              {addDestMode === 'cidr' ? (
+                <input placeholder="e.g. 1.1.1.1, 9.9.9.9" value={form.dst_cidrs ?? ''}
+                  onChange={e => setForm(f => ({ ...f, dst_cidrs: e.target.value }))}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              ) : (
+                <select value={form.dst_site_key ?? ''} onChange={e => setForm(f => ({ ...f, dst_site_key: e.target.value || null }))}
+                  onFocus={refreshSites}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">— pick a site —</option>
+                  {siteOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              )}
             </div>
             <div>
               <label className="block text-xs text-gray-400 mb-1">Destination Ports (optional, comma-separated, ranges OK)</label>
@@ -3682,7 +3887,7 @@ function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
-          <p className="text-xs text-gray-500">At least one filter is required. List multiple values separated by commas (e.g. "1.1.1.1, 9.9.9.9" or "53, 8000-9000"). Leave Destination IPs blank to match any destination on that port; leave Ports blank to match any port; leave both blank (with an Address Mapping picked) to make this the default/catch-all for that mapping — put it below any more specific rules for the same mapping.</p>
+          <p className="text-xs text-gray-500">At least one filter is required. List multiple values separated by commas (e.g. "1.1.1.1, 9.9.9.9" or "53, 8000-9000"). Leave Destination blank to match any destination on that port; leave Ports blank to match any port; leave both blank (with a NAT Mapping picked) to make this the default/catch-all for that mapping — put it below any more specific rules for the same mapping.</p>
           {error && <p className="text-xs text-red-400">{error}</p>}
           <div className="flex gap-3 pt-1">
             <button onClick={handleAdd} disabled={saving}
@@ -3712,7 +3917,7 @@ function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
               <tr className="border-b border-gray-800">
                 {isAdmin && <th className="w-8" />}
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Name</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Address Mapping</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">NAT Mapping</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Destinations</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Ports</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Line Style</th>
@@ -3720,18 +3925,33 @@ function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
-              {rules.map(r => editingId === r.id ? (
+              {pageRules.map(r => editingId === r.id ? (
                 /* ── Edit row ── */
                 <tr key={r.id} className="bg-gray-800/60">
                   {isAdmin && <td />}
                   <td className="px-2 py-2"><input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} className={inp} /></td>
                   <td className="px-2 py-2">
-                    <select value={editForm.address_mapping_id ?? ''} onChange={e => setEditForm(f => ({ ...f, address_mapping_id: e.target.value ? Number(e.target.value) : null }))} onFocus={refreshMappings} className={inp}>
+                    <select value={editForm.nat_mapping_id ?? ''} onChange={e => setEditForm(f => ({ ...f, nat_mapping_id: e.target.value ? Number(e.target.value) : null }))} onFocus={refreshMappings} className={inp}>
                       <option value="">Any</option>
                       {mappings.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>
                   </td>
-                  <td className="px-2 py-2"><input value={editForm.dst_cidrs ?? ''} onChange={e => setEditForm(f => ({ ...f, dst_cidrs: e.target.value }))} className={`${inp} font-mono`} /></td>
+                  <td className="px-2 py-2">
+                    {editDestMode === 'none' && (
+                      <div className="flex rounded overflow-hidden border border-gray-600 text-[10px] mb-1 w-fit">
+                        <button type="button" onClick={() => setEditDestMode('cidr')} className="px-2 py-0.5 bg-gray-700 text-gray-400 hover:text-gray-200">Manual</button>
+                        <button type="button" onClick={() => setEditDestMode('site')} className="px-2 py-0.5 bg-gray-700 text-gray-400 hover:text-gray-200">Site</button>
+                      </div>
+                    )}
+                    {editDestMode === 'site' ? (
+                      <select value={editForm.dst_site_key ?? ''} onChange={e => setEditForm(f => ({ ...f, dst_site_key: e.target.value || null }))} onFocus={refreshSites} className={inp}>
+                        <option value="">— pick a site —</option>
+                        {siteOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    ) : (
+                      <input value={editForm.dst_cidrs ?? ''} onChange={e => setEditForm(f => ({ ...f, dst_cidrs: e.target.value }))} className={`${inp} font-mono`} />
+                    )}
+                  </td>
                   <td className="px-2 py-2"><input value={editForm.dst_ports ?? ''} onChange={e => setEditForm(f => ({ ...f, dst_ports: e.target.value }))} className={`${inp} font-mono`} /></td>
                   <td className="px-2 py-2">
                     <select value={editForm.line_style_id ?? ''} onChange={e => setEditForm(f => ({ ...f, line_style_id: e.target.value ? Number(e.target.value) : null }))} className={inp}>
@@ -3763,9 +3983,15 @@ function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
                   {isAdmin && <td className="pl-3"><DragHandle /></td>}
                   <td className="px-4 py-3 text-white font-medium">{r.name}</td>
                   <td className="px-4 py-3 text-gray-300">
-                    {r.address_mapping_id ? (mappings.find(m => m.id === r.address_mapping_id)?.name ?? `#${r.address_mapping_id}`) : <span className="text-gray-500">Any</span>}
+                    {r.nat_mapping_id ? (mappings.find(m => m.id === r.nat_mapping_id)?.name ?? `#${r.nat_mapping_id}`) : <span className="text-gray-500">Any</span>}
                   </td>
-                  <td className="px-4 py-3 font-mono text-gray-300">{r.dst_cidrs || <span className="text-gray-500 font-sans">Any</span>}</td>
+                  <td className="px-4 py-3 text-gray-300">
+                    {r.dst_site_key
+                      ? <span className="font-sans"><span className="text-gray-500">Site:</span> {sites.find(s => s.name === r.dst_site_key)?.display_name ?? r.dst_site_key}</span>
+                      : r.dst_cidrs
+                        ? <span className="font-mono">{r.dst_cidrs}</span>
+                        : <span className="text-gray-500 font-sans">Any</span>}
+                  </td>
                   <td className="px-4 py-3 font-mono text-gray-300">{r.dst_ports || <span className="text-gray-500 font-sans">Any</span>}</td>
                   <td className="px-4 py-3"><LineStylePreview lineStyles={lineStyles} id={r.line_style_id} /></td>
                   {isAdmin && (
@@ -3775,6 +4001,12 @@ function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
                           className="text-gray-500 hover:text-blue-400 transition-colors">
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                          </svg>
+                        </button>
+                        <button onClick={() => handleClone(r)} title="Clone rule"
+                          className="text-gray-500 hover:text-emerald-400 transition-colors">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
                           </svg>
                         </button>
                         <button onClick={() => handleDelete(r.id)} title="Delete rule"
@@ -3790,6 +4022,11 @@ function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {totalPages > 1 && (
+        <div className="flex justify-end">
+          <Pagination page={pageNum} totalPages={totalPages} onChange={setPage} />
         </div>
       )}
     </div>

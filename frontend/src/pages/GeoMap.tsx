@@ -6,14 +6,14 @@
  *   GeoMapCard   → inline card for the Analytics page
  *   default      → full-screen standalone pop-out at /geomap
  *
- * Arc line color/dash is resolved server-side (Settings → Geo Map → Address
+ * Arc line color/dash is resolved server-side (Settings → Geo Map → NAT
  * Mappings / Traffic Rules, each picking a Line Style directly) and comes
  * back on each arc already resolved — no client-side type lookup needed.
  *
- * Circle marker colours by group (configured in Settings → Geo Map → Site Groups):
+ * Circle marker colours by site (configured in Settings → Geo Map → Sites):
  *   group_a → purple  (#a78bfa)
  *   group_b → green   (#34d399)
- *   other   → blue    (#60a5fa)
+ *   default → blue    (#60a5fa)
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
 import L from 'leaflet'
@@ -22,7 +22,7 @@ import * as d3 from 'd3'
 import { Maximize2, RefreshCw, X, MapPin } from 'lucide-react'
 import { api, setToken, getToken, getTokenRole } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
-import type { GeoDataResponse, SiteGroup } from '../api/client'
+import type { GeoDataResponse, Site, NatMapping } from '../api/client'
 import HelpButton from '../components/HelpButton'
 
 // ── Geo config (dynamic — fetched from API, falls back to hardcoded defaults) ──
@@ -30,55 +30,75 @@ import HelpButton from '../components/HelpButton'
 // color/dash/label from the backend (see GeoArc), so the legend reads
 // straight off geoData.arcs instead of a separately-fetched catalog.
 interface GeoConfig {
-  groupColors:  Record<string, string>
-  groupStrokes: Record<string, string>
+  siteColors:   Record<string, string>
+  siteStrokes:  Record<string, string>
   defaultFill:  string
   defaultStroke: string
-  siteGroups:   SiteGroup[]
+  sites:        Site[]
+  natMappings:  NatMapping[]
 }
 
 const FALLBACK_CONFIG: GeoConfig = {
-  groupColors:  { group_a: '#a78bfa', group_b: '#34d399' },
-  groupStrokes: { group_a: '#c4b5fd', group_b: '#6ee7b7' },
+  siteColors:  { group_a: '#a78bfa', group_b: '#34d399' },
+  siteStrokes: { group_a: '#c4b5fd', group_b: '#6ee7b7' },
   defaultFill:  '#ef4444',
   defaultStroke: '#fca5a5',
-  siteGroups:   [],
+  sites:        [],
+  natMappings:  [],
 }
 
-function buildConfig(siteGroups: SiteGroup[]): GeoConfig {
+function buildConfig(sites: Site[], natMappings: NatMapping[]): GeoConfig {
   let defaultFill   = '#60a5fa'
   let defaultStroke = '#93c5fd'
 
-  const groupColors:  Record<string, string> = {}
-  const groupStrokes: Record<string, string> = {}
-  for (const g of siteGroups) {
-    groupColors[g.name]  = g.fill_color
-    groupStrokes[g.name] = g.stroke_color
+  const siteColors:  Record<string, string> = {}
+  const siteStrokes: Record<string, string> = {}
+  for (const s of sites) {
+    siteColors[s.name]  = s.fill_color
+    siteStrokes[s.name] = s.stroke_color
   }
 
-  // External marker colour: fall back to red if no 'external' group is configured
-  const extGroup = siteGroups.find(g => g.name === 'external') ?? null
-  if (extGroup) {
-    defaultFill   = extGroup.fill_color
-    defaultStroke = extGroup.stroke_color
+  // External marker colour: fall back to red if no 'external' site is configured
+  const extSite = sites.find(s => s.name === 'external') ?? null
+  if (extSite) {
+    defaultFill   = extSite.fill_color
+    defaultStroke = extSite.stroke_color
   }
 
-  return { groupColors, groupStrokes, defaultFill, defaultStroke, siteGroups }
+  return { siteColors, siteStrokes, defaultFill, defaultStroke, sites, natMappings }
 }
 
 // Fetched fresh on every mount and on every auto-refresh tick — a prior
 // version cached this at module scope for the whole browser session, which
-// meant editing Site Groups (e.g. unchecking "show in legend") in Settings
-// never showed up on the Geo Map without a hard page reload.
+// meant editing Sites (e.g. unchecking "show in legend") in Settings never
+// showed up on the Geo Map without a hard page reload.
 function useGeoConfig(): GeoConfig | null {
   const [config, setConfig] = useState<GeoConfig | null>(null)
   const { tick } = useAutoRefresh()
   useEffect(() => {
-    api.getSiteGroups()
-      .then(sg => setConfig(buildConfig(sg)))
+    Promise.all([api.getSites(), api.getNatMappings()])
+      .then(([sites, natMappings]) => setConfig(buildConfig(sites, natMappings)))
       .catch(() => setConfig(FALLBACK_CONFIG))
   }, [tick])
   return config
+}
+
+// ── Legend selection (clickable filter state) ─────────────────────────────
+// lines/sites/mappings hold the currently-toggled-on keys for each legend
+// category — arc.label for lines, site.name for sites, mapping.name for
+// mappings. Empty everywhere = no filter, show all traffic (the default).
+interface LegendSelection {
+  lines: Set<string>
+  sites: Set<string>
+  mappings: Set<string>
+}
+const EMPTY_SELECTION: LegendSelection = { lines: new Set(), sites: new Set(), mappings: new Set() }
+function hasSelection(sel: LegendSelection): boolean {
+  return sel.lines.size > 0 || sel.sites.size > 0 || sel.mappings.size > 0
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 }
 
 // ── Legend HTML ───────────────────────────────────────────────────────────
@@ -87,9 +107,21 @@ function useGeoConfig(): GeoConfig | null {
 // so the legend reads "DNS - Cloudflare/Quad9" instead of a generic
 // "Dashed Blue". Arcs with no matching rule (the neutral default gray for
 // unmapped public<->public traffic) have no label and are omitted.
-function buildLegendHTML(geoData: GeoDataResponse, cfg: GeoConfig): string {
+//
+// Every row is clickable (data-kind + data-key, read by a delegated click
+// listener on the legend's container — see LeafletGeoMap) and every
+// category is scoped to what's actually in geoData right now, not just
+// what's configured with show_in_legend — an entry for traffic that isn't
+// on screen is pointless to offer as a filter.
+function buildLegendHTML(geoData: GeoDataResponse, cfg: GeoConfig, selection: LegendSelection): string {
   const heading = (t: string) =>
     `<div style="color:#9ca3af;font-weight:600;margin-bottom:3px;font-size:10px;text-transform:uppercase;letter-spacing:.05em">${t}</div>`
+
+  const row = (kind: string, key: string, selected: boolean, marginBottom: boolean, inner: string) =>
+    `<div class="pf-legend-row${selected ? ' pf-legend-selected' : ''}" data-kind="${kind}" data-key="${escapeHtml(key)}"
+      style="display:flex;align-items:center;gap:7px;cursor:pointer;padding:2px 4px;margin:-2px -4px${marginBottom ? ' -2px -4px 2px -4px' : ' -2px -4px'};border-radius:4px;">
+      ${inner}
+    </div>`
 
   const seenLabels = new Set<string>()
   const usedArcs: { color: string; dash: string; label: string }[] = []
@@ -101,32 +133,89 @@ function buildLegendHTML(geoData: GeoDataResponse, cfg: GeoConfig): string {
 
   const arcEntries = usedArcs.map(a => {
     const da = a.dash ? ` stroke-dasharray="${a.dash}"` : ''
-    return `<div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
-      <svg width="26" height="7"><line x1="0" y1="3.5" x2="26" y2="3.5" stroke="${a.color}" stroke-width="2"${da}/></svg>
-      ${a.label}
-    </div>`
+    return row('line', a.label, selection.lines.has(a.label), true,
+      `<svg width="26" height="7"><line x1="0" y1="3.5" x2="26" y2="3.5" stroke="${a.color}" stroke-width="2"${da}/></svg>
+      ${escapeHtml(a.label)}`)
   }).join('')
 
-  const legendGroups = cfg.siteGroups.filter(g => g.show_in_legend)
-  const siteEntries = cfg.siteGroups.length
-    ? legendGroups.map((g, i) =>
-        `<div style="display:flex;align-items:center;gap:7px;${i < legendGroups.length - 1 ? 'margin-bottom:2px' : ''}">
-          <div style="width:10px;height:10px;border-radius:50%;background:${g.fill_color};border:1.5px solid ${g.stroke_color};flex-shrink:0"></div>
-          ${g.display_name}
-        </div>`
-      ).join('')
-    : `<div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
-        <div style="width:10px;height:10px;border-radius:50%;background:#a78bfa;flex-shrink:0"></div>Group A
-      </div>
-      <div style="display:flex;align-items:center;gap:7px;margin-bottom:2px">
-        <div style="width:10px;height:10px;border-radius:50%;background:#34d399;flex-shrink:0"></div>Group B
-      </div>
-      <div style="display:flex;align-items:center;gap:7px">
-        <div style="width:10px;height:10px;border-radius:50%;background:#ef4444;flex-shrink:0"></div>External
-      </div>`
+  // Present = actually showing up in the current traffic, not just configured.
+  const presentSiteKeys = new Set(geoData.locations.map(l => l.site_key).filter(Boolean))
+  const legendSites = cfg.sites.filter(s => s.show_in_legend && presentSiteKeys.has(s.name))
+  const siteEntries = legendSites.map((s, i) =>
+    row('site', s.name, selection.sites.has(s.name), i < legendSites.length - 1,
+      `<div style="width:10px;height:10px;border-radius:50%;background:${s.fill_color};border:1.5px solid ${s.stroke_color};flex-shrink:0"></div>
+      ${escapeHtml(s.display_name)}`)
+  ).join('')
+
+  // A NAT Mapping's identity shows up as loc.site_name when that location was
+  // resolved through it (see app/api/flows.py — site_name = meta["name"]).
+  const presentMappingNames = new Set(geoData.locations.map(l => l.site_name).filter(Boolean))
+  const legendMappings = cfg.natMappings.filter(m => m.show_in_legend && presentMappingNames.has(m.name))
+  const mappingEntries = legendMappings.map((m, i) => {
+    // Swatch matches the mapping's own Site color — a NAT Mapping carries no
+    // color of its own, it inherits its Site's.
+    const site = cfg.sites.find(s => s.name === m.site_key)
+    const fill   = site?.fill_color   ?? cfg.defaultFill
+    const stroke = site?.stroke_color ?? cfg.defaultStroke
+    return row('mapping', m.name, selection.mappings.has(m.name), i < legendMappings.length - 1,
+      `<div style="width:10px;height:10px;border-radius:50%;background:${fill};border:1.5px solid ${stroke};flex-shrink:0"></div>
+      ${escapeHtml(m.name)}`)
+  }).join('')
+
+  const resetRow = hasSelection(selection)
+    ? `<button data-action="reset" style="margin-top:6px;width:100%;text-align:center;font-size:10px;padding:3px 0;border-radius:4px;border:1px solid #4b5563;color:#9ca3af;cursor:pointer;background:transparent">Reset</button>`
+    : ''
 
   return (arcEntries ? heading('Line Styles') + `<div style="margin-bottom:6px">${arcEntries}</div>` : '') +
-    (siteEntries ? heading('Sites') + siteEntries : '')
+    (siteEntries ? heading('Sites') + `<div style="margin-bottom:6px">${siteEntries}</div>` : '') +
+    (mappingEntries ? heading('NAT Mappings') + `<div>${mappingEntries}</div>` : '') +
+    resetRow
+}
+
+// ── Legend filtering ───────────────────────────────────────────────────────
+// A location's key is (ip, lat, lng) rather than just ip — the same private
+// IP can produce two separate location entries with different site/lat/lng
+// when its NAT mapping's own dst_cidrs/dst_ports make it resolve differently
+// by destination (see app/api/flows.py). Keying on ip alone would collapse
+// those into one and mismatch which entry an arc's endpoint actually is.
+function locKey(ip: string, lat: number, lng: number): string {
+  return `${ip}|${lat}|${lng}`
+}
+
+function filterGeoData(geoData: GeoDataResponse, selection: LegendSelection): GeoDataResponse {
+  if (!hasSelection(selection)) return geoData
+
+  const locByKey = new Map(geoData.locations.map(l => [locKey(l.ip, l.lat, l.lng), l]))
+  const matches = (ip: string, lat: number, lng: number): boolean => {
+    const loc = locByKey.get(locKey(ip, lat, lng))
+    if (!loc) return false
+    return (!!loc.site_key && selection.sites.has(loc.site_key)) ||
+           (!!loc.site_name && selection.mappings.has(loc.site_name))
+  }
+
+  const visibleArcs = geoData.arcs.filter(arc =>
+    (!!arc.label && selection.lines.has(arc.label)) ||
+    matches(arc.src_ip, arc.src_lat, arc.src_lng) ||
+    matches(arc.dst_ip, arc.dst_lat, arc.dst_lng)
+  )
+
+  // Both endpoints of any visible arc must render even if the far side
+  // wasn't itself part of the selection — an arc can't draw with only one
+  // end showing. Also directly include any location matching the selection
+  // on its own, in case it has no arc for some reason.
+  const visibleKeys = new Set<string>()
+  for (const arc of visibleArcs) {
+    visibleKeys.add(locKey(arc.src_ip, arc.src_lat, arc.src_lng))
+    visibleKeys.add(locKey(arc.dst_ip, arc.dst_lat, arc.dst_lng))
+  }
+  for (const loc of geoData.locations) {
+    if (matches(loc.ip, loc.lat, loc.lng)) visibleKeys.add(locKey(loc.ip, loc.lat, loc.lng))
+  }
+
+  return {
+    locations: geoData.locations.filter(l => visibleKeys.has(locKey(l.ip, l.lat, l.lng))),
+    arcs: visibleArcs,
+  }
 }
 
 // ── Formatters ─────────────────────────────────────────────────────────────
@@ -148,6 +237,13 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
   const legendDivRef = useRef<HTMLDivElement | null>(null)
   const configRef   = useRef(config)
   useEffect(() => { configRef.current = config }, [config])
+
+  // Legend click-to-filter selection. Resets whenever a genuinely new
+  // geoData object arrives (auto-refresh tick or manual reload) — a
+  // selected item might not even exist in the new data, and the spec calls
+  // for the legend/filter to come back fresh on every refresh.
+  const [selection, setSelection] = useState<LegendSelection>(EMPTY_SELECTION)
+  useEffect(() => { setSelection(EMPTY_SELECTION) }, [geoData])
 
   // Initialise Leaflet once
   useEffect(() => {
@@ -172,17 +268,42 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
     L.svg({ pane: 'overlayPane' }).addTo(map)
 
     // ── Dynamic legend (Leaflet control) ────────────────────────────────────
-    // Content is rebuilt whenever geoData changes (see the effect below) so
-    // the Line Styles section only ever lists styles currently on screen.
+    // Content is rebuilt whenever geoData or the selection changes (see the
+    // effect below) so the legend only ever lists what's currently on
+    // screen. One delegated click listener handles every row plus the
+    // Reset button — it survives each innerHTML rebuild since it's bound to
+    // this stable container, not the rows themselves.
     const legend = new L.Control({ position: 'bottomleft' })
     legend.onAdd = () => {
       const div = L.DomUtil.create('div')
       div.style.cssText = `
         background:rgba(17,24,39,0.88);border:1px solid #374151;border-radius:8px;
         padding:8px 11px;font-size:11px;line-height:1.7;color:#d1d5db;
-        pointer-events:none;user-select:none;
+        user-select:none;
       `
-      div.innerHTML = buildLegendHTML(geoData, configRef.current)
+      div.innerHTML = buildLegendHTML(geoData, configRef.current, EMPTY_SELECTION)
+      // The legend used to be pointer-events:none (fully click-through); now
+      // that it's interactive, stop clicks/drags/scroll on it from also
+      // reaching the map underneath (pan/zoom), matching Leaflet's own
+      // built-in controls.
+      L.DomEvent.disableClickPropagation(div)
+      L.DomEvent.disableScrollPropagation(div)
+      div.addEventListener('click', (e) => {
+        const target = (e.target as HTMLElement).closest('[data-kind][data-key], [data-action="reset"]') as HTMLElement | null
+        if (!target) return
+        if (target.dataset.action === 'reset') {
+          setSelection(EMPTY_SELECTION)
+          return
+        }
+        const kind = target.dataset.kind as 'line' | 'site' | 'mapping'
+        const key  = target.dataset.key!
+        setSelection(prev => {
+          const next: LegendSelection = { lines: new Set(prev.lines), sites: new Set(prev.sites), mappings: new Set(prev.mappings) }
+          const set = kind === 'line' ? next.lines : kind === 'site' ? next.sites : next.mappings
+          if (set.has(key)) set.delete(key); else set.add(key)
+          return next
+        })
+      })
       legendDivRef.current = div
       return div
     }
@@ -205,12 +326,17 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
     // Clear previous arc layer
     d3.select(map.getPanes().overlayPane).select('svg').select('.geo-arcs').remove()
 
-    if (legendDivRef.current) legendDivRef.current.innerHTML = buildLegendHTML(geoData, configRef.current)
+    if (legendDivRef.current) legendDivRef.current.innerHTML = buildLegendHTML(geoData, configRef.current, selection)
 
-    if (!geoData.locations.length) return
+    // Locations/arcs actually drawn below — the full dataset when nothing's
+    // selected in the legend, or the subset matching the selection (both
+    // endpoints of any qualifying arc always included) otherwise.
+    const visible = filterGeoData(geoData, selection)
+
+    if (!visible.locations.length) return
 
     // Fit bounds to data
-    const latlngs = geoData.locations.map(l => [l.lat, l.lng] as [number, number])
+    const latlngs = visible.locations.map(l => [l.lat, l.lng] as [number, number])
     if (latlngs.length === 1) {
       map.setView(latlngs[0], 5)
     } else {
@@ -218,18 +344,18 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
     }
 
     // Circle size scale
-    const maxBytes = Math.max(...geoData.locations.map(l => l.bytes), 1)
+    const maxBytes = Math.max(...visible.locations.map(l => l.bytes), 1)
     const rScale   = d3.scaleSqrt().domain([0, maxBytes]).range([6, 24])
 
-    // Draw location circles, coloured by group
-    geoData.locations.forEach(loc => {
+    // Draw location circles, coloured by site
+    visible.locations.forEach(loc => {
       const r      = rScale(loc.bytes)
       const cfg    = configRef.current
-      const fill   = cfg.groupColors[loc.group ?? '']  ?? cfg.defaultFill
-      const stroke = cfg.groupStrokes[loc.group ?? ''] ?? cfg.defaultStroke
+      const fill   = cfg.siteColors[loc.site_key ?? '']  ?? cfg.defaultFill
+      const stroke = cfg.siteStrokes[loc.site_key ?? ''] ?? cfg.defaultStroke
 
       const displayLabel = loc.site_name
-        ? `${loc.site_name} <span style="color:#9ca3af;font-size:10px">(${loc.group})</span>`
+        ? `${loc.site_name} <span style="color:#9ca3af;font-size:10px">(${loc.site_key})</span>`
         : `<span style="font-family:monospace;color:#93c5fd">${loc.ip}</span>`
 
       const locationLine = loc.site_name
@@ -266,14 +392,14 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
     const svg  = d3.select(map.getPanes().overlayPane).select('svg')
     const arcG = svg.append('g').attr('class', 'geo-arcs leaflet-zoom-hide')
 
-    const maxArcBytes  = Math.max(...geoData.arcs.map(a => a.bytes), 1)
+    const maxArcBytes  = Math.max(...visible.arcs.map(a => a.bytes), 1)
     const widthScale   = d3.scaleSqrt().domain([0, maxArcBytes]).range([0.8, 4])
 
     function drawArcs() {
       if (!mapRef.current) return
       arcG.selectAll('*').remove()
 
-      const pathDs = geoData.arcs.map(arc => {
+      const pathDs = visible.arcs.map(arc => {
         const src = mapRef.current!.latLngToLayerPoint([arc.src_lat, arc.src_lng])
         const dst = mapRef.current!.latLngToLayerPoint([arc.dst_lat, arc.dst_lng])
         const dx  = dst.x - src.x, dy = dst.y - src.y
@@ -284,10 +410,10 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
       })
 
       // 1st pass — visible styled arcs (pointer-events off; hit area handles them)
-      // color/dash come resolved directly from the backend (Address Mappings /
+      // color/dash come resolved directly from the backend (NAT Mappings /
       // Traffic Rules each pick a Line Style) — no client-side lookup needed.
       const visibleNodes = pathDs.map((d, i) => {
-        const arc  = geoData.arcs[i]
+        const arc  = visible.arcs[i]
         const node = arcG.append('path')
           .attr('d', d)
           .attr('stroke', arc.color)
@@ -303,7 +429,7 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
 
       // 2nd pass — wide transparent hit areas
       pathDs.forEach((d, i) => {
-        const arc   = geoData.arcs[i]
+        const arc   = visible.arcs[i]
         const vis   = visibleNodes[i]
         const baseW = widthScale(arc.bytes)
 
@@ -336,7 +462,7 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
     drawArcs()
     map.on('moveend zoomend', drawArcs)
     return () => { map.off('moveend zoomend', drawArcs) }
-  }, [geoData])
+  }, [geoData, selection])
 
   return (
     <>
@@ -345,6 +471,8 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
           box-shadow: none !important; padding: 0 !important; }
         .pf-geo-tooltip::before { display: none !important; }
         .leaflet-container { background: #0f172a; }
+        .pf-legend-row:hover { background: rgba(255,255,255,0.08); }
+        .pf-legend-selected { background: rgba(59,130,246,0.28) !important; }
       `}</style>
       <div ref={divRef} style={{ width: '100%', height: '100%' }} />
     </>
@@ -392,8 +520,9 @@ export function GeoPage() {
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-semibold text-white">Geo Map</h1>
           <HelpButton title="Geo Map — How It Works">
-            <p>Every arc and marker on this page is driven entirely by <span className="text-gray-300 font-medium">Settings → Geo Map</span> — Address Mappings place your private ranges at a real-world location, Traffic Rules decide each arc's color/dash style, Site Groups color the circle markers. This page has no styling controls of its own.</p>
+            <p>Every arc and marker on this page is driven entirely by <span className="text-gray-300 font-medium">Settings → Geo Map</span> — NAT Mappings place your private ranges at a real-world location, Traffic Rules decide each arc's color/dash style, Sites color the circle markers (by IP/CIDR match on the remote end, or via a NAT Mapping on the local end). This page has no styling controls of its own.</p>
             <p>Click any marker or arc to jump into Flow Explorer, pre-filtered to that location's or that conversation's traffic.</p>
+            <p><span className="text-gray-300 font-medium">The legend is clickable</span> — click a Line Style, Site, or NAT Mapping to filter the map to just that item and everything connected to it; click more to add them (any combination, shown together). A Reset button appears at the bottom of the legend once something's selected. The filter clears automatically on the next refresh. Legend entries themselves only ever list what's actually in the current traffic.</p>
             <p><span className="text-gray-300 font-medium">Pop-out</span> opens the map as a real separate browser window rather than a modal — its Close button actually closes just that window, and it keeps itself refreshed on its own 30s timer independent of this page's auto-refresh setting.</p>
           </HelpButton>
         </div>
