@@ -88,6 +88,10 @@ DEFAULTS: dict[str, Any] = {
     "ssl_certfile": "",               # Absolute path to PEM cert file on server
     "ssl_keyfile": "",                # Absolute path to PEM private key on server
 
+    # Geo Map — NAT Mappings
+    "isp_dhcp_enabled": False,   # True = ISP DHCP mode; see nat_mappings.py / flows.py for behavior
+    "isp_dhcp_mapping_id": None, # id of the synthetic "Default" nat_mappings row created while isp_dhcp_enabled — internal, not user-editable
+
     # Alerts
     "alert_event_retention_days": 90, # Days to keep alert_events + notification_log rows
 
@@ -183,6 +187,14 @@ async def update_setting(
     if key in _SECRET_KEYS and body.value == _MASK:
         return {"key": key, "updated": False, "skipped": "mask value"}
 
+    # Capture the pre-write value for settings whose side effects only fire
+    # on an actual state transition (re-PUTting the same value is a no-op).
+    old_value = None
+    if key == "isp_dhcp_enabled":
+        async with db.execute("SELECT value FROM settings WHERE key = 'isp_dhcp_enabled'") as cur:
+            row = await cur.fetchone()
+        old_value = bool(json.loads(row[0])) if row else False
+
     await db.execute(
         "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
@@ -194,6 +206,42 @@ async def update_setting(
     if key == "retention_days_raw":
         from app.storage.factory import get_storage
         await get_storage().update_retention_ttl(int(body.value))
+
+    if key == "isp_dhcp_enabled" and bool(body.value) != old_value:
+        if body.value:
+            # Enabling: create the single synthetic "Default" mapping every
+            # other nat_mappings row is ignored in favor of (see flows.py).
+            # 0.0.0.0/0 catches all private traffic regardless of subnet;
+            # public_cidr stays blank since a DHCP-assigned IP can't be
+            # geolocated — this row exists so Traffic Rules has something to
+            # scope to, not to place anything on the map by itself.
+            async with db.execute("SELECT COALESCE(MAX(priority) + 1, 0) FROM nat_mappings") as cur:
+                next_priority = (await cur.fetchone())[0]
+            cur = await db.execute(
+                """INSERT INTO nat_mappings
+                   (name, site_key, category, private_cidr, public_cidr, priority, show_in_legend)
+                   VALUES ('Default', 'default', 'wan', '0.0.0.0/0', '', ?, 1)""",
+                (next_priority,),
+            )
+            await db.execute(
+                "INSERT INTO settings (key, value, updated_at) VALUES ('isp_dhcp_mapping_id', ?, datetime('now')) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                (json.dumps(cur.lastrowid),),
+            )
+        else:
+            # Disabling: remove the synthetic mapping. Any Traffic Rule
+            # scoped to it goes with it (ON DELETE CASCADE, same as manually
+            # deleting any other NAT mapping).
+            async with db.execute("SELECT value FROM settings WHERE key = 'isp_dhcp_mapping_id'") as cur:
+                row = await cur.fetchone()
+            dhcp_mapping_id = json.loads(row[0]) if row else None
+            if dhcp_mapping_id is not None:
+                await db.execute("DELETE FROM nat_mappings WHERE id = ?", (dhcp_mapping_id,))
+            await db.execute(
+                "INSERT INTO settings (key, value, updated_at) VALUES ('isp_dhcp_mapping_id', 'null', datetime('now')) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at"
+            )
+        await db.commit()
 
     return {"key": key, "updated": True}
 
