@@ -99,6 +99,7 @@ else
     cp -r "$REPO_DIR/migrations"  "$INSTALL_DIR/"
     cp -r "$REPO_DIR/clickhouse"  "$INSTALL_DIR/"
     cp -r "$REPO_DIR/scripts"     "$INSTALL_DIR/"
+    cp -r "$REPO_DIR/docs"        "$INSTALL_DIR/"
 fi
 
 # ── 7. Config file ────────────────────────────────────────────────────────────

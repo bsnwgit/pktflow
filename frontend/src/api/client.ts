@@ -351,6 +351,11 @@ export const api = {
   deleteTrafficRule: (id: number) =>
     request(`/traffic-rules/${id}`, { method: 'DELETE' }),
 
+  // ── Documentation ─────────────────────────────────────────────────────────
+  getDocs: () => request<{ slug: string; title: string }[]>('/docs-content'),
+  getDoc: (slug: string) =>
+    request<{ slug: string; title: string; content: string }>(`/docs-content/${slug}`),
+
   // ── Geo Map config ─────────────────────────────────────────────────────────
   getSites: () =>
     request<Site[]>('/geo-config/sites'),
