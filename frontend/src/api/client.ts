@@ -193,6 +193,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ port }),
     }),
+  getSystemInfo: () =>
+    request<{
+      app_name: string; version: string; install_dir: string
+      github: string; license: string; developer: string; contact: string
+    }>('/system/info'),
 
   runCleanup: () =>
     request<{
