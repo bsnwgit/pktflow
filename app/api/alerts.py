@@ -20,7 +20,7 @@ class AlertRuleIn(BaseModel):
     name: str
     description: str = ""
     enabled: bool = True
-    rule_type: str   # threshold | rate_spike | port_protocol | new_host | data_gap
+    rule_type: str   # see CHECK constraint on alert_rules.rule_type (migrations/027) for the full list
     conditions: dict = {}
     time_window_min: int = 5
     severity: str = "warning"
@@ -156,7 +156,7 @@ async def import_rules_csv(
       name, description, rule_type, conditions, time_window_min, severity,
       channels, cooldown_min, enabled
 
-    - rule_type: threshold | rate_spike | port_protocol | new_host | data_gap
+    - rule_type: see CHECK constraint on alert_rules.rule_type (migrations/027) for the full list
     - conditions: a JSON object string, e.g. '{"bytes_threshold": 1000000}' —
       the exact shape depends on rule_type, same as what the UI builds.
       Blank or invalid JSON is treated as {}.
