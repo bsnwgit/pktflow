@@ -2414,7 +2414,7 @@ const setFieldsApi: Record<string, (fields: string[]) => Promise<UserApiKey>> = 
 // per-field checkboxes (single score, not multiple sections) but still gets
 // the modal-section on/off toggle. IPQualityScore isn't wired into the modal
 // at all, so it gets neither.
-const MODAL_PROVIDERS = ['ipinfo', 'ipapi_is', 'abuseipdb', 'mxtoolbox']
+const MODAL_PROVIDERS = ['ipinfo', 'ipapi_is', 'abuseipdb', 'mxtoolbox', 'ipqualityscore']
 
 function ApiKeysTab({ lucidToken, onLucidChange, lucidSave }: {
   lucidToken: string
@@ -2524,7 +2524,7 @@ function ApiKeysTab({ lucidToken, onLucidChange, lucidSave }: {
           {keys.map(k => {
             const isFreeTier = k.provider === 'ipapi_is' && k.free_tier
             return (
-            <div key={k.provider}>
+            <div key={k.provider} className="pb-4 border-b-2 border-gray-600 last:border-0 last:pb-0">
               <label className="block text-xs text-white mb-1">{k.label}</label>
               {MODAL_PROVIDERS.includes(k.provider) && (
                 <label className="flex items-center gap-2 text-xs text-white cursor-pointer mb-1.5">
