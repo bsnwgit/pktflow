@@ -1,8 +1,14 @@
 """
 Geo Map configuration — CRUD endpoints for the two configurable catalogs:
-  site_groups    — circle marker colours and badge styles keyed by group name
+  sites          — circle marker colours, badge styles, and IP/CIDR matching
+                   keyed by site key
   line_styles    — arc line style catalog (colour + dash pattern), picked
                    directly by Address Mappings and Traffic Rules
+
+Every install has exactly one Default site (name == 'default') that address
+mappings fall back to. Its key is immutable — update_site rejects renaming
+it away, delete_site refuses to delete it — but its display name, colors,
+and ip_cidr stay fully editable.
 
 All authenticated users can read (GET).
 Only admins can write (POST, PUT, DELETE).
@@ -21,7 +27,7 @@ router = APIRouter()
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
-class SiteGroupIn(BaseModel):
+class SiteIn(BaseModel):
     name:           str
     display_name:   str
     fill_color:     str
@@ -29,9 +35,10 @@ class SiteGroupIn(BaseModel):
     badge_bg:       str = '#374151'
     badge_text:     str = '#d1d5db'
     show_in_legend: bool = True
+    ip_cidr:        str = ''   # comma-separated IP/CIDR list; matches remote (public) traffic to this site
 
 
-class SiteGroup(SiteGroupIn):
+class Site(SiteIn):
     id:         int
     created_at: str
 
@@ -58,32 +65,32 @@ async def _get_one(db: aiosqlite.Connection, table: str, id_: int) -> aiosqlite.
     return row
 
 
-# ── Site Groups ───────────────────────────────────────────────────────────────
+# ── Sites ─────────────────────────────────────────────────────────────────────
 
-@router.get("/site-groups", response_model=list[SiteGroup])
-async def list_site_groups(_: CurrentUser):
+@router.get("/sites", response_model=list[Site])
+async def list_sites(_: CurrentUser):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM site_groups ORDER BY name") as cur:
+        async with db.execute("SELECT * FROM sites ORDER BY name") as cur:
             rows = await cur.fetchall()
     return [dict(r) for r in rows]
 
 
-@router.post("/site-groups", response_model=SiteGroup, status_code=201)
-async def create_site_group(_: AdminUser, body: SiteGroupIn):
+@router.post("/sites", response_model=Site, status_code=201)
+async def create_site(_: AdminUser, body: SiteIn):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         try:
             await db.execute(
-                """INSERT INTO site_groups
-                   (name, display_name, fill_color, stroke_color, badge_bg, badge_text, show_in_legend)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (body.name, body.display_name, body.fill_color,
-                 body.stroke_color, body.badge_bg, body.badge_text, 1 if body.show_in_legend else 0),
+                """INSERT INTO sites
+                   (name, display_name, fill_color, stroke_color, badge_bg, badge_text, show_in_legend, ip_cidr)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (body.name, body.display_name, body.fill_color, body.stroke_color,
+                 body.badge_bg, body.badge_text, 1 if body.show_in_legend else 0, body.ip_cidr),
             )
             await db.commit()
             async with db.execute(
-                "SELECT * FROM site_groups WHERE name = ?", (body.name,)
+                "SELECT * FROM sites WHERE name = ?", (body.name,)
             ) as cur:
                 row = await cur.fetchone()
         except Exception as exc:
@@ -91,31 +98,49 @@ async def create_site_group(_: AdminUser, body: SiteGroupIn):
     return dict(row)
 
 
-@router.put("/site-groups/{id}", response_model=SiteGroup)
-async def update_site_group(_: AdminUser, id: int, body: SiteGroupIn):
+@router.put("/sites/{id}", response_model=Site)
+async def update_site(_: AdminUser, id: int, body: SiteIn):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        await _get_one(db, "site_groups", id)
+        existing = await _get_one(db, "sites", id)
+        if existing["name"] == "default" and body.name != "default":
+            raise HTTPException(status_code=400, detail="The Default site's key cannot be changed")
         try:
             await db.execute(
-                """UPDATE site_groups
-                   SET name=?, display_name=?, fill_color=?, stroke_color=?, badge_bg=?, badge_text=?, show_in_legend=?
+                """UPDATE sites
+                   SET name=?, display_name=?, fill_color=?, stroke_color=?, badge_bg=?, badge_text=?, show_in_legend=?, ip_cidr=?
                    WHERE id=?""",
-                (body.name, body.display_name, body.fill_color,
-                 body.stroke_color, body.badge_bg, body.badge_text, 1 if body.show_in_legend else 0, id),
+                (body.name, body.display_name, body.fill_color, body.stroke_color,
+                 body.badge_bg, body.badge_text, 1 if body.show_in_legend else 0, body.ip_cidr, id),
             )
             await db.commit()
-            row = await _get_one(db, "site_groups", id)
+            row = await _get_one(db, "sites", id)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
     return dict(row)
 
 
-@router.delete("/site-groups/{id}", status_code=204)
-async def delete_site_group(_: AdminUser, id: int):
+@router.delete("/sites/{id}", status_code=204)
+async def delete_site(_: AdminUser, id: int):
     async with aiosqlite.connect(DB_PATH) as db:
-        await _get_one(db, "site_groups", id)
-        await db.execute("DELETE FROM site_groups WHERE id = ?", (id,))
+        db.row_factory = aiosqlite.Row
+        row = await _get_one(db, "sites", id)
+        if row["name"] == "default":
+            raise HTTPException(status_code=400, detail="The Default site cannot be deleted")
+        # traffic_rules.dst_site_key -> sites(name) ON DELETE SET NULL would
+        # otherwise silently null out a rule's only filter and violate its
+        # "at least one filter" CHECK — block up front with a clear message
+        # instead of letting that surface as a raw IntegrityError.
+        async with db.execute(
+            "SELECT name FROM traffic_rules WHERE dst_site_key = ?", (row["name"],)
+        ) as cur:
+            in_use = await cur.fetchone()
+        if in_use:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Site is used as the Destination on Traffic Rule \"{in_use['name']}\" — update or delete that rule first",
+            )
+        await db.execute("DELETE FROM sites WHERE id = ?", (id,))
         await db.commit()
     return None
 
