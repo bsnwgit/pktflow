@@ -14,7 +14,9 @@ Open the app in your browser and log in with your username and password, or "Log
 
 ## Navigation
 
-Top-level pages: **Dashboard** (Analytics), **Device View**, **Flow Explorer**, **Topology**, **Geo Map**, **Traffic by Port**, **NAT Translations**, **Alerts**, **Logs**. **Settings** appears only for admins.
+Top-level pages: **Analytics** (Dashboard), **Sources** (per-device view), **Flow Explorer**, **Geo Map**, **Topology**, **NAT Translations**, **Alerts**, **Logs**, **Settings**. Settings is reachable by every role — the page itself hides admin-only tabs (Users, VPN/Site mappings, etc.) from analysts and viewers rather than hiding the whole page.
+
+**Traffic by Port** is a separate page (`/ports`) covering protocol mix and port inventory — it currently isn't linked from the sidebar, so reach it by typing the URL directly or via a dashboard widget link if your admin has added one.
 
 ## Dashboard / Analytics
 
@@ -77,3 +79,5 @@ Manage your own password from the user menu. Your personal API keys for IP looku
 ## Getting help in the app
 
 A small blue **?** button next to almost every page heading and Settings section opens a short explainer for that specific feature, including anything non-obvious about how it behaves.
+
+For longer-form documentation, click **Documentation** in the sidebar (just above your account info) — it opens this guide and the Administrator Guide as in-app tabs, so you don't need the repo checked out to read them.
