@@ -183,7 +183,7 @@ See [requirements.txt](requirements.txt). Key dependencies:
 - `aiosqlite` — app database
 - `python-jose[cryptography]`, `passlib[bcrypt]` — JWT auth
 - `python3-saml` — SAML 2.0 SSO
-- `anthropic` — AI assistant (optional, requires API key in Settings)
+- `anthropic` — AI assistant's Anthropic cloud provider (optional; the local/Ollama and OpenAI-compatible providers don't need it — see Settings → Security → AI Assistant)
 
 ### Frontend
 
@@ -394,10 +394,14 @@ Two sections on this sub-tab:
 
 #### Security → AI Assistant
 
+Providers are grouped **Local / Self-Hosted (Private)** first, then **Cloud (Paid)** below — each with its own enable toggle. Local providers are tried first; the first enabled provider with valid config answers each chat question.
+
 | Setting | Description |
 |---------|-------------|
-| Anthropic API key | Required to enable the AI assistant panel. From console.anthropic.com — separate from a Claude Enterprise seat |
-| AI model | Model used for the assistant. Default `claude-haiku-4-5-20251001` (fast/cheap); selectable alternatives are Sonnet (`claude-sonnet-5`, balanced) and Opus (`claude-opus-4-8`, most capable) |
+| Ollama | Local models via a running Ollama server — base URL + model name |
+| Local providers (+ Add) | Any number of additional OpenAI-compatible local endpoints (LM Studio, LocalAI, vLLM, etc.) — name, base URL, model, optional API key |
+| Anthropic API key + model | From console.anthropic.com — separate from a Claude Enterprise seat. Default `claude-haiku-4-5-20251001` (fast/cheap); selectable alternatives are Sonnet (`claude-sonnet-5`, balanced) and Opus (`claude-opus-4-8`, most capable) |
+| OpenAI API key + model | From platform.openai.com. Model is a free-text field (default `gpt-4o`) |
 
 #### Security → SSL / TLS
 
@@ -574,7 +578,7 @@ pktflow/
 │   │   ├── suite.py        Inbound pktHub Suite Integration token + /api/suite/whoami
 │   │   ├── system.py       Health, restart, port, SSL upload, cleanup, backup, test-connection
 │   │   ├── ws.py           WebSocket endpoint + broadcast helpers
-│   │   └── ai.py           AI assistant (Claude)
+│   │   └── ai.py           AI assistant (Ollama/local, Anthropic, or OpenAI)
 │   ├── alerts/
 │   │   ├── engine.py       Alert evaluation loop (all rule types) + notification dispatch
 │   │   │                     (Slack, Email/SMTP, PagerDuty, generic Webhook, Tracecat — all
@@ -811,7 +815,7 @@ This list is kept in sync with [FEATURES.md](FEATURES.md), which is the canonica
 | Feature | Status |
 |---------|--------|
 | Notification channels (Slack, Email, PagerDuty, Webhook, Tracecat) | Code written, including a real `POST /api/settings/test-notification` behind the "Send Test" buttons — not yet confirmed fired against a live service in production |
-| AI assistant | Code written (`app/api/ai.py`, `AiAssistant.tsx`); `anthropic` is now a declared dependency in `requirements.txt` — not yet confirmed used with a live API key in production |
+| AI assistant | Code written (`app/api/ai.py`, `AiAssistant.tsx`) — multi-provider: local/self-hosted (Ollama, OpenAI-compatible endpoints), Anthropic, OpenAI. `anthropic` is a declared dependency in `requirements.txt` for the Anthropic provider; not yet confirmed used with a live API key in production |
 | Okta OIDC | **Deliberately dropped, not pending** — `app/auth/okta.py` is an intentional no-op; SAML 2.0 covers Okta SSO |
 | SSL/TLS auto-detection | **Done, not pending** — the code that wires an uploaded cert into uvicorn now lives in `app/server.py`'s actual entrypoint (previously dead code in `app/main.py`); see Known Issues & Quirks above |
 | `ingest_http_port` Settings field | Vestigial — displayed in Settings → Ingest but not read anywhere in the backend; the real listen port is Settings → General → Port |

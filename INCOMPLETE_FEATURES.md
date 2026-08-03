@@ -37,12 +37,14 @@ service / Tracecat webhook in production.
 
 ## AI Assistant — BUILT, NOT CONFIRMED USED WITH A LIVE KEY IN PRODUCTION
 
-`app/api/ai.py` is complete — calls the Anthropic Messages API with flow context, using a
-configurable model (Settings → Security → AI Assistant → AI model; default
+`app/api/ai.py` is complete — multi-provider now: local/self-hosted (Ollama, or any
+OpenAI-compatible endpoint) tried first, then cloud (Anthropic, OpenAI), each independently
+enabled in Settings → Security → AI Assistant. Anthropic's model is configurable (default
 `claude-haiku-4-5-20251001`, selectable Sonnet `claude-sonnet-5` or Opus `claude-opus-4-8`).
 `AiAssistant.tsx` renders the chat panel. `anthropic>=0.30.0` is a declared dependency in
-`requirements.txt`. What's unverified: nobody has confirmed this actually working end-to-end
-against a real Anthropic API key in a production deployment.
+`requirements.txt` for the Anthropic provider; the local and OpenAI providers use plain
+`httpx` calls, no extra dependency. What's unverified: nobody has confirmed any of these
+providers actually working end-to-end against a real key/server in a production deployment.
 
 ---
 
