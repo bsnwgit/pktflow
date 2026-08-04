@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from app.database import DB_PATH
 from app.dependencies import CurrentUser
+from app.crypto import decrypt_str, encrypt_str
 
 # Public, harmless IP used to exercise each provider's lookup endpoint when
 # testing a key — Google Public DNS, safe to query against any provider.
@@ -94,7 +95,7 @@ async def list_api_keys(user: CurrentUser):
         ApiKeyOut(
             provider=provider,
             label=label,
-            api_key=rows[provider]["api_key"] if provider in rows else "",
+            api_key=decrypt_str(rows[provider]["api_key"]) if provider in rows else "",
             updated_at=rows[provider]["updated_at"] if provider in rows else None,
             enabled_fields=json.loads(rows[provider]["enabled_fields"]) if provider in rows and rows[provider]["enabled_fields"] else None,
             free_tier=bool(rows[provider]["free_tier"]) if provider in rows else False,
@@ -128,7 +129,7 @@ async def set_provider_enabled(provider: str, body: EnabledIn, user: CurrentUser
     return ApiKeyOut(
         provider=provider,
         label=SUPPORTED_PROVIDERS[provider],
-        api_key=row["api_key"],
+        api_key=decrypt_str(row["api_key"]),
         updated_at=row["updated_at"],
         enabled_fields=json.loads(row["enabled_fields"]) if row["enabled_fields"] else None,
         free_tier=bool(row["free_tier"]),
@@ -157,7 +158,7 @@ async def set_ipapi_is_free_tier(body: FreeTierIn, user: CurrentUser):
     return ApiKeyOut(
         provider="ipapi_is",
         label=SUPPORTED_PROVIDERS["ipapi_is"],
-        api_key=row["api_key"],
+        api_key=decrypt_str(row["api_key"]),
         updated_at=row["updated_at"],
         enabled_fields=json.loads(row["enabled_fields"]) if row["enabled_fields"] else None,
         free_tier=bool(row["free_tier"]),
@@ -190,7 +191,7 @@ async def set_ipinfo_fields(body: FieldsIn, user: CurrentUser):
     return ApiKeyOut(
         provider="ipinfo",
         label=SUPPORTED_PROVIDERS["ipinfo"],
-        api_key=row["api_key"],
+        api_key=decrypt_str(row["api_key"]),
         updated_at=row["updated_at"],
         enabled_fields=json.loads(row["enabled_fields"]) if row["enabled_fields"] else None,
         enabled=bool(row["enabled"]),
@@ -222,7 +223,7 @@ async def set_ipapi_is_fields(body: FieldsIn, user: CurrentUser):
     return ApiKeyOut(
         provider="ipapi_is",
         label=SUPPORTED_PROVIDERS["ipapi_is"],
-        api_key=row["api_key"],
+        api_key=decrypt_str(row["api_key"]),
         updated_at=row["updated_at"],
         enabled_fields=json.loads(row["enabled_fields"]) if row["enabled_fields"] else None,
         free_tier=bool(row["free_tier"]),
@@ -255,7 +256,7 @@ async def set_mxtoolbox_fields(body: FieldsIn, user: CurrentUser):
     return ApiKeyOut(
         provider="mxtoolbox",
         label=SUPPORTED_PROVIDERS["mxtoolbox"],
-        api_key=row["api_key"],
+        api_key=decrypt_str(row["api_key"]),
         updated_at=row["updated_at"],
         enabled_fields=json.loads(row["enabled_fields"]) if row["enabled_fields"] else None,
         enabled=bool(row["enabled"]),
@@ -276,7 +277,7 @@ async def set_api_key(provider: str, body: ApiKeyIn, user: CurrentUser):
                    VALUES (?, ?, ?, datetime('now'))
                    ON CONFLICT (username, provider)
                    DO UPDATE SET api_key = excluded.api_key, updated_at = excluded.updated_at""",
-                (user["username"], provider, key),
+                (user["username"], provider, encrypt_str(key)),
             )
         else:
             # Empty key means "clear" the key — but keep the row (if it
