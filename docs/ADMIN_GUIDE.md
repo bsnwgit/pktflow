@@ -45,7 +45,7 @@ Top-level tabs: **General · Security · Data · Notifications · User Keys · S
 | Security | Users | Accounts, roles, default-admin flag | no |
 | | Auth | Local auth toggle, session timeout, SAML config | no |
 | | Suite Integration | Suite token (inbound), Sibling pkt Apps (outbound pktIPAM connections) | no |
-| | AI Assistant | Local/self-hosted (Ollama, OpenAI-compatible endpoints) + cloud (Anthropic, OpenAI) providers, each independently enabled; local tried first | no |
+| | AI Assistant | Local/self-hosted (Ollama, OpenAI-compatible endpoints) + cloud (Anthropic, OpenAI) providers, each independently enabled; local tried first. Scoped strictly to pktFlow's own domain — off-topic questions and prompt-injection/override attempts are refused server-side before ever reaching the provider | no |
 | | SSL / TLS | Cert/key or PFX upload | restart to load new cert |
 | Data | Storage | Backend (ClickHouse default / DuckDB), retention days, cleanup, Test Connection | backend switch: yes |
 | | Backups | Schedule, rotation, manual run, restore | restore of config.yaml: yes |

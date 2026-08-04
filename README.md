@@ -403,6 +403,8 @@ Providers are grouped **Local / Self-Hosted (Private)** first, then **Cloud (Pai
 | Anthropic API key + model | From console.anthropic.com — separate from a Claude Enterprise seat. Default `claude-haiku-4-5-20251001` (fast/cheap); selectable alternatives are Sonnet (`claude-sonnet-5`, balanced) and Opus (`claude-opus-4-8`, most capable) |
 | OpenAI API key + model | From platform.openai.com. Model is a free-text field (default `gpt-4o`) |
 
+The assistant is scoped strictly to pktFlow's own domain (NetFlow traffic, top talkers, anomalies). A server-side pre-filter blocks prompt-injection/override attempts (e.g. "ignore your previous instructions") and questions naming another pktApp suite tool before they ever reach the AI provider, and the system prompt itself refuses anything else off-topic. Each pktApp has its own similarly-scoped assistant.
+
 #### Security → SSL / TLS
 
 Upload a PFX/P12 bundle or separate PEM cert+key via drag-and-drop; the running service auto-detects and loads whichever was uploaded, at startup. See [SSL / HTTPS](#ssl--https) above.
