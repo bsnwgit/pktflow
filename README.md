@@ -280,6 +280,7 @@ Set `admin_user`/`admin_password` here — that's what lets you log in at all on
 | `clickhouse_port` | `9000` | ClickHouse native protocol port |
 | `clickhouse_database` | `pktflow` | ClickHouse database name |
 | `secret_key` | **CHANGE THIS** | JWT signing key (32+ random bytes) |
+| `credential_key` | **CHANGE THIS** | Fernet key encrypting stored secrets (user API keys) at rest — generate with `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `admin_user` | (blank) | Initial admin username — created on first run |
 | `admin_password` | (blank) | Initial admin password — created on first run |
 | `log_file` | `/opt/pktflow/pktflow.log` | Log path |
@@ -454,7 +455,7 @@ Each channel has a "Send Test" button (`POST /api/settings/test-notification`) t
 
 ### User Keys
 
-Every logged-in user (not just admins) manages their **own** keys here for AbuseIPDB, ipinfo.io, ipapi.is, MXToolbox, and IPQualityScore — used by the public IP Lookup feature (IPQualityScore can be saved/tested but isn't consumed by the lookup yet). Keys are scoped strictly to the owning user; nobody else, including admins, can see the value. Each field has a "Test" button that calls the real provider API with a harmless test IP before saving. Leaving a field blank and saving clears that key.
+Every logged-in user (not just admins) manages their **own** keys here for AbuseIPDB, ipinfo.io, ipapi.is, MXToolbox, and IPQualityScore — used by the public IP Lookup feature (IPQualityScore can be saved/tested but isn't consumed by the lookup yet). Keys are scoped strictly to the owning user; nobody else, including admins, can see the value. Keys are Fernet-encrypted at rest (`app/crypto.py`, using a dedicated `credential_key` — separate from `secret_key`, which only signs JWTs) — decrypted only in memory when a lookup runs or the owning user views their own key. Each field has a "Test" button that calls the real provider API with a harmless test IP before saving. Leaving a field blank and saving clears that key.
 
 For ipinfo.io, ipapi.is, AbuseIPDB, and MXToolbox — the four providers actually wired into the IP Lookup modal — a checkbox toggles the whole provider's section on/off in the modal, and ipinfo.io/ipapi.is additionally expose per-field checkboxes (geolocation, ASN/org, company, privacy/threat detection, abuse contact, hosted domains) to hide individual pieces of data. ipapi.is also has a "Use free tier" toggle that skips the API key requirement entirely (~1,000 lookups/day, no key needed).
 
