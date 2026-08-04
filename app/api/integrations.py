@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.dependencies import CurrentUser, AdminUser
 from app.integrations.suite_client import SuiteClient
+from app.crypto import decrypt_str, encrypt_str
 
 router = APIRouter()
 
@@ -62,7 +63,8 @@ async def create_integration(body: IntegrationCreate, user: AdminUser, db: aiosq
         cur = await db.execute(
             """INSERT INTO integrations (name, app_name, base_url, suite_token, enabled)
                VALUES (?, ?, ?, ?, ?) RETURNING *""",
-            (body.name, body.app_name, body.base_url.rstrip("/"), body.suite_token, int(body.enabled)),
+            (body.name, body.app_name, body.base_url.rstrip("/"),
+             encrypt_str(body.suite_token) if body.suite_token else "", int(body.enabled)),
         )
         row = await cur.fetchone()
         await db.commit()
@@ -81,6 +83,11 @@ async def update_integration(integration_id: int, body: IntegrationUpdate, user:
     updates = body.model_dump(exclude_none=True)
     if "base_url" in updates:
         updates["base_url"] = updates["base_url"].rstrip("/")
+    if "suite_token" in updates:
+        # Only re-encrypt when a new plaintext token was actually supplied —
+        # existing["suite_token"] is already Fernet-encrypted, encrypting it
+        # again would make it undecryptable.
+        updates["suite_token"] = encrypt_str(updates["suite_token"]) if updates["suite_token"] else ""
     existing.update(updates)
     try:
         await db.execute(
@@ -109,7 +116,7 @@ async def test_integration(integration_id: int, user: AdminUser, db: aiosqlite.C
     if not row or not row["base_url"]:
         raise HTTPException(status_code=400, detail="Integration is not configured yet")
 
-    client = SuiteClient(row["base_url"], row["suite_token"], suite_user="pktflow", suite_role="admin")
+    client = SuiteClient(row["base_url"], decrypt_str(row["suite_token"]), suite_user="pktflow", suite_role="admin")
     healthy, detail = await client.health_check()
     status_str = "ok" if healthy else "error"
     await db.execute(
