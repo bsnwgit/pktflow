@@ -31,6 +31,10 @@ duckdb_path: "/opt/pktflow/flows.duckdb"
 # ── JWT (CHANGE THIS in production — generate with: openssl rand -hex 32) ────
 secret_key: "CHANGE_ME_generate_with_openssl_rand_hex_32"
 
+# ── Credential encryption key (generate with the Fernet command below) ───────
+# python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+credential_key: "CHANGE_ME_generate_with_fernet_generate_key"
+
 # ── First-run admin seed (creates admin user if no users exist) ───────────────
 # admin_user: "admin"
 # admin_password: "changeme"
