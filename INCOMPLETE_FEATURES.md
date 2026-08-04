@@ -35,7 +35,7 @@ service / Tracecat webhook in production.
 
 ---
 
-## AI Assistant — BUILT, NOT CONFIRMED USED WITH A LIVE KEY IN PRODUCTION
+## AI Assistant — LOCAL PROVIDER CONFIRMED LIVE; CLOUD PROVIDERS STILL UNCONFIRMED
 
 `app/api/ai.py` is complete — multi-provider now: local/self-hosted (Ollama, or any
 OpenAI-compatible endpoint) tried first, then cloud (Anthropic, OpenAI), each independently
@@ -43,8 +43,15 @@ enabled in Settings → Security → AI Assistant. Anthropic's model is configur
 `claude-haiku-4-5-20251001`, selectable Sonnet `claude-sonnet-5` or Opus `claude-opus-4-8`).
 `AiAssistant.tsx` renders the chat panel. `anthropic>=0.30.0` is a declared dependency in
 `requirements.txt` for the Anthropic provider; the local and OpenAI providers use plain
-`httpx` calls, no extra dependency. What's unverified: nobody has confirmed any of these
-providers actually working end-to-end against a real key/server in a production deployment.
+`httpx` calls, no extra dependency.
+
+**2026-08-03: confirmed working end-to-end in production against a real Ollama server**, after
+fixing a bug where the chat request never sent the session's auth token and always failed
+pktFlow's own login check with "Not authenticated" (unrelated to provider config — see
+[Known Issues & Quirks](README.md#known-issues--quirks) item 8 in the README). Connection/timeout
+failures talking to a provider now also surface an actionable message instead of a blank one.
+Still unverified: the Anthropic and OpenAI cloud providers haven't been confirmed against a real
+API key in production.
 
 ---
 
