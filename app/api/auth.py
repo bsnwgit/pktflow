@@ -254,7 +254,7 @@ async def saml_callback(request: Request, db: aiosqlite.Connection = Depends(get
     )
     await db.commit()
 
-    pktflow_access = create_access_token(user["id"], user["role"])
+    pktflow_access = create_access_token(user["id"], okta_role)
     pktflow_refresh = create_refresh_token(user["id"])
 
     resp = RedirectResponse(url="/", status_code=302)
