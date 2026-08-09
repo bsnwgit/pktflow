@@ -213,7 +213,17 @@ async def get_setting(key: str, _: CurrentUser, db: aiosqlite.Connection = Depen
         row = await cur.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
-    return {key: json.loads(row[0])}
+    value = json.loads(row[0])
+
+    # Mask secrets, same convention as GET / (bulk listing) — a single-key
+    # lookup must not be usable to bypass the masking any authenticated
+    # non-admin user (e.g. viewer) would otherwise see.
+    if key in _SECRET_KEYS and value:
+        value = _MASK
+    elif key == "ai_local_providers":
+        value = _mask_local_providers(value)
+
+    return {key: value}
 
 
 class SettingUpdate(BaseModel):

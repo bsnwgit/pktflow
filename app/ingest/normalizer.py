@@ -15,6 +15,7 @@ Key difference: vector outputs proto as a string ("UDP", "TCP") not an integer.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import logging
 import struct
 from datetime import datetime, timezone
@@ -94,11 +95,25 @@ def _flow_role(src_port: int, dst_port: int) -> int:
 
 
 def _ip_or_default(val: Any, default: str = "0.0.0.0") -> str:
-    """Return IP string, falling back to default for None/empty."""
+    """Return a validated IP string, falling back to default for
+    None/empty/malformed input.
+
+    Ingested values come from untrusted exporters and are later rendered
+    unescaped by some NOC widgets (app/api/widgets.py). Anything that
+    doesn't parse as a real IPv4/IPv6 address — including HTML/script
+    payloads someone tries to smuggle in via a spoofed flow record — is
+    dropped in favor of the default rather than stored verbatim.
+    """
     if val is None:
         return default
     s = str(val).strip()
-    return s if s and s not in ("null", "None") else default
+    if not s or s in ("null", "None"):
+        return default
+    try:
+        ipaddress.ip_address(s)
+    except ValueError:
+        return default
+    return s
 
 
 def _ns_to_datetime(ns: int) -> datetime:

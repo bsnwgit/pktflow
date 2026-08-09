@@ -7,15 +7,21 @@ Views:    GET /api/widgets/{type}     → server-rendered HTML page (iframe targ
 Flow data is sourced from ClickHouse; alert/device data from SQLite.
 """
 from __future__ import annotations
-import asyncio, ipaddress, json, urllib.request
+import asyncio, html, ipaddress, json, urllib.request
 from pathlib import Path
 
 import aiosqlite
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 from app.config import get_settings
+from app.dependencies import require_suite_token
 
-router   = APIRouter()
+# These views are embedded as unauthenticated iframes by pktHub's NOC
+# Builder, so they can't require a login session — but they do render
+# internal flow/alert/device data, so every route on this router requires
+# a valid X-Suite-Token (same trusted-proxy secret pktHub already sends on
+# every proxied request per app/api/suite.py's docstring).
+router   = APIRouter(dependencies=[Depends(require_suite_token)])
 _s       = get_settings()
 _DB      = _s.db_path
 
@@ -121,8 +127,8 @@ async def widget_top_talkers():
     """)
     if rows:
         trs = "".join(
-            f"<tr><td>{r[0]}</td><td>{r[1]}</td>"
-            f"<td><span class='badge bl'>{_pname(r[2])}</span></td>"
+            f"<tr><td>{html.escape(str(r[0]))}</td><td>{html.escape(str(r[1]))}</td>"
+            f"<td><span class='badge bl'>{html.escape(_pname(r[2]))}</span></td>"
             f"<td>{_fmt_bytes(r[3] or 0)}</td><td>{r[4]}</td></tr>"
             for r in rows
         )
@@ -187,7 +193,11 @@ async def widget_active_alerts():
         for r in rows:
             sev = str(r.get("severity","info")).lower()
             c = SEV.get(sev,"#94a3b8")
-            trs.append(f"<tr><td style='font-size:10px;color:#475569'>{_fmt_ts(r.get('ts',''))}</td><td><span class='badge' style='background:#1e293b;color:{c}'>{sev.upper()}</span></td><td style='color:#e2e8f0'>{str(r.get('message',''))[:80]}</td></tr>")
+            trs.append(
+                f"<tr><td style='font-size:10px;color:#475569'>{html.escape(_fmt_ts(r.get('ts','')))}</td>"
+                f"<td><span class='badge' style='background:#1e293b;color:{c}'>{html.escape(sev.upper())}</span></td>"
+                f"<td style='color:#e2e8f0'>{html.escape(str(r.get('message',''))[:80])}</td></tr>"
+            )
         content = f"<table><thead><tr><th>Time</th><th>Severity</th><th>Message</th></tr></thead><tbody>{''.join(trs)}</tbody></table>"
     else:
         content = "<div class='empty'>No recent alerts</div>"
@@ -339,10 +349,10 @@ async def widget_recent_flows():
     """)
     if rows:
         trs = "".join(
-            f"<tr><td style='font-size:10px;color:#475569'>{_fmt_ts(r[5])}</td>"
-            f"<td>{r[0]}</td><td>{r[1]}</td>"
-            f"<td><span class='badge bl'>{_pname(r[2])}</span></td>"
-            f"<td style='color:#64748b'>{r[3] or '—'}</td>"
+            f"<tr><td style='font-size:10px;color:#475569'>{html.escape(_fmt_ts(r[5]))}</td>"
+            f"<td>{html.escape(str(r[0]))}</td><td>{html.escape(str(r[1]))}</td>"
+            f"<td><span class='badge bl'>{html.escape(_pname(r[2]))}</span></td>"
+            f"<td style='color:#64748b'>{html.escape(str(r[3])) if r[3] else '—'}</td>"
             f"<td>{_fmt_bytes(r[4] or 0)}</td></tr>"
             for r in rows
         )
@@ -375,7 +385,7 @@ async def widget_network_topology():
         for r in rows:
             pct = int(((r[1] or 0) / max_b) * 100)
             bar = f"<div style='background:#1e293b;border-radius:2px;height:6px;width:80px;display:inline-block;vertical-align:middle;margin-right:6px'><div style='background:#60a5fa;height:6px;border-radius:2px;width:{pct}%'></div></div>"
-            trs.append(f"<tr><td style='font-family:monospace;font-size:11px'>{r[0]}</td><td>{bar}{_fmt_bytes(r[1] or 0)}</td><td style='color:#64748b'>{r[2] or 0}</td><td style='color:#64748b'>{r[3] or 0}</td></tr>")
+            trs.append(f"<tr><td style='font-family:monospace;font-size:11px'>{html.escape(str(r[0]))}</td><td>{bar}{_fmt_bytes(r[1] or 0)}</td><td style='color:#64748b'>{r[2] or 0}</td><td style='color:#64748b'>{r[3] or 0}</td></tr>")
         content = f"<table><thead><tr><th>IP Address</th><th>Traffic (1 hr)</th><th>Flows</th><th>Peers</th></tr></thead><tbody>{''.join(trs)}</tbody></table>"
     else:
         content = "<div class='empty'>No topology data</div>"
@@ -411,10 +421,10 @@ async def widget_collector_status():
             last = _fmt_ts(r[3])
             trs.append(
                 f"<tr>"
-                f"<td><span style='display:inline-block;width:7px;height:7px;border-radius:50%;background:#4ade80;margin-right:6px'></span>{ip}</td>"
-                f"<td style='color:#64748b;font-size:11px'>{name}</td>"
+                f"<td><span style='display:inline-block;width:7px;height:7px;border-radius:50%;background:#4ade80;margin-right:6px'></span>{html.escape(ip)}</td>"
+                f"<td style='color:#64748b;font-size:11px'>{html.escape(name)}</td>"
                 f"<td>{_fmt_bytes(r[2] or 0)}</td>"
-                f"<td style='font-size:10px;color:#475569'>{last}</td></tr>"
+                f"<td style='font-size:10px;color:#475569'>{html.escape(last)}</td></tr>"
             )
         content = f"<table><thead><tr><th>Sampler</th><th>Name/Site</th><th>Traffic (1 hr)</th><th>Last Seen</th></tr></thead><tbody>{''.join(trs)}</tbody></table>"
     else:

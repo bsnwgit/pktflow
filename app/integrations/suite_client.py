@@ -40,7 +40,7 @@ class SuiteClient:
         }
 
     async def get(self, path: str, params: Optional[dict] = None) -> Any:
-        async with httpx.AsyncClient(timeout=15, verify=False) as client:
+        async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(f"{self.base_url}{path}", headers=self._headers(), params=params)
             resp.raise_for_status()
             return resp.json()
