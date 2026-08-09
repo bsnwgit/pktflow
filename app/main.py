@@ -4,6 +4,7 @@ pktFlow — FastAPI application entry point.
 from __future__ import annotations
 
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -208,7 +209,12 @@ if _frontend_dist.exists():
     async def serve_spa(request: Request, full_path: str):
         if full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not found")
-        static_file = _frontend_dist / full_path
+        _dist_root = _frontend_dist.resolve()
+        static_file = (_frontend_dist / full_path).resolve()
+        if not (static_file == _dist_root or _dist_root in static_file.parents):
+            # Path traversal attempt (e.g. "../../etc/passwd") — refuse to
+            # serve anything outside the frontend dist directory.
+            raise HTTPException(status_code=404, detail="Not found")
         if static_file.exists() and static_file.is_file():
             return FileResponse(str(static_file))
         index = _frontend_dist / "index.html"
@@ -216,7 +222,7 @@ if _frontend_dist.exists():
         # pktHub suite-token bootstrap — set sso cookies so React logs in automatically
         _cfg = settings
         _suite_tk = request.headers.get("x-suite-token", "")
-        if _suite_tk and _cfg.suite_token and _suite_tk == _cfg.suite_token:
+        if _suite_tk and _cfg.suite_token and secrets.compare_digest(_suite_tk, _cfg.suite_token):
             from datetime import datetime, timedelta, timezone
             from jose import jwt as _jose_jwt
             from app.dependencies import _SUITE_ROLE_MAP
