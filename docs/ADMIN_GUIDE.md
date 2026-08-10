@@ -37,23 +37,24 @@ Settings → Security → Auth: enable SAML, then either paste Okta's IdP metada
 
 ## Settings reference
 
-Top-level tabs: **General · Security · Data · Notifications · User Keys · Sources · Geo Map · Ingest**. Security and Data have their own left-hand sub-tabs. Most settings apply immediately; the exceptions are called out below.
+A section bar at the top of the page splits Settings in two: **Common** (**General · Security · Data · Notifications · User Keys · System**) and **pktFlow** (**Sources · Geo Map · Ingest**). The tab bar below shows only the selected section's tabs — if a tab isn't where you expect, switch sections. Deep links to a specific tab select the right section on their own. Security and Data have their own left-hand sub-tabs. Most settings apply immediately; the exceptions are called out below.
 
-| Tab | Sub-tab | Key settings | Needs restart? |
-|---|---|---|---|
-| General | — | App name, **Port**, **Base URL**, timezone, Restart Service | Port: yes |
-| Security | Users | Accounts, roles, default-admin flag | no |
-| | Auth | Local auth toggle, session timeout, SAML config | no |
-| | Suite Integration | Suite token (inbound), Sibling pkt Apps (outbound pktIPAM connections) | no |
-| | AI Assistant | Local/self-hosted (Ollama, OpenAI-compatible endpoints) + cloud (Anthropic, OpenAI) providers, each independently enabled; local tried first. Scoped strictly to pktFlow's own domain — off-topic questions and prompt-injection/override attempts are refused server-side before ever reaching the provider | no |
-| | SSL / TLS | Cert/key or PFX upload | restart to load new cert |
-| Data | Storage | Backend (ClickHouse default / DuckDB), retention days, cleanup, Test Connection | backend switch: yes |
-| | Backups | Schedule, rotation, manual run, restore | restore of config.yaml: yes |
-| Ingest | — | Ingest method (http/udp/both), ingest token, UDP ports, source-IP allowlist, raw-stream broadcast | method/UDP port change: yes |
-| Notifications | — | Slack/Email/PagerDuty/Webhook/Tracecat channels | no |
-| User Keys | — | Per-user lookup API keys + Lucidchart token (per-user, private) | no |
-| Sources | — | Device/sampler registry (CSV import/export) | no |
-| Geo Map | — | Sites, Private/Public NAT Mapping, Traffic Rules, Line Style Catalog | no |
+| Section | Tab | Sub-tab | Key settings | Needs restart? |
+|---|---|---|---|---|
+| **Common** | General | — | App name, **Port**, **Base URL**, timezone, Restart Service | Port: yes |
+| | Security | Users | Accounts, roles, default-admin flag | no |
+| | | Auth | Local auth toggle, session timeout, SAML config | no |
+| | | Suite Integration | Suite token (inbound), Sibling pkt Apps (outbound pktIPAM connections) | no |
+| | | AI Assistant | Local/self-hosted (Ollama, OpenAI-compatible endpoints) + cloud (Anthropic, OpenAI) providers, each independently enabled; local tried first. Scoped strictly to pktFlow's own domain — off-topic questions and prompt-injection/override attempts are refused server-side before ever reaching the provider. A provider has 180 seconds to answer before the request fails — sized for slow local models | no |
+| | | SSL / TLS | Cert/key or PFX upload | restart to load new cert |
+| | Data | Storage | Backend (ClickHouse default / DuckDB), retention days, cleanup, Test Connection | backend switch: yes |
+| | | Backups | Schedule, rotation, manual run, restore | restore of config.yaml: yes |
+| | Notifications | — | Slack/Email/PagerDuty/Webhook/Tracecat channels | no |
+| | User Keys | — | Per-user lookup API keys + Lucidchart token (per-user, private) | no |
+| | System | — | Version/build info, host and runtime details, open-source notices | no |
+| **pktFlow** | Sources | — | Device/sampler registry (CSV import/export) | no |
+| | Geo Map | — | Sites, Private/Public NAT Mapping, Traffic Rules, Line Style Catalog | no |
+| | Ingest | — | Ingest method (http/udp/both), ingest token, UDP ports, source-IP allowlist, raw-stream broadcast | method/UDP port change: yes |
 
 **Restart Service** (General tab) tries `sudo systemctl restart pktflow` first; if the service account lacks passwordless sudo for that (the common case), it falls back to sending itself SIGTERM and relying on systemd to bring it back up — which only works if the unit has `Restart=always` (the shipped template does). If you've customized the systemd unit, keep that setting or set up passwordless sudo for this button to keep working.
 

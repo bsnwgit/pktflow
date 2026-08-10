@@ -350,7 +350,14 @@ pktFlow auto-detects SSL at process startup: `app/server.py`'s `main()` (the act
 
 ## Application Settings
 
-All settings are in the browser UI at `/settings`. Changes take effect immediately (no restart needed unless otherwise noted). The top-level tab bar is: **General · Security · Data · Notifications · User Keys · Sources · Geo Map · Ingest**. Security and Data each have their own left-hand sub-tab strip.
+All settings are in the browser UI at `/settings`. Changes take effect immediately (no restart needed unless otherwise noted).
+
+The page is split into two **sections**, chosen from a section bar above the tab bar:
+
+- **Common** — the settings every pkt* app shares: **General · Security · Data · Notifications · User Keys · System**
+- **pktFlow** — this app's own: **Sources · Geo Map · Ingest**
+
+Selecting a section swaps the tab bar beneath it, so only one group's tabs are visible at a time. (These used to be a single long tab row separated by a thin divider.) Deep links such as `/settings?tab=ingest` are unaffected — they select the correct section automatically. Security and Data each have their own left-hand sub-tab strip.
 
 ### General
 
@@ -403,6 +410,8 @@ Providers are grouped **Local / Self-Hosted (Private)** first, then **Cloud (Pai
 | Local providers (+ Add) | Any number of additional OpenAI-compatible local endpoints (LM Studio, LocalAI, vLLM, etc.) — name, base URL, model, optional API key |
 | Anthropic API key + model | From console.anthropic.com — separate from a Claude Enterprise seat. Default `claude-haiku-4-5-20251001` (fast/cheap); selectable alternatives are Sonnet (`claude-sonnet-5`, balanced) and Opus (`claude-opus-4-8`, most capable) |
 | OpenAI API key + model | From platform.openai.com. Model is a free-text field (default `gpt-4o`) |
+
+Each provider call gets up to **180 seconds** to return an answer. That ceiling is sized for a local model on modest hardware working through a complex, multi-part question — cloud providers almost never come close to it. Past that the request fails with a message saying so, rather than hanging indefinitely.
 
 The assistant is scoped strictly to pktFlow's own domain (NetFlow traffic, top talkers, anomalies). A server-side pre-filter blocks prompt-injection/override attempts (e.g. "ignore your previous instructions") and questions naming another pktApp suite tool before they ever reach the AI provider, and the system prompt itself refuses anything else off-topic. Each pktApp has its own similarly-scoped assistant.
 
