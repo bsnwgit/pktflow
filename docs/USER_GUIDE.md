@@ -16,6 +16,8 @@ Open the app in your browser and log in with your username and password, or "Log
 
 Top-level pages: **Analytics** (Dashboard), **Sources** (per-device view), **Flow Explorer**, **Geo Map**, **Topology**, **NAT Translations**, **Alerts**, **Logs**, **Settings**. Settings is reachable by every role — the page itself hides admin-only tabs (Users, VPN/Site mappings, etc.) from analysts and viewers rather than hiding the whole page.
 
+Inside Settings, a section bar at the top offers **Common** (General, Security, Data, Notifications, User Keys, System — the tabs shared by every pkt* app) and **pktFlow** (Sources, Geo Map, Ingest — this app's own). The tab row underneath shows one section at a time, so switch sections if the tab you want isn't listed. Links that point at a specific tab pick the right section for you.
+
 **Traffic by Port** is a separate page (`/ports`) covering protocol mix and port inventory — it currently isn't linked from the sidebar, so reach it by typing the URL directly or via a dashboard widget link if your admin has added one.
 
 ## Dashboard / Analytics
