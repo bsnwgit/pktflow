@@ -16,7 +16,7 @@ import { api, ProtocolStat, PortStat, DeviceSummary, FlowRecord } from '../api/c
 import { useAutoRefresh } from '../store/autoRefresh'
 import { protoLabel } from '../utils/protocols'
 import HelpButton from '../components/HelpButton'
-import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT, InstrumentFrame, RadialRing , liveEdgeDot , LinePulseGradient } from '../components/instrument'
+import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT, InstrumentFrame, RadialRing , liveEdgeDot , LinePulseGradient, BarPulseGradients } from '../components/instrument'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -229,25 +229,33 @@ function TopPortsPanel({
     port: d.port, protocol: d.protocol,
   }))
 
+  const barColors = chartData.map((_, i) => BAR_COLORS[i % BAR_COLORS.length])
+
   return (
-    <div className="h-44">
+    <InstrumentFrame height={176} live>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData} layout="vertical" margin={{ left: 0, right: 8, top: 0, bottom: 0 }}>
-          <XAxis type="number" tick={{ fill: '#fff', fontSize: 10 }} tickFormatter={metric === 'bytes' ? fmtBytes : fmtNum} />
-          <YAxis type="category" dataKey="label" tick={{ fill: '#fff', fontSize: 10 }} width={70} />
+          <defs>
+            <BarPulseGradients colors={barColors} idPrefix="f-topport" />
+          </defs>
+          <XAxis type="number" {...axisProps} tickFormatter={metric === 'bytes' ? fmtBytes : fmtNum} />
+          <YAxis type="category" dataKey="label" {...axisProps} width={70} />
           <Tooltip
-            cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+            cursor={{ fill: 'rgba(216,180,110,0.06)' }}
             contentStyle={tooltipProps.contentStyle}
             labelStyle={tooltipProps.labelStyle}
-            itemStyle={{ color: '#fff' }}
+            itemStyle={{ color: '#f5f1e8' }}
             formatter={(v: any) => metric === 'bytes' ? fmtBytes(Number(v)) : fmtNum(Number(v))}
           />
-          <Bar dataKey="value" radius={[0, 4, 4, 0]} onClick={(d: any) => onPortClick(d.port, d.protocol)}>
-            {chartData.map((_, i) => <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />)}
+          <Bar dataKey="value" radius={[0, 2, 2, 0]} onClick={(d: any) => onPortClick(d.port, d.protocol)}>
+            {chartData.map((_, i) => (
+              <Cell key={i} fill={`url(#f-topport-${i})`}
+                    stroke={barColors[i]} strokeOpacity={0.55} strokeWidth={0.75} />
+            ))}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-    </div>
+    </InstrumentFrame>
   )
 }
 
