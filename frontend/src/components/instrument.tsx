@@ -76,7 +76,7 @@ export function InstrumentFrame({
   ticks = 48,
   className = '',
   live = false,
-  sweep = true,
+  sweep = false,
 }: {
   children: ReactNode
   height: number | string
@@ -464,4 +464,66 @@ export function liveEdgeDot(dataLength: number, color: string) {
       </g>
     )
   }
+}
+
+/**
+ * A travelling highlight that lives *in the line itself*.
+ *
+ * The stroke is painted with a gradient whose bright band slides from left to
+ * right and repeats, so the line reads as a live trace being drawn rather than
+ * a static shape. Two properties make this safe:
+ *
+ *   - the line stays continuous. A dashed stroke would animate just as easily
+ *     but would break the series into segments, and a gap in a line chart
+ *     means "no data" — it would be saying something untrue.
+ *   - only colour moves. No vertex shifts, so every point stays exactly where
+ *     its value puts it.
+ *
+ * Left-to-right matches the time axis, so the motion runs the same direction
+ * the data is read.
+ *
+ * Usage: drop <LinePulseGradient id="x" color="#8ad8ea" /> inside the chart's
+ * <defs> and set stroke="url(#x)" on the Area/Line.
+ */
+export function LinePulseGradient({
+  id,
+  color,
+  duration = 4.5,
+  width = 0.16,
+  intensity = '#ffffff',
+  baseOpacity = 0.55,
+}: {
+  id: string
+  color: string
+  duration?: number
+  width?: number
+  intensity?: string
+  baseOpacity?: number
+}) {
+  const dur = `${duration}s`
+  // The band runs from off-screen left to off-screen right so it enters and
+  // leaves cleanly rather than appearing mid-line.
+  const from = -width * 2
+  const to = 1 + width * 2
+  const seq = (shift: number) => `${from + shift};${to + shift}`
+
+  // The resting stroke is held below full strength so the travelling band is
+  // the brightest thing on the line. Painting the band over an already-bright
+  // stroke gives almost no contrast — the trace has to be dim for the pulse to
+  // read as a pulse. It stays well above the legibility floor at rest.
+  return (
+    <linearGradient id={id} x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stopColor={color} stopOpacity={baseOpacity} />
+      <stop offset="0" stopColor={color} stopOpacity={baseOpacity}>
+        <animate attributeName="offset" values={seq(0)} dur={dur} repeatCount="indefinite" />
+      </stop>
+      <stop offset="0" stopColor={intensity} stopOpacity="1">
+        <animate attributeName="offset" values={seq(width / 2)} dur={dur} repeatCount="indefinite" />
+      </stop>
+      <stop offset="0" stopColor={color} stopOpacity={baseOpacity}>
+        <animate attributeName="offset" values={seq(width)} dur={dur} repeatCount="indefinite" />
+      </stop>
+      <stop offset="1" stopColor={color} stopOpacity={baseOpacity} />
+    </linearGradient>
+  )
 }
