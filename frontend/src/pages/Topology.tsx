@@ -319,18 +319,37 @@ function ForceGraph({
     // Tooltip
     const { tip, show: showTip, move: moveTip, hide: hideTip } = attachTooltip()
 
+    // Hovering a node leaves only that node's own traffic running. The eye
+    // follows movement before anything else, so unrelated charges would pull
+    // attention away from the thing being inspected.
+    const touches = (l: D3Link, id: string) => {
+      const src = typeof l.source === 'string' ? l.source : (l.source as D3Node)._id
+      const dst = typeof l.target === 'string' ? l.target : (l.target as D3Node)._id
+      return src === id || dst === id
+    }
+
     node
-      .on('mouseenter', (ev, d) => showTip(ev, `
-        <b>${d.sampler_name || d.id}</b>
-        ${d.site ? `<br><span style="color:#a9a294">Site: ${d.site}</span>` : ''}
-        <br>Bytes: ${fmtBytes(d.bytes)}
-        <br>Flows: ${d.flows.toLocaleString()}
-        ${d.is_sampler ? '<br><span style="color:#8ad8ea">★ NetFlow sampler</span>' : ''}
-      `))
-      .on('mousemove', moveTip).on('mouseleave', hideTip)
+      .on('mouseenter', (ev, d) => {
+        pulse.style('display', l => touches(l, d._id) ? null : 'none')
+        link.attr('stroke-opacity', l => touches(l, d._id) ? 0.9 : 0.12)
+        showTip(ev, `
+          <b>${d.sampler_name || d.id}</b>
+          ${d.site ? `<br><span style="color:#a9a294">Site: ${d.site}</span>` : ''}
+          <br>Bytes: ${fmtBytes(d.bytes)}
+          <br>Flows: ${d.flows.toLocaleString()}
+          ${d.is_sampler ? '<br><span style="color:#8ad8ea">★ NetFlow sampler</span>' : ''}
+        `)
+      })
+      .on('mousemove', moveTip)
+      .on('mouseleave', () => {
+        pulse.style('display', null)
+        link.attr('stroke-opacity', l => (l as any).is_asymmetric ? 0.85 : 0.55)
+        hideTip()
+      })
 
     link
       .on('mouseenter', (ev, d) => {
+        pulse.style('display', l => l === d ? null : 'none')
         const src = typeof d.source === 'string' ? d.source : (d.source as D3Node)._id
         const dst = typeof d.target === 'string' ? d.target : (d.target as D3Node)._id
         const fwd = (d as any).bytes_fwd ?? 0
@@ -346,7 +365,12 @@ function ForceGraph({
           ${asymFlag}
         `)
       })
-      .on('mousemove', moveTip).on('mouseleave', hideTip)
+      .on('mousemove', moveTip)
+      .on('mouseleave', () => {
+        pulse.style('display', null)
+        link.attr('stroke-opacity', l => (l as any).is_asymmetric ? 0.85 : 0.55)
+        hideTip()
+      })
 
     // Site target positions
     const siteList = [...siteNodes.keys()]
@@ -772,7 +796,7 @@ function HierarchicalGraph({
     // A charge runs each link, speed scaled by volume on the same curve the
     // Sankey, GeoMap and force graph use.
     const hMaxBytes = Math.max(1, ...validLines.map(v => v.line.bytes))
-    g.append('g').selectAll<SVGPathElement, typeof validLines[number]>('path')
+    const pulseSel = g.append('g').selectAll<SVGPathElement, typeof validLines[number]>('path')
       .data(validLines).join('path')
       .attr('class', 'topoh-pulse')
       .attr('fill', 'none')
@@ -900,7 +924,8 @@ function HierarchicalGraph({
     }
 
     const HIGHLIGHT_COLOR = '#8ad8ea'
-    const baseLinkColor = (d: typeof validLines[number]) => d.line.kind === 'private-private' ? '#a9a294' : '#5c6470'
+    const baseLinkColor = (d: typeof validLines[number]) =>
+      d.line.kind === 'private-private' ? 'rgba(216,180,110,.45)' : 'rgba(216,180,110,.55)'
 
     function isLineActive(d: typeof validLines[number], keep: Set<string>): boolean {
       const { line } = d
@@ -919,6 +944,12 @@ function HierarchicalGraph({
         .attr('opacity', d => isLineActive(d, keep) ? 1 : 0.12)
         .attr('stroke', d => isLineActive(d, keep) ? HIGHLIGHT_COLOR : baseLinkColor(d))
         .attr('stroke-width', d => isLineActive(d, keep) ? Math.max(2, wScale(d.line.bytes)) : wScale(d.line.bytes))
+      // Only the hovered object's own traffic keeps running. Leaving every
+      // charge in motion while the rest of the view is dimmed defeats the
+      // point of the highlight — the eye follows movement first, so unrelated
+      // motion pulls attention away from the thing being inspected.
+      pulseSel
+        .style('display', d => isLineActive(d, keep) ? null : 'none')
     }
     function clearHighlight() {
       cardSel.attr('opacity', 1)
@@ -930,6 +961,7 @@ function HierarchicalGraph({
         .attr('opacity', 1)
         .attr('stroke', d => baseLinkColor(d))
         .attr('stroke-width', d => wScale(d.line.bytes))
+      pulseSel.style('display', null)
     }
 
     // The card itself already shows name/id/bytes/flows — repeating that in
