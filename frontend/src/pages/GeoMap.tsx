@@ -11,9 +11,9 @@
  * back on each arc already resolved — no client-side type lookup needed.
  *
  * Circle marker colours by site (configured in Settings → Geo Map → Sites):
- *   group_a → purple  (#a78bfa)
- *   group_b → green   (#34d399)
- *   default → blue    (#60a5fa)
+ *   group_a → purple  (#b0a0dd)
+ *   group_b → green   (#9aeabd)
+ *   default → blue    (#8ad8ea)
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
 import L from 'leaflet'
@@ -39,17 +39,17 @@ interface GeoConfig {
 }
 
 const FALLBACK_CONFIG: GeoConfig = {
-  siteColors:  { group_a: '#a78bfa', group_b: '#34d399' },
-  siteStrokes: { group_a: '#c4b5fd', group_b: '#6ee7b7' },
-  defaultFill:  '#ef4444',
-  defaultStroke: '#fca5a5',
+  siteColors:  { group_a: '#b0a0dd', group_b: '#9aeabd' },
+  siteStrokes: { group_a: '#c4b7e9', group_b: '#9aeabd' },
+  defaultFill:  '#ff6b5e',
+  defaultStroke: '#ff9086',
   sites:        [],
   natMappings:  [],
 }
 
 function buildConfig(sites: Site[], natMappings: NatMapping[]): GeoConfig {
-  let defaultFill   = '#60a5fa'
-  let defaultStroke = '#93c5fd'
+  let defaultFill   = '#8ad8ea'
+  let defaultStroke = '#63c3d8'
 
   const siteColors:  Record<string, string> = {}
   const siteStrokes: Record<string, string> = {}
@@ -115,7 +115,7 @@ function escapeHtml(s: string): string {
 // on screen is pointless to offer as a filter.
 function buildLegendHTML(geoData: GeoDataResponse, cfg: GeoConfig, selection: LegendSelection): string {
   const heading = (t: string) =>
-    `<div style="color:#9ca3af;font-weight:600;margin-bottom:3px;font-size:10px;text-transform:uppercase;letter-spacing:.05em">${t}</div>`
+    `<div style="color:#a9a294;font-weight:600;margin-bottom:3px;font-size:10px;text-transform:uppercase;letter-spacing:.05em">${t}</div>`
 
   const row = (kind: string, key: string, selected: boolean, marginBottom: boolean, inner: string) =>
     `<div class="pf-legend-row${selected ? ' pf-legend-selected' : ''}" data-kind="${kind}" data-key="${escapeHtml(key)}"
@@ -163,7 +163,7 @@ function buildLegendHTML(geoData: GeoDataResponse, cfg: GeoConfig, selection: Le
   }).join('')
 
   const resetRow = hasSelection(selection)
-    ? `<button data-action="reset" style="margin-top:6px;width:100%;text-align:center;font-size:10px;padding:3px 0;border-radius:4px;border:1px solid #4b5563;color:#9ca3af;cursor:pointer;background:transparent">Reset</button>`
+    ? `<button data-action="reset" style="margin-top:6px;width:100%;text-align:center;font-size:10px;padding:3px 0;border-radius:4px;border:1px solid #5c6470;color:#a9a294;cursor:pointer;background:transparent">Reset</button>`
     : ''
 
   return (arcEntries ? heading('Line Styles') + `<div style="margin-bottom:6px">${arcEntries}</div>` : '') +
@@ -277,8 +277,8 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
     legend.onAdd = () => {
       const div = L.DomUtil.create('div')
       div.style.cssText = `
-        background:rgba(17,24,39,0.88);border:1px solid #374151;border-radius:8px;
-        padding:8px 11px;font-size:11px;line-height:1.7;color:#d1d5db;
+        background:rgba(17,24,39,0.88);border:1px solid #2a2418;border-radius:8px;
+        padding:8px 11px;font-size:11px;line-height:1.7;color:#dcd6c9;
         user-select:none;
       `
       div.innerHTML = buildLegendHTML(geoData, configRef.current, EMPTY_SELECTION)
@@ -355,8 +355,8 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
       const stroke = cfg.siteStrokes[loc.site_key ?? ''] ?? cfg.defaultStroke
 
       const displayLabel = loc.site_name
-        ? `${loc.site_name} <span style="color:#9ca3af;font-size:10px">(${loc.site_key})</span>`
-        : `<span style="font-family:monospace;color:#93c5fd">${loc.ip}</span>`
+        ? `${loc.site_name} <span style="color:#a9a294;font-size:10px">(${loc.site_key})</span>`
+        : `<span style="font-family:monospace;color:#63c3d8">${loc.ip}</span>`
 
       const locationLine = loc.site_name
         ? `via ${loc.ip}`
@@ -370,11 +370,11 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
         weight: 1.5,
       })
         .bindTooltip(
-          `<div style="background:#111827;border:1px solid #374151;border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.6;color:#f9fafb">
+          `<div style="background:#0d1219;border:1px solid #2a2418;border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.6;color:#f5f1e8">
             <div style="font-weight:600">${displayLabel}</div>
-            <div style="color:#9ca3af">${locationLine}</div>
+            <div style="color:#a9a294">${locationLine}</div>
             <div>${fmt(loc.bytes)} · ${fmtNum(loc.flows)} flows</div>
-            <div style="color:#6b7280;font-size:11px;margin-top:4px">Click to explore flows</div>
+            <div style="color:#a9a294;font-size:11px;margin-top:4px">Click to explore flows</div>
           </div>`,
           { direction: 'top', offset: L.point(0, -r - 4), className: 'pf-geo-tooltip', opacity: 1 }
         )
@@ -395,9 +395,41 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
     const maxArcBytes  = Math.max(...visible.arcs.map(a => a.bytes), 1)
     const widthScale   = d3.scaleSqrt().domain([0, maxArcBytes]).range([0.8, 4])
 
+    // ── live layer: keyframes + glow, mounted once into the overlay SVG ──
+    // Leaflet redraws this group on every pan/zoom, so the defs are guarded
+    // rather than appended each pass.
+    function ensureLiveDefs() {
+      const node = arcG.node() as SVGGElement | null
+      const svg = node?.ownerSVGElement
+      if (!svg) return
+      const sel = d3.select(svg)
+      if (!sel.select('#geo-live-defs').empty()) return
+
+      const defs = sel.append('defs').attr('id', 'geo-live-defs')
+      const f = defs.append('filter').attr('id', 'geo-glow')
+        .attr('x', '-40%').attr('y', '-40%').attr('width', '180%').attr('height', '180%')
+      f.append('feGaussianBlur').attr('stdDeviation', 2).attr('result', 'b')
+      const merge = f.append('feMerge')
+      merge.append('feMergeNode').attr('in', 'b')
+      merge.append('feMergeNode').attr('in', 'SourceGraphic')
+
+      sel.append('style').text(`
+        @keyframes geo-flow { to { stroke-dashoffset: -260; } }
+        .geo-arc-pulse {
+          stroke-dasharray: 2 22;
+          animation: geo-flow 4s linear infinite;
+          pointer-events: none;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .geo-arc-pulse { animation: none; opacity: 0 !important; }
+        }
+      `)
+    }
+
     function drawArcs() {
       if (!mapRef.current) return
       arcG.selectAll('*').remove()
+      ensureLiveDefs()
 
       const pathDs = visible.arcs.map(arc => {
         const src = mapRef.current!.latLngToLayerPoint([arc.src_lat, arc.src_lng])
@@ -425,6 +457,52 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
           .style('pointer-events', 'none')
           .node()
         return node
+      })
+
+      // 1.5th pass — a charge travelling src -> dst along each arc. Speed
+      // carries volume (busiest arc fastest), matching the Sankey ribbons, and
+      // it is drawn on the same path so it cannot imply a route that is not
+      // there. Pointer events stay off so the hit areas below still own
+      // interaction.
+      const maxArcBytes = Math.max(1, ...visible.arcs.map(a => a.bytes))
+      pathDs.forEach((d, i) => {
+        const arc = visible.arcs[i]
+        const frac = Math.min(1, Math.max(0, arc.bytes / maxArcBytes))
+        const dur = (7 - Math.sqrt(frac) * 4.6).toFixed(2)   // 7s quiet -> 2.4s busiest
+        arcG.append('path')
+          .attr('d', d)
+          .attr('stroke', arc.color)
+          .attr('stroke-width', Math.min(widthScale(arc.bytes) * 0.9, 3))
+          .attr('stroke-linecap', 'round')
+          .attr('fill', 'none')
+          .attr('class', 'geo-arc-pulse')
+          .attr('filter', 'url(#geo-glow)')
+          .style('animation-duration', `${dur}s`)
+          .style('animation-delay', `${(i % 6) * 0.4}s`)
+      })
+
+      // Radar pings on the locations. Drawn in the overlay rather than on the
+      // Leaflet markers so they redraw with pan/zoom and never intercept
+      // clicks. SMIL rather than CSS because animating the r geometry
+      // attribute through CSS is not reliable across browsers.
+      visible.locations.forEach((loc, i) => {
+        const pt = mapRef.current!.latLngToLayerPoint([loc.lat, loc.lng])
+        const gcfg = configRef.current
+        const stroke = gcfg.siteStrokes[loc.site_key ?? ''] ?? gcfg.defaultStroke
+        const ring = arcG.append('circle')
+          .attr('cx', pt.x).attr('cy', pt.y)
+          .attr('r', 3)
+          .attr('fill', 'none')
+          .attr('stroke', stroke)
+          .attr('stroke-width', 1.1)
+          .style('pointer-events', 'none')
+        const begin = `${((i % 5) * 0.7).toFixed(2)}s`
+        ring.append('animate')
+          .attr('attributeName', 'r').attr('values', '3;18')
+          .attr('dur', '3s').attr('begin', begin).attr('repeatCount', 'indefinite')
+        ring.append('animate')
+          .attr('attributeName', 'opacity').attr('values', '0.65;0')
+          .attr('dur', '3s').attr('begin', begin).attr('repeatCount', 'indefinite')
       })
 
       // 2nd pass — wide transparent hit areas
@@ -470,7 +548,7 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
         .pf-geo-tooltip { background: transparent !important; border: none !important;
           box-shadow: none !important; padding: 0 !important; }
         .pf-geo-tooltip::before { display: none !important; }
-        .leaflet-container { background: #0f172a; }
+        .leaflet-container { background: #04060a; }
         .pf-legend-row:hover { background: rgba(255,255,255,0.08); }
         .pf-legend-selected { background: rgba(59,130,246,0.28) !important; }
       `}</style>
@@ -678,31 +756,31 @@ export default function GeoMapPage() {
   const hasData = geoData && geoData.locations.length > 0
 
   return (
-    <div style={{ width: '100vw', height: '100vh', background: '#030712', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ width: '100vw', height: '100vh', background: '#04060a', display: 'flex', flexDirection: 'column' }}>
       {/* Minimal top bar */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '10px 16px', borderBottom: '1px solid #1f2937', flexShrink: 0,
+        padding: '10px 16px', borderBottom: '1px solid #211c14', flexShrink: 0,
       }}>
-        <span style={{ color: '#f9fafb', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ color: '#3b82f6' }}>◉</span>
+        <span style={{ color: '#f5f1e8', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ color: '#8ad8ea' }}>◉</span>
           pktFlow — Traffic Geo Map ({timeWindow})
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          {loading && <span style={{ color: '#9ca3af', fontSize: 11 }}>Refreshing…</span>}
+          {loading && <span style={{ color: '#a9a294', fontSize: 11 }}>Refreshing…</span>}
           <button
             onClick={load} title="Refresh"
-            style={{ color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
-            onMouseEnter={e => (e.currentTarget.style.color = '#f9fafb')}
-            onMouseLeave={e => (e.currentTarget.style.color = '#6b7280')}
+            style={{ color: '#a9a294', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#f5f1e8')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#a9a294')}
           >
             <RefreshCw size={14} /> Refresh
           </button>
           <button
             onClick={() => window.close()}
-            style={{ color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
-            onMouseEnter={e => (e.currentTarget.style.color = '#f9fafb')}
-            onMouseLeave={e => (e.currentTarget.style.color = '#6b7280')}
+            style={{ color: '#a9a294', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#f5f1e8')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#a9a294')}
           >
             <X size={14} /> Close
           </button>
@@ -712,17 +790,17 @@ export default function GeoMapPage() {
       {/* Map fills remainder */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {loading && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontSize: 14 }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a9a294', fontSize: 14 }}>
             Fetching geo data…
           </div>
         )}
         {error && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 14 }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a9a294', fontSize: 14 }}>
             Geo lookup unavailable
           </div>
         )}
         {!loading && geoData && !hasData && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 14 }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a9a294', fontSize: 14 }}>
             No external IP traffic in the {timeWindow} window
           </div>
         )}

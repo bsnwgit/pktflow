@@ -11,9 +11,10 @@ import { api, TimeSeriesPoint, TopologyResponse } from '../api/client'
 import { GeoMapCard } from './GeoMap'
 import { useWebSocket, type WsMessage, type IngestStats } from '../hooks/useWebSocket'
 import HelpButton from '../components/HelpButton'
+import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT, FlowDefs, NodeRail, InstrumentFrame, RadialRing, liveEdgeDot , LinePulseGradient } from '../components/instrument'
 
 // ── Colour palette ─────────────────────────────────────────────────────────────
-const COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#84cc16','#ec4899','#a78bfa']
+const COLORS = ['#ab9017','#007dab','#d86353','#00a49e','#8561bd','#007b43','#466cc8','#be7125']
 
 const WINDOWS = ['1h','6h','24h','7d','30d']
 const HIST_WINDOWS = [
@@ -93,7 +94,18 @@ function buildSankeyLayout(
     const x0 = sn.x + nodeW, y0 = sn.y + sOff
     const x1 = dn.x, y1 = dn.y + dOff
     const mx = (x0 + x1) / 2
-    return { d: `M${x0},${y0} C${mx},${y0} ${mx},${y1} ${x1},${y1} L${x1},${y1+linkH} C${mx},${y1+linkH} ${mx},${y0+linkH} ${x0},${y0+linkH} Z`, value: l.value }
+    // The ribbon body, plus its centreline — the centreline carries the
+    // travelling dash that shows direction, so it must follow the same curve.
+    const cy0 = y0 + linkH / 2
+    const cy1 = y1 + linkH / 2
+    return {
+      d: `M${x0},${y0} C${mx},${y0} ${mx},${y1} ${x1},${y1} L${x1},${y1+linkH} C${mx},${y1+linkH} ${mx},${y0+linkH} ${x0},${y0+linkH} Z`,
+      mid: `M${x0},${cy0} C${mx},${cy0} ${mx},${cy1} ${x1},${cy1}`,
+      value: l.value,
+      source: l.source,
+      target: l.target,
+      h: linkH,
+    }
   })
 
   return { positioned, paths }
@@ -140,28 +152,84 @@ function SankeyChart({ topology }: { topology: TopologyResponse }) {
   const { W, H } = { W: dims.w, H: dims.h }
   const { positioned, paths } = buildSankeyLayout(nodes, links, W, H)
 
+  const ribbons = paths.map((p, i) => ({
+    from: COLORS[(p ? p.source : i) % COLORS.length],
+    to:   COLORS[(p ? p.target : i) % COLORS.length],
+  }))
+
+  // Dash speed carries the ribbon's throughput: the busiest link runs fastest.
+  // Scaled against the busiest ribbon in view rather than an absolute rate, so
+  // the comparison is between links on screen — it reads as "this one is
+  // moving more than that one", not as an absolute bytes/sec.
+  const maxVal = Math.max(1, ...paths.filter(Boolean).map(p => (p as any).value))
+  const FAST_S = 1.6, SLOW_S = 9   // seconds per dash cycle
+  const flowDuration = (value: number) => {
+    const frac = Math.min(1, Math.max(0, value / maxVal))
+    // sqrt keeps mid-sized flows visibly different rather than all near-slow
+    return `${(SLOW_S - Math.sqrt(frac) * (SLOW_S - FAST_S)).toFixed(2)}s`
+  }
+
   return (
-    <div ref={containerRef} className="w-full h-full">
+    <div ref={containerRef} className="w-full h-full relative">
       <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} className="overflow-visible">
+        <FlowDefs ribbons={ribbons} />
+
+        {/* ribbons: volume in the width, direction in the travelling dash */}
         {paths.map((p, i) => p && (
-          <path key={i} d={p.d} fill={COLORS[i % COLORS.length]} opacity={0.55}>
-            <title>{fmt(p.value)}</title>
-          </path>
+          <g key={i}>
+            <path d={p.d} fill={`url(#f-ribbon-${i})`}>
+              <title>{fmt(p.value)}</title>
+            </path>
+            <path
+              d={p.mid}
+              fill="none"
+              stroke={COLORS[p.source % COLORS.length]}
+              strokeWidth={Math.min(Math.max(p.h * 0.34, 0.8), 3)}
+              strokeLinecap="round"
+              opacity={0.9}
+              className="f-ribbon-pulse"
+              filter="url(#f-ribbon-glow)"
+              style={{
+                animationDelay: `${(i % 7) * 0.45}s`,
+                animationDuration: flowDuration(p.value),
+              }}
+            />
+          </g>
         ))}
+
+        {/* endpoints as instrument rails rather than filled blocks */}
         {positioned.filter(Boolean).map((n, i) => (
           <g key={i}>
-            <rect x={n.x} y={n.y} width={14} height={Math.max(n.h, 4)} fill={COLORS[i % COLORS.length]} rx={2} />
+            <NodeRail
+              x={n.x < W / 2 ? n.x + 10 : n.x}
+              y={n.y}
+              h={Math.max(n.h, 4)}
+              color={COLORS[i % COLORS.length]}
+              side={n.x < W / 2 ? 'src' : 'dst'}
+            />
             <text
-              x={n.x < W/2 ? n.x + 18 : n.x - 4}
+              x={n.x < W/2 ? n.x + 20 : n.x - 6}
               y={n.y + n.h / 2}
               textAnchor={n.x < W/2 ? 'start' : 'end'}
               dominantBaseline="middle"
-              fontSize={10}
-              fill="#9ca3af"
+              fontSize={9.5}
+              fontFamily="ui-monospace, SF Mono, Menlo, monospace"
+              fill={INSTRUMENT.ink}
+              opacity={0.82}
             >{n.name}</text>
           </g>
         ))}
       </svg>
+
+      {/* width = volume, dash speed = throughput */}
+      <div className="absolute bottom-0 left-0 flex items-center gap-3 pointer-events-none flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="f-lbl">source</span>
+          <span className="h-px w-8" style={{ background: 'linear-gradient(90deg, rgba(216,180,110,.5), rgba(138,216,234,.5))' }} />
+          <span className="f-lbl">destination</span>
+        </div>
+        <span className="f-lbl" style={{ opacity: 0.75 }}>· width = volume · dash speed = rate</span>
+      </div>
     </div>
   )
 }
@@ -193,7 +261,7 @@ function NetworkMap({ topology }: { topology: TopologyResponse }) {
     defs.append('marker').attr('id','arrow').attr('viewBox','0 -4 8 8')
       .attr('refX',16).attr('refY',0).attr('markerWidth',6).attr('markerHeight',6)
       .attr('orient','auto')
-      .append('path').attr('d','M0,-4L8,0L0,4').attr('fill','#4b5563')
+      .append('path').attr('d','M0,-4L8,0L0,4').attr('fill','#5c6470')
 
     const g = svg.append('g')
 
@@ -222,7 +290,7 @@ function NetworkMap({ topology }: { topology: TopologyResponse }) {
       .force('collision', d3.forceCollide().radius((d: any) => rScale(d.bytes) + 4))
 
     const link = g.append('g').selectAll('line').data(edges).join('line')
-      .attr('stroke','#374151').attr('stroke-opacity',0.6)
+      .attr('stroke','#2a2418').attr('stroke-opacity',0.6)
       .attr('stroke-width', (d: any) => edgeScale(d.bytes))
       .attr('marker-end','url(#arrow)')
 
@@ -235,14 +303,14 @@ function NetworkMap({ topology }: { topology: TopologyResponse }) {
 
     node.append('circle')
       .attr('r', (d: any) => rScale(d.bytes))
-      .attr('fill', (d: any) => d.is_sampler ? '#3b82f6' : '#1e40af')
-      .attr('stroke', (d: any) => d.is_sampler ? '#93c5fd' : '#3b82f6')
+      .attr('fill', (d: any) => d.is_sampler ? '#8ad8ea' : '#466cc8')
+      .attr('stroke', (d: any) => d.is_sampler ? '#63c3d8' : '#8ad8ea')
       .attr('stroke-width', (d: any) => d.is_sampler ? 2 : 1)
 
     node.append('text')
       .text((d: any) => d.sampler_name || d.id)
       .attr('dy', (d: any) => rScale(d.bytes) + 10)
-      .attr('text-anchor','middle').attr('font-size',9).attr('fill','#9ca3af')
+      .attr('text-anchor','middle').attr('font-size',9).attr('fill','#a9a294')
 
     node.append('title').text((d: any) => `${d.id}\n${fmt(d.bytes)} · ${d.flows} flows`)
 
@@ -260,9 +328,9 @@ function NetworkMap({ topology }: { topology: TopologyResponse }) {
     btnData.forEach(({ label, dy, fn }) => {
       const btn = controls.append('g').attr('transform', `translate(0,${dy})`).style('cursor','pointer').on('click', fn)
       btn.append('rect').attr('width', 22).attr('height', 22).attr('rx', 4)
-        .attr('fill','#1f2937').attr('stroke','#374151').attr('stroke-width', 0.5)
+        .attr('fill','#211c14').attr('stroke','#2a2418').attr('stroke-width', 0.5)
       btn.append('text').text(label).attr('x', 11).attr('y', 15)
-        .attr('text-anchor','middle').attr('font-size', 13).attr('fill','#9ca3af')
+        .attr('text-anchor','middle').attr('font-size', 13).attr('fill','#a9a294')
     })
 
     return () => { sim.stop() }
@@ -384,26 +452,31 @@ export default function Analytics() {
               </button>
             ))}
           </div>
-          <ResponsiveContainer width="100%" height={180}>
+          <InstrumentFrame height={180} live>
+          <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={tsData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
               <defs>
-                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                <LinePulseGradient id="f-pulse-traffic" color="#8ad8ea" />
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor="#8ad8ea" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#8ad8ea" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-              <XAxis dataKey="t" tick={{ fill:'#6b7280', fontSize:10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-              <YAxis tick={{ fill:'#6b7280', fontSize:10 }} tickLine={false} axisLine={false}
+              <CartesianGrid {...gridProps} />
+              <XAxis dataKey="t" tick={axisProps.tick} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+              <YAxis tick={axisProps.tick} tickLine={false} axisLine={false}
                 tickFormatter={v => metric === 'bytes' ? fmt(v) : fmt(v, 'flows')} />
               <Tooltip
-                contentStyle={{ background:'#111827', border:'1px solid #374151', borderRadius:8, fontSize:12 }}
-                labelStyle={{ color:'#9ca3af' }}
+                contentStyle={tooltipProps.contentStyle}
+                labelStyle={tooltipProps.labelStyle}
                 formatter={(v: number) => [metric === 'bytes' ? fmt(v) : fmt(v, 'flows'), metricLabel]}
               />
-              <Area type="monotone" dataKey={metric} stroke="#3b82f6" fill="url(#areaGrad)" strokeWidth={2} dot={false} />
+              <Area type="monotone" dataKey={metric} stroke="url(#f-pulse-traffic)" style={glow("#8ad8ea", 5)}
+                    fill="url(#areaGrad)" strokeWidth={2}
+                    dot={liveEdgeDot(tsData.length, '#8ad8ea')} activeDot={{ r: 3, strokeWidth: 0, fill: '#8ad8ea' }} />
             </AreaChart>
           </ResponsiveContainer>
+        </InstrumentFrame>
         </Card>
 
         <Card title="Historical Trend — Daily Traffic">
@@ -423,7 +496,8 @@ export default function Analytics() {
               Accumulating data…
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={180}>
+            <InstrumentFrame height={180} live>
+            <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={(() => {
                 // Zero-fill: build one entry per day in the selected range so the
                 // X-axis spans the full window even when early days have no data.
@@ -447,22 +521,26 @@ export default function Analytics() {
                 return filled
               })()} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
                 <defs>
-                  <linearGradient id="histGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#10b981" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                  <LinePulseGradient id="f-pulse-hist" color="#7ee0a8" />
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 <linearGradient id="histGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#7ee0a8" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#7ee0a8" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                <XAxis dataKey="t" tick={{ fill: '#6b7280', fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => fmt(v)} />
+                <CartesianGrid {...gridProps} />
+                <XAxis dataKey="t" tick={axisProps.tick} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis tick={axisProps.tick} tickLine={false} axisLine={false} tickFormatter={v => fmt(v)} />
                 <Tooltip
-                  contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8, fontSize: 12 }}
-                  labelStyle={{ color: '#9ca3af' }}
+                  contentStyle={tooltipProps.contentStyle}
+                  labelStyle={tooltipProps.labelStyle}
                   formatter={(v: number) => [fmt(v), 'Bytes']}
                 />
-                <Area type="monotone" dataKey="bytes" stroke="#10b981" fill="url(#histGrad)" strokeWidth={2} dot={false} />
+                <Area type="monotone" dataKey="bytes" stroke="url(#f-pulse-hist)" style={glow("#7ee0a8", 5)}
+                      fill="url(#histGrad)" strokeWidth={2}
+                      dot={liveEdgeDot(histDays, '#7ee0a8')} activeDot={{ r: 3, strokeWidth: 0, fill: '#7ee0a8' }} />
               </AreaChart>
             </ResponsiveContainer>
+        </InstrumentFrame>
           )}
         </Card>
       </div>
