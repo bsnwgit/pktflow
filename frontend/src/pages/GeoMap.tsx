@@ -40,16 +40,16 @@ interface GeoConfig {
 
 const FALLBACK_CONFIG: GeoConfig = {
   siteColors:  { group_a: '#b0a0dd', group_b: '#9aeabd' },
-  siteStrokes: { group_a: '#c4b7e9', group_b: '#6ee7b7' },
+  siteStrokes: { group_a: '#c4b7e9', group_b: '#9aeabd' },
   defaultFill:  '#ff6b5e',
-  defaultStroke: '#fca5a5',
+  defaultStroke: '#ff9086',
   sites:        [],
   natMappings:  [],
 }
 
 function buildConfig(sites: Site[], natMappings: NatMapping[]): GeoConfig {
   let defaultFill   = '#8ad8ea'
-  let defaultStroke = '#93c5fd'
+  let defaultStroke = '#63c3d8'
 
   const siteColors:  Record<string, string> = {}
   const siteStrokes: Record<string, string> = {}
@@ -163,7 +163,7 @@ function buildLegendHTML(geoData: GeoDataResponse, cfg: GeoConfig, selection: Le
   }).join('')
 
   const resetRow = hasSelection(selection)
-    ? `<button data-action="reset" style="margin-top:6px;width:100%;text-align:center;font-size:10px;padding:3px 0;border-radius:4px;border:1px solid #4b5563;color:#a9a294;cursor:pointer;background:transparent">Reset</button>`
+    ? `<button data-action="reset" style="margin-top:6px;width:100%;text-align:center;font-size:10px;padding:3px 0;border-radius:4px;border:1px solid #5c6470;color:#a9a294;cursor:pointer;background:transparent">Reset</button>`
     : ''
 
   return (arcEntries ? heading('Line Styles') + `<div style="margin-bottom:6px">${arcEntries}</div>` : '') +
@@ -356,7 +356,7 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
 
       const displayLabel = loc.site_name
         ? `${loc.site_name} <span style="color:#a9a294;font-size:10px">(${loc.site_key})</span>`
-        : `<span style="font-family:monospace;color:#93c5fd">${loc.ip}</span>`
+        : `<span style="font-family:monospace;color:#63c3d8">${loc.ip}</span>`
 
       const locationLine = loc.site_name
         ? `via ${loc.ip}`
@@ -370,7 +370,7 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
         weight: 1.5,
       })
         .bindTooltip(
-          `<div style="background:#0d1219;border:1px solid #2a2418;border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.6;color:#f9fafb">
+          `<div style="background:#0d1219;border:1px solid #2a2418;border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.6;color:#f5f1e8">
             <div style="font-weight:600">${displayLabel}</div>
             <div style="color:#a9a294">${locationLine}</div>
             <div>${fmt(loc.bytes)} · ${fmtNum(loc.flows)} flows</div>
@@ -678,13 +678,13 @@ export default function GeoMapPage() {
   const hasData = geoData && geoData.locations.length > 0
 
   return (
-    <div style={{ width: '100vw', height: '100vh', background: '#030712', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ width: '100vw', height: '100vh', background: '#04060a', display: 'flex', flexDirection: 'column' }}>
       {/* Minimal top bar */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '10px 16px', borderBottom: '1px solid #211c14', flexShrink: 0,
       }}>
-        <span style={{ color: '#f9fafb', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ color: '#f5f1e8', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ color: '#8ad8ea' }}>◉</span>
           pktFlow — Traffic Geo Map ({timeWindow})
         </span>
@@ -693,7 +693,7 @@ export default function GeoMapPage() {
           <button
             onClick={load} title="Refresh"
             style={{ color: '#a9a294', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
-            onMouseEnter={e => (e.currentTarget.style.color = '#f9fafb')}
+            onMouseEnter={e => (e.currentTarget.style.color = '#f5f1e8')}
             onMouseLeave={e => (e.currentTarget.style.color = '#a9a294')}
           >
             <RefreshCw size={14} /> Refresh
@@ -701,7 +701,7 @@ export default function GeoMapPage() {
           <button
             onClick={() => window.close()}
             style={{ color: '#a9a294', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
-            onMouseEnter={e => (e.currentTarget.style.color = '#f9fafb')}
+            onMouseEnter={e => (e.currentTarget.style.color = '#f5f1e8')}
             onMouseLeave={e => (e.currentTarget.style.color = '#a9a294')}
           >
             <X size={14} /> Close
