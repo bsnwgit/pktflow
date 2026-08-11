@@ -49,7 +49,7 @@ function fmtDuration(ms: number): string {
   return ms + 'ms'
 }
 
-const PIE_COLORS = ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4','#ec4899','#84cc16']
+const PIE_COLORS = ['#ab9017','#007dab','#d86353','#00a49e','#8561bd','#007b43','#466cc8','#be7125']
 
 function buildProtoDist(talkers: TopTalker[]) {
   const map: Record<string, number> = {}
@@ -386,16 +386,16 @@ function TopTalkersTable({ talkers, totalBytes, window, externalExpanded, onExte
 // ── Sankey Flow Diagram ───────────────────────────────────────────────────────
 
 const SANKEY_PORT_GROUPS: Array<{ label: string; ports: Set<number>; color: string }> = [
-  { label: 'HTTPS',    ports: new Set([443, 8443]),                                 color: '#8b5cf6' },
+  { label: 'HTTPS',    ports: new Set([443, 8443]),                                 color: '#9784cb' },
   { label: 'HTTP',     ports: new Set([80, 8080, 8000]),                            color: '#14b8a6' },
-  { label: 'DNS',      ports: new Set([53]),                                         color: '#10b981' },
-  { label: 'SSH',      ports: new Set([22]),                                         color: '#f59e0b' },
-  { label: 'Database', ports: new Set([3306, 5432, 1433, 5433, 27017, 6379, 5984]), color: '#ec4899' },
-  { label: 'RDP',      ports: new Set([3389]),                                       color: '#ef4444' },
-  { label: 'Email',    ports: new Set([25, 587, 465, 143, 993, 110, 995]),           color: '#f97316' },
+  { label: 'DNS',      ports: new Set([53]),                                         color: '#7ee0a8' },
+  { label: 'SSH',      ports: new Set([22]),                                         color: '#f3c265' },
+  { label: 'Database', ports: new Set([3306, 5432, 1433, 5433, 27017, 6379, 5984]), color: '#b58ab0' },
+  { label: 'RDP',      ports: new Set([3389]),                                       color: '#ff6b5e' },
+  { label: 'Email',    ports: new Set([25, 587, 465, 143, 993, 110, 995]),           color: '#e88450' },
 ]
-const SANKEY_UDP_COLOR   = '#06b6d4' // cyan — all UDP except DNS
-const SANKEY_OTHER_COLOR = '#6b7280' // gray — unmatched TCP
+const SANKEY_UDP_COLOR   = '#63c3d8' // cyan — all UDP except DNS
+const SANKEY_OTHER_COLOR = '#a9a294' // gray — unmatched TCP
 
 interface SankeyNode { key: string; bytes: number; x: number; y: number; h: number }
 interface SankeyLink { color: string; x0: number; y0: number; w0: number; x1: number; y1: number; w1: number; bytes: number; flow?: TopTalker }
@@ -566,7 +566,7 @@ function SankeyTab({ talkers, onDrillDown }: { talkers: TopTalker[]; onDrillDown
       {nodes.map(n => (
         <g key={n.key}>
           <rect x={n.x} y={n.y} width={COL_W} height={n.h}
-            rx={3} fill="#3b82f6" fillOpacity={0.8} />
+            rx={3} fill="#8ad8ea" fillOpacity={0.8} />
           <text
             x={n.x + COL_W / 2} y={n.y + n.h / 2}
             textAnchor="middle" dominantBaseline="middle"
@@ -631,9 +631,9 @@ function SankeyTab({ talkers, onDrillDown }: { talkers: TopTalker[]; onDrillDown
 
       <div className="overflow-x-auto">
         <svg width="100%" viewBox={`0 0 ${W} ${H + 24}`} xmlns="http://www.w3.org/2000/svg">
-          <text x={COL_W / 2} y={12} textAnchor="middle" fontSize={10} fill="#9ca3af">Source IP</text>
-          <text x={W / 2} y={12} textAnchor="middle" fontSize={10} fill="#9ca3af">Dst Port</text>
-          <text x={W - COL_W / 2} y={12} textAnchor="middle" fontSize={10} fill="#9ca3af">Dest IP</text>
+          <text x={COL_W / 2} y={12} textAnchor="middle" fontSize={10} fill="#a9a294">Source IP</text>
+          <text x={W / 2} y={12} textAnchor="middle" fontSize={10} fill="#a9a294">Dst Port</text>
+          <text x={W - COL_W / 2} y={12} textAnchor="middle" fontSize={10} fill="#a9a294">Dest IP</text>
 
           <g transform="translate(0,20)">
             {links1.map((l, i) => (
@@ -813,15 +813,15 @@ export default function DeviceView() {
                   <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
                     <defs>
                       <linearGradient id="gB" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                        <stop offset="5%"  stopColor="#8ad8ea" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#8ad8ea" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
-                    <XAxis dataKey="ts" tick={{ fill: '#6b7280', fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <YAxis tickFormatter={v => fmtBytes(v)} tick={{ fill: '#6b7280', fontSize: 11 }} tickLine={false} axisLine={false} width={72} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#211c14" vertical={false} />
+                    <XAxis dataKey="ts" tick={{ fill: '#a9a294', fontSize: 11 }} tickLine={false} axisLine={false} />
+                    <YAxis tickFormatter={v => fmtBytes(v)} tick={{ fill: '#a9a294', fontSize: 11 }} tickLine={false} axisLine={false} width={72} />
                     <Tooltip content={<TimeTooltip />} />
-                    <Area type="monotone" dataKey="bytes" name="Bytes" stroke="#3b82f6" strokeWidth={2} fill="url(#gB)" dot={false} />
+                    <Area type="monotone" dataKey="bytes" name="Bytes" stroke="#8ad8ea" strokeWidth={2} fill="url(#gB)" dot={false} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -831,15 +831,15 @@ export default function DeviceView() {
                   <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
                     <defs>
                       <linearGradient id="gP" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%"  stopColor="#8b5cf6" stopOpacity={0.25} />
-                        <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                        <stop offset="5%"  stopColor="#9784cb" stopOpacity={0.25} />
+                        <stop offset="95%" stopColor="#9784cb" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
-                    <XAxis dataKey="ts" tick={{ fill: '#6b7280', fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fill: '#6b7280', fontSize: 11 }} tickLine={false} axisLine={false} width={72} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#211c14" vertical={false} />
+                    <XAxis dataKey="ts" tick={{ fill: '#a9a294', fontSize: 11 }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fill: '#a9a294', fontSize: 11 }} tickLine={false} axisLine={false} width={72} />
                     <Tooltip content={<TimeTooltip />} />
-                    <Area type="monotone" dataKey="packets" name="Packets" stroke="#8b5cf6" strokeWidth={2} fill="url(#gP)" dot={false} />
+                    <Area type="monotone" dataKey="packets" name="Packets" stroke="#9784cb" strokeWidth={2} fill="url(#gP)" dot={false} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>

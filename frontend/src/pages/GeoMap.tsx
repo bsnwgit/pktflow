@@ -11,9 +11,9 @@
  * back on each arc already resolved — no client-side type lookup needed.
  *
  * Circle marker colours by site (configured in Settings → Geo Map → Sites):
- *   group_a → purple  (#a78bfa)
- *   group_b → green   (#34d399)
- *   default → blue    (#60a5fa)
+ *   group_a → purple  (#b0a0dd)
+ *   group_b → green   (#9aeabd)
+ *   default → blue    (#8ad8ea)
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
 import L from 'leaflet'
@@ -39,16 +39,16 @@ interface GeoConfig {
 }
 
 const FALLBACK_CONFIG: GeoConfig = {
-  siteColors:  { group_a: '#a78bfa', group_b: '#34d399' },
-  siteStrokes: { group_a: '#c4b5fd', group_b: '#6ee7b7' },
-  defaultFill:  '#ef4444',
+  siteColors:  { group_a: '#b0a0dd', group_b: '#9aeabd' },
+  siteStrokes: { group_a: '#c4b7e9', group_b: '#6ee7b7' },
+  defaultFill:  '#ff6b5e',
   defaultStroke: '#fca5a5',
   sites:        [],
   natMappings:  [],
 }
 
 function buildConfig(sites: Site[], natMappings: NatMapping[]): GeoConfig {
-  let defaultFill   = '#60a5fa'
+  let defaultFill   = '#8ad8ea'
   let defaultStroke = '#93c5fd'
 
   const siteColors:  Record<string, string> = {}
@@ -115,7 +115,7 @@ function escapeHtml(s: string): string {
 // on screen is pointless to offer as a filter.
 function buildLegendHTML(geoData: GeoDataResponse, cfg: GeoConfig, selection: LegendSelection): string {
   const heading = (t: string) =>
-    `<div style="color:#9ca3af;font-weight:600;margin-bottom:3px;font-size:10px;text-transform:uppercase;letter-spacing:.05em">${t}</div>`
+    `<div style="color:#a9a294;font-weight:600;margin-bottom:3px;font-size:10px;text-transform:uppercase;letter-spacing:.05em">${t}</div>`
 
   const row = (kind: string, key: string, selected: boolean, marginBottom: boolean, inner: string) =>
     `<div class="pf-legend-row${selected ? ' pf-legend-selected' : ''}" data-kind="${kind}" data-key="${escapeHtml(key)}"
@@ -163,7 +163,7 @@ function buildLegendHTML(geoData: GeoDataResponse, cfg: GeoConfig, selection: Le
   }).join('')
 
   const resetRow = hasSelection(selection)
-    ? `<button data-action="reset" style="margin-top:6px;width:100%;text-align:center;font-size:10px;padding:3px 0;border-radius:4px;border:1px solid #4b5563;color:#9ca3af;cursor:pointer;background:transparent">Reset</button>`
+    ? `<button data-action="reset" style="margin-top:6px;width:100%;text-align:center;font-size:10px;padding:3px 0;border-radius:4px;border:1px solid #4b5563;color:#a9a294;cursor:pointer;background:transparent">Reset</button>`
     : ''
 
   return (arcEntries ? heading('Line Styles') + `<div style="margin-bottom:6px">${arcEntries}</div>` : '') +
@@ -277,8 +277,8 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
     legend.onAdd = () => {
       const div = L.DomUtil.create('div')
       div.style.cssText = `
-        background:rgba(17,24,39,0.88);border:1px solid #374151;border-radius:8px;
-        padding:8px 11px;font-size:11px;line-height:1.7;color:#d1d5db;
+        background:rgba(17,24,39,0.88);border:1px solid #2a2418;border-radius:8px;
+        padding:8px 11px;font-size:11px;line-height:1.7;color:#dcd6c9;
         user-select:none;
       `
       div.innerHTML = buildLegendHTML(geoData, configRef.current, EMPTY_SELECTION)
@@ -355,7 +355,7 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
       const stroke = cfg.siteStrokes[loc.site_key ?? ''] ?? cfg.defaultStroke
 
       const displayLabel = loc.site_name
-        ? `${loc.site_name} <span style="color:#9ca3af;font-size:10px">(${loc.site_key})</span>`
+        ? `${loc.site_name} <span style="color:#a9a294;font-size:10px">(${loc.site_key})</span>`
         : `<span style="font-family:monospace;color:#93c5fd">${loc.ip}</span>`
 
       const locationLine = loc.site_name
@@ -370,11 +370,11 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
         weight: 1.5,
       })
         .bindTooltip(
-          `<div style="background:#111827;border:1px solid #374151;border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.6;color:#f9fafb">
+          `<div style="background:#0d1219;border:1px solid #2a2418;border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.6;color:#f9fafb">
             <div style="font-weight:600">${displayLabel}</div>
-            <div style="color:#9ca3af">${locationLine}</div>
+            <div style="color:#a9a294">${locationLine}</div>
             <div>${fmt(loc.bytes)} · ${fmtNum(loc.flows)} flows</div>
-            <div style="color:#6b7280;font-size:11px;margin-top:4px">Click to explore flows</div>
+            <div style="color:#a9a294;font-size:11px;margin-top:4px">Click to explore flows</div>
           </div>`,
           { direction: 'top', offset: L.point(0, -r - 4), className: 'pf-geo-tooltip', opacity: 1 }
         )
@@ -470,7 +470,7 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
         .pf-geo-tooltip { background: transparent !important; border: none !important;
           box-shadow: none !important; padding: 0 !important; }
         .pf-geo-tooltip::before { display: none !important; }
-        .leaflet-container { background: #0f172a; }
+        .leaflet-container { background: #04060a; }
         .pf-legend-row:hover { background: rgba(255,255,255,0.08); }
         .pf-legend-selected { background: rgba(59,130,246,0.28) !important; }
       `}</style>
@@ -682,27 +682,27 @@ export default function GeoMapPage() {
       {/* Minimal top bar */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '10px 16px', borderBottom: '1px solid #1f2937', flexShrink: 0,
+        padding: '10px 16px', borderBottom: '1px solid #211c14', flexShrink: 0,
       }}>
         <span style={{ color: '#f9fafb', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ color: '#3b82f6' }}>◉</span>
+          <span style={{ color: '#8ad8ea' }}>◉</span>
           pktFlow — Traffic Geo Map ({timeWindow})
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          {loading && <span style={{ color: '#9ca3af', fontSize: 11 }}>Refreshing…</span>}
+          {loading && <span style={{ color: '#a9a294', fontSize: 11 }}>Refreshing…</span>}
           <button
             onClick={load} title="Refresh"
-            style={{ color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
+            style={{ color: '#a9a294', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
             onMouseEnter={e => (e.currentTarget.style.color = '#f9fafb')}
-            onMouseLeave={e => (e.currentTarget.style.color = '#6b7280')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#a9a294')}
           >
             <RefreshCw size={14} /> Refresh
           </button>
           <button
             onClick={() => window.close()}
-            style={{ color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
+            style={{ color: '#a9a294', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
             onMouseEnter={e => (e.currentTarget.style.color = '#f9fafb')}
-            onMouseLeave={e => (e.currentTarget.style.color = '#6b7280')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#a9a294')}
           >
             <X size={14} /> Close
           </button>
@@ -712,17 +712,17 @@ export default function GeoMapPage() {
       {/* Map fills remainder */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {loading && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontSize: 14 }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a9a294', fontSize: 14 }}>
             Fetching geo data…
           </div>
         )}
         {error && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 14 }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a9a294', fontSize: 14 }}>
             Geo lookup unavailable
           </div>
         )}
         {!loading && geoData && !hasData && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 14 }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a9a294', fontSize: 14 }}>
             No external IP traffic in the {timeWindow} window
           </div>
         )}
