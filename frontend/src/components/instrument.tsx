@@ -228,3 +228,138 @@ export function InstrumentHead({ children, right }: { children: ReactNode; right
     </div>
   )
 }
+
+// ── Flow ribbons (Sankey) ────────────────────────────────────────────────────
+
+/**
+ * Animation + gradient defs for instrument-style Sankey ribbons.
+ *
+ * A Sankey already encodes volume in ribbon width; what it does not show is
+ * that the thing being drawn is *moving*. A slow dash travelling along each
+ * ribbon's centreline restores direction and liveness without adding a second
+ * visual variable — the dash carries no magnitude, it only says "this way".
+ *
+ * Rendered as a <style> inside the chart rather than in the shared stylesheet
+ * so the effect travels with the component.
+ */
+export function FlowDefs({ ribbons }: { ribbons: Array<{ from: string; to: string }> }) {
+  return (
+    <defs>
+      <style>{`
+        @keyframes f-flow { to { stroke-dashoffset: -220; } }
+        .f-ribbon-pulse {
+          animation: f-flow 5.5s linear infinite;
+          stroke-dasharray: 3 26;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .f-ribbon-pulse { animation: none; }
+        }
+      `}</style>
+      {ribbons.map((r, i) => (
+        <linearGradient key={i} id={`f-ribbon-${i}`} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor={r.from} stopOpacity={0.5} />
+          <stop offset="100%" stopColor={r.to} stopOpacity={0.16} />
+        </linearGradient>
+      ))}
+      <filter id="f-ribbon-glow" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur stdDeviation="2.2" result="b" />
+        <feMerge>
+          <feMergeNode in="b" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+    </defs>
+  )
+}
+
+/**
+ * A node rail: the hairline equivalent of a Sankey's filled node block, with a
+ * lit cap so the endpoint reads as an instrument terminal rather than a bar.
+ */
+export function NodeRail({
+  x, y, h, w = 3, color, side,
+}: {
+  x: number; y: number; h: number; w?: number; color: string; side: 'src' | 'dst'
+}) {
+  return (
+    <g>
+      <rect x={x} y={y} width={w} height={h} fill={color} opacity={0.85}
+            style={{ filter: `drop-shadow(0 0 4px ${color}66)` }} />
+      {/* terminal caps */}
+      <rect x={side === 'src' ? x - 1.5 : x + w - 1.5} y={y - 1} width={4.5} height={2} fill={INSTRUMENT.goldHi} opacity={0.9} />
+      <rect x={side === 'src' ? x - 1.5 : x + w - 1.5} y={y + h - 1} width={4.5} height={2} fill={INSTRUMENT.goldHi} opacity={0.9} />
+    </g>
+  )
+}
+
+// ── Radial ring (part-to-whole in the radiant idiom) ─────────────────────────
+
+/**
+ * Concentric arc segments instead of a pie. Same data, same part-to-whole
+ * reading, but it wears the console's geometry — and unlike a pie, comparing
+ * arc lengths on a shared radius is an easier judgement than comparing angles.
+ */
+export function RadialRing({
+  segments,
+  size = 190,
+  label,
+  total,
+}: {
+  segments: Array<{ name: string; value: number; color: string }>
+  size?: number
+  label?: string
+  total?: string
+}) {
+  const sum = segments.reduce((s, x) => s + x.value, 0) || 1
+  const R0 = 78          // outermost ring radius
+  const STEP = 13        // spacing between rings
+  const C = (r: number) => 2 * Math.PI * r
+
+  const ticks = Array.from({ length: 60 }, (_, i) => {
+    const a = (i / 60) * Math.PI * 2 - Math.PI / 2
+    const long = i % 5 === 0
+    const r1 = long ? 88 : 91
+    return {
+      x1: 96 + Math.cos(a) * r1, y1: 96 + Math.sin(a) * r1,
+      x2: 96 + Math.cos(a) * 94, y2: 96 + Math.sin(a) * 94,
+      o: long ? 0.6 : 0.24,
+    }
+  })
+
+  return (
+    <div className="grid place-items-center">
+      <div className="relative" style={{ width: size, height: size }}>
+        <svg width={size} height={size} viewBox="0 0 192 192" fill="none">
+          <g stroke="rgba(216,180,110,.3)">
+            {ticks.map((t, i) => (
+              <line key={i} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} opacity={t.o} />
+            ))}
+          </g>
+          {segments.slice(0, 5).map((seg, i) => {
+            const r = R0 - i * STEP
+            const frac = seg.value / sum
+            return (
+              <g key={seg.name}>
+                <circle cx="96" cy="96" r={r} stroke="rgba(216,180,110,.14)" strokeWidth="6" />
+                <circle
+                  cx="96" cy="96" r={r}
+                  stroke={seg.color} strokeWidth="6" strokeLinecap="round"
+                  strokeDasharray={C(r)}
+                  strokeDashoffset={C(r) * (1 - frac)}
+                  transform="rotate(-90 96 96)"
+                  style={{ transition: 'stroke-dashoffset .8s ease', ...glow(seg.color, 4) }}
+                />
+              </g>
+            )
+          })}
+        </svg>
+        {(label || total) && (
+          <div className="absolute inset-0 grid place-content-center text-center pointer-events-none">
+            {total && <div className="f-num f-num-gold text-[19px]">{total}</div>}
+            {label && <div className="f-lbl mt-1.5">{label}</div>}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

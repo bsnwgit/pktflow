@@ -10,7 +10,7 @@ import { PortsTabContent } from './Ports'
 import { protoLabel } from '../utils/protocols'
 import IpLink from '../components/IpLink'
 import HelpButton from '../components/HelpButton'
-import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT } from '../components/instrument'
+import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT , InstrumentFrame } from '../components/instrument'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -810,7 +810,8 @@ export default function DeviceView() {
             <div className="space-y-6">
               <div>
                 <p className="text-xs text-white mb-3">Bytes per bucket</p>
-                <ResponsiveContainer width="100%" height={260}>
+                <InstrumentFrame height={260} live>
+                <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
                     <defs>
                       <linearGradient id="gB" x1="0" y1="0" x2="0" y2="1">
@@ -825,10 +826,12 @@ export default function DeviceView() {
                     <Area type="monotone" dataKey="bytes" name="Bytes" stroke="#8ad8ea" style={glow("#8ad8ea", 5)} strokeWidth={2} fill="url(#gB)" dot={false} />
                   </AreaChart>
                 </ResponsiveContainer>
+                </InstrumentFrame>
               </div>
               <div>
                 <p className="text-xs text-white mb-3">Packets per bucket</p>
-                <ResponsiveContainer width="100%" height={160}>
+                <InstrumentFrame height={160} live>
+                <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
                     <defs>
                       <linearGradient id="gP" x1="0" y1="0" x2="0" y2="1">
@@ -843,6 +846,7 @@ export default function DeviceView() {
                     <Area type="monotone" dataKey="packets" name="Packets" stroke="#9784cb" style={glow("#9784cb", 5)} strokeWidth={2} fill="url(#gP)" dot={false} />
                   </AreaChart>
                 </ResponsiveContainer>
+                </InstrumentFrame>
               </div>
             </div>
           )}

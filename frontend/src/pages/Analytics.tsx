@@ -11,7 +11,7 @@ import { api, TimeSeriesPoint, TopologyResponse } from '../api/client'
 import { GeoMapCard } from './GeoMap'
 import { useWebSocket, type WsMessage, type IngestStats } from '../hooks/useWebSocket'
 import HelpButton from '../components/HelpButton'
-import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT } from '../components/instrument'
+import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT, FlowDefs, NodeRail, InstrumentFrame, RadialRing } from '../components/instrument'
 
 // ── Colour palette ─────────────────────────────────────────────────────────────
 const COLORS = ['#ab9017','#007dab','#d86353','#00a49e','#8561bd','#007b43','#466cc8','#be7125']
@@ -94,7 +94,18 @@ function buildSankeyLayout(
     const x0 = sn.x + nodeW, y0 = sn.y + sOff
     const x1 = dn.x, y1 = dn.y + dOff
     const mx = (x0 + x1) / 2
-    return { d: `M${x0},${y0} C${mx},${y0} ${mx},${y1} ${x1},${y1} L${x1},${y1+linkH} C${mx},${y1+linkH} ${mx},${y0+linkH} ${x0},${y0+linkH} Z`, value: l.value }
+    // The ribbon body, plus its centreline — the centreline carries the
+    // travelling dash that shows direction, so it must follow the same curve.
+    const cy0 = y0 + linkH / 2
+    const cy1 = y1 + linkH / 2
+    return {
+      d: `M${x0},${y0} C${mx},${y0} ${mx},${y1} ${x1},${y1} L${x1},${y1+linkH} C${mx},${y1+linkH} ${mx},${y0+linkH} ${x0},${y0+linkH} Z`,
+      mid: `M${x0},${cy0} C${mx},${cy0} ${mx},${cy1} ${x1},${cy1}`,
+      value: l.value,
+      source: l.source,
+      target: l.target,
+      h: linkH,
+    }
   })
 
   return { positioned, paths }
@@ -141,28 +152,66 @@ function SankeyChart({ topology }: { topology: TopologyResponse }) {
   const { W, H } = { W: dims.w, H: dims.h }
   const { positioned, paths } = buildSankeyLayout(nodes, links, W, H)
 
+  const ribbons = paths.map((p, i) => ({
+    from: COLORS[(p ? p.source : i) % COLORS.length],
+    to:   COLORS[(p ? p.target : i) % COLORS.length],
+  }))
+
   return (
-    <div ref={containerRef} className="w-full h-full">
+    <div ref={containerRef} className="w-full h-full relative">
       <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} className="overflow-visible">
+        <FlowDefs ribbons={ribbons} />
+
+        {/* ribbons: volume in the width, direction in the travelling dash */}
         {paths.map((p, i) => p && (
-          <path key={i} d={p.d} fill={COLORS[i % COLORS.length]} opacity={0.55}>
-            <title>{fmt(p.value)}</title>
-          </path>
+          <g key={i}>
+            <path d={p.d} fill={`url(#f-ribbon-${i})`}>
+              <title>{fmt(p.value)}</title>
+            </path>
+            <path
+              d={p.mid}
+              fill="none"
+              stroke={COLORS[p.source % COLORS.length]}
+              strokeWidth={Math.min(Math.max(p.h * 0.34, 0.8), 3)}
+              strokeLinecap="round"
+              opacity={0.9}
+              className="f-ribbon-pulse"
+              filter="url(#f-ribbon-glow)"
+              style={{ animationDelay: `${(i % 7) * 0.45}s` }}
+            />
+          </g>
         ))}
+
+        {/* endpoints as instrument rails rather than filled blocks */}
         {positioned.filter(Boolean).map((n, i) => (
           <g key={i}>
-            <rect x={n.x} y={n.y} width={14} height={Math.max(n.h, 4)} fill={COLORS[i % COLORS.length]} rx={2} />
+            <NodeRail
+              x={n.x < W / 2 ? n.x + 10 : n.x}
+              y={n.y}
+              h={Math.max(n.h, 4)}
+              color={COLORS[i % COLORS.length]}
+              side={n.x < W / 2 ? 'src' : 'dst'}
+            />
             <text
-              x={n.x < W/2 ? n.x + 18 : n.x - 4}
+              x={n.x < W/2 ? n.x + 20 : n.x - 6}
               y={n.y + n.h / 2}
               textAnchor={n.x < W/2 ? 'start' : 'end'}
               dominantBaseline="middle"
-              fontSize={10}
-              fill="#a9a294"
+              fontSize={9.5}
+              fontFamily="ui-monospace, SF Mono, Menlo, monospace"
+              fill={INSTRUMENT.ink}
+              opacity={0.82}
             >{n.name}</text>
           </g>
         ))}
       </svg>
+
+      {/* the dash means "this way", not "this much" */}
+      <div className="absolute bottom-0 left-0 flex items-center gap-2 pointer-events-none">
+        <span className="f-lbl">source</span>
+        <span className="h-px w-8" style={{ background: 'linear-gradient(90deg, rgba(216,180,110,.5), rgba(138,216,234,.5))' }} />
+        <span className="f-lbl">destination</span>
+      </div>
     </div>
   )
 }
@@ -385,7 +434,8 @@ export default function Analytics() {
               </button>
             ))}
           </div>
-          <ResponsiveContainer width="100%" height={180}>
+          <InstrumentFrame height={180} live>
+          <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={tsData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
               <defs>
                 <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
@@ -405,6 +455,7 @@ export default function Analytics() {
               <Area type="monotone" dataKey={metric} stroke="#8ad8ea" style={glow("#8ad8ea", 5)} fill="url(#areaGrad)" strokeWidth={2} dot={false} />
             </AreaChart>
           </ResponsiveContainer>
+        </InstrumentFrame>
         </Card>
 
         <Card title="Historical Trend — Daily Traffic">
@@ -424,7 +475,8 @@ export default function Analytics() {
               Accumulating data…
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={180}>
+            <InstrumentFrame height={180} live>
+            <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={(() => {
                 // Zero-fill: build one entry per day in the selected range so the
                 // X-axis spans the full window even when early days have no data.
@@ -464,6 +516,7 @@ export default function Analytics() {
                 <Area type="monotone" dataKey="bytes" stroke="#7ee0a8" style={glow("#7ee0a8", 5)} fill="url(#histGrad)" strokeWidth={2} dot={false} />
               </AreaChart>
             </ResponsiveContainer>
+        </InstrumentFrame>
           )}
         </Card>
       </div>

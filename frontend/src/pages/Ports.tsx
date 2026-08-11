@@ -16,7 +16,7 @@ import { api, ProtocolStat, PortStat, DeviceSummary, FlowRecord } from '../api/c
 import { useAutoRefresh } from '../store/autoRefresh'
 import { protoLabel } from '../utils/protocols'
 import HelpButton from '../components/HelpButton'
-import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT } from '../components/instrument'
+import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT, InstrumentFrame, RadialRing } from '../components/instrument'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -174,20 +174,31 @@ function ProtocolMixPanel({ window, sampler_ip }: { window: string; sampler_ip?:
 
   if (!data.length) return <div className="h-40 flex items-center justify-center text-white text-sm">No data</div>
 
-  const pieData = data.map(d => ({ name: d.name, value: d.bytes }))
+  // Concentric arcs rather than a pie: same part-to-whole reading, but arc
+  // lengths on a shared radius are an easier comparison than pie angles, and
+  // it wears the console's geometry.
+  const segments = data.slice(0, 5).map((d, i) => ({
+    name: d.name,
+    value: d.bytes,
+    color: PROTO_COLORS[d.name] || BAR_COLORS[i % BAR_COLORS.length],
+  }))
+  const totalBytes = data.reduce((s, d) => s + d.bytes, 0)
+
   return (
-    <div className="h-44">
-      <ResponsiveContainer width="100%" height="100%">
-        <PieChart>
-          <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70}>
-            {pieData.map((_, i) => (
-              <Cell key={i} fill={PROTO_COLORS[pieData[i].name] || BAR_COLORS[i % BAR_COLORS.length]} />
-            ))}
-          </Pie>
-          <Tooltip formatter={(v: any) => fmtBytes(Number(v))} contentStyle={tooltipProps.contentStyle} labelStyle={tooltipProps.labelStyle} itemStyle={{ color: '#fff' }} />
-          <Legend iconSize={8} wrapperStyle={{ fontSize: 11, color: '#fff' }} />
-        </PieChart>
-      </ResponsiveContainer>
+    <div className="h-44 flex items-center gap-4">
+      <RadialRing segments={segments} size={168} label="protocols" total={fmtBytes(totalBytes)} />
+      <div className="flex-1 min-w-0 space-y-1.5">
+        {segments.map(seg => (
+          <div key={seg.name} className="flex items-center gap-2">
+            <span className="w-2 h-2 flex-none" style={{ background: seg.color, boxShadow: `0 0 6px ${seg.color}88` }} />
+            <span className="font-mono text-[10.5px] text-gray-300 truncate">{seg.name}</span>
+            <span className="flex-1" />
+            <span className="font-mono text-[10px] text-gray-500">
+              {totalBytes > 0 ? `${((seg.value / totalBytes) * 100).toFixed(1)}%` : '—'}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
