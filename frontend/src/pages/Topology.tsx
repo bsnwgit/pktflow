@@ -10,6 +10,7 @@ import { api, TopologyNode, TopologyEdge, DeviceSummary } from '../api/client'
 import { protoShort } from '../utils/protocols'
 import IpLink from '../components/IpLink'
 import HelpButton from '../components/HelpButton'
+import { INSTRUMENT } from '../components/instrument'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -21,7 +22,7 @@ function fmtBytes(b: number): string {
 }
 
 const SITE_COLORS = [
-  '#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4',
+  '#8ad8ea', '#9784cb', '#7ee0a8', '#f3c265', '#ff6b5e', '#63c3d8',
 ]
 
 function siteColorFn(nodes: TopologyNode[]): (site: string) => string {
@@ -31,10 +32,10 @@ function siteColorFn(nodes: TopologyNode[]): (site: string) => string {
 
 function attachTooltip() {
   const tip = d3.select('body').append('div')
-    .style('position', 'fixed').style('background', '#111827')
-    .style('border', '1px solid #374151').style('border-radius', '8px')
+    .style('position', 'fixed').style('background', '#0d1219')
+    .style('border', '1px solid #2a2418').style('border-radius', '8px')
     .style('padding', '8px 12px').style('font-size', '12px')
-    .style('color', '#f3f4f6').style('pointer-events', 'none')
+    .style('color', '#e9e4d8').style('pointer-events', 'none')
     .style('opacity', '0').style('z-index', '9999')
     .style('max-width', '260px').style('line-height', '1.6')
   const show = (_ev: MouseEvent, html: string) => tip.style('opacity', '1').html(html)
@@ -53,7 +54,7 @@ function renderSiteLegend(
     const row = legend.append('g').attr('transform', `translate(0,${i * 18})`)
     row.append('circle').attr('r', 5).attr('cx', 5).attr('cy', 5).attr('fill', siteColor(site))
     row.append('text').text(site).attr('x', 14).attr('y', 9)
-      .attr('fill', '#9ca3af').attr('font-size', '10px')
+      .attr('fill', '#a9a294').attr('font-size', '10px')
   })
 }
 
@@ -123,11 +124,36 @@ function ForceGraph({
         .on('zoom', ev => g.attr('transform', ev.transform))
     )
 
+    // Live layer: a charge travels each edge, exactly as the Sankey ribbons do,
+    // so the same motion means the same thing in both views. Mounted once.
+    const liveDefs = svg.append('defs')
+    const gf = liveDefs.append('filter').attr('id', 'topo-glow')
+      .attr('x', '-40%').attr('y', '-40%').attr('width', '180%').attr('height', '180%')
+    gf.append('feGaussianBlur').attr('stdDeviation', 1.8).attr('result', 'b')
+    const gm = gf.append('feMerge')
+    gm.append('feMergeNode').attr('in', 'b')
+    gm.append('feMergeNode').attr('in', 'SourceGraphic')
+    svg.append('style').text(`
+      /* One distinct charge per edge, not a stream of dots. A short dash with
+         a long gap reads as a single packet running the link; the offset moves
+         exactly one dash+gap per cycle so the loop is seamless. */
+      @keyframes topo-flow { to { stroke-dashoffset: -120; } }
+      .topo-pulse {
+        stroke-dasharray: 12 108;
+        stroke-linecap: round;
+        animation: topo-flow 4s linear infinite;
+        pointer-events: none;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .topo-pulse { animation: none; opacity: 0 !important; }
+      }
+    `)
+
     svg.append('defs').append('marker')
       .attr('id', 'arr')
       .attr('viewBox', '0 -4 8 8').attr('refX', 22).attr('refY', 0)
       .attr('markerWidth', 5).attr('markerHeight', 5).attr('orient', 'auto')
-      .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', '#4b5563')
+      .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', '#5c6470')
 
     // ── Cluster hulls ─────────────────────────────────────────────────────────
     const HULL_PADDING = 32
@@ -191,7 +217,7 @@ function ForceGraph({
       )
       hullBgs.set(site,
         hullLabelGroup.append('rect')
-          .attr('fill', '#111827').attr('fill-opacity', 0.65)
+          .attr('fill', '#0d1219').attr('fill-opacity', 0.65)
           .attr('rx', 4).attr('ry', 4)
           .attr('pointer-events', 'none')
       )
@@ -231,10 +257,27 @@ function ForceGraph({
     // Asymmetric edges (one side sent >10× the other) render in amber as a visual flag
     const link = g.append('g').selectAll<SVGLineElement, D3Link>('line')
       .data(links).join('line')
-      .attr('stroke', d => (d as any).is_asymmetric ? '#f59e0b' : '#374151')
+      .attr('stroke', d => (d as any).is_asymmetric ? '#f3c265' : 'rgba(216,180,110,.42)')
       .attr('stroke-width', d => wScale(d.bytes))
-      .attr('stroke-opacity', d => (d as any).is_asymmetric ? 0.85 : 0.7)
+      .attr('stroke-opacity', d => (d as any).is_asymmetric ? 0.85 : 0.55)
       .attr('marker-end', 'url(#arr)')
+
+    // Charge travelling source -> target. Speed carries volume, busiest fastest,
+    // on the same scale as the Sankey ribbons. Drawn on the same geometry as
+    // the edge, so it cannot imply a path that is not there.
+    const maxLinkBytes = Math.max(1, ...links.map(l => l.bytes))
+    const pulse = g.append('g').selectAll<SVGLineElement, D3Link>('line')
+      .data(links).join('line')
+      .attr('class', 'topo-pulse')
+      .attr('stroke', d => (d as any).is_asymmetric ? INSTRUMENT.goldHi : INSTRUMENT.ice)
+      .attr('stroke-width', d => Math.min(Math.max(wScale(d.bytes) * 1.1, 1.6), 3.4))
+      .attr('stroke-linecap', 'round')
+      .attr('filter', 'url(#topo-glow)')
+      .style('animation-duration', d => {
+        const frac = Math.min(1, Math.max(0, d.bytes / maxLinkBytes))
+        return `${(7 - Math.sqrt(frac) * 4.6).toFixed(2)}s`
+      })
+      .style('animation-delay', (_, i) => `${(i % 6) * 0.4}s`)
 
     const node = g.append('g').selectAll<SVGGElement, D3Node>('g')
       .data(nodes).join('g')
@@ -247,15 +290,20 @@ function ForceGraph({
       )
       .on('click', (_, d) => onNodeClick(d))
 
+    // Nodes as instrument terminals: a dim body with a bright rim, so the edge
+    // charges arriving at them stay the brightest thing on screen. Radius still
+    // encodes bytes exactly as before.
     node.append('circle')
       .attr('r', d => rScale(d.bytes))
       .attr('fill', d => siteColor(d.site || 'unknown'))
-      .attr('fill-opacity', 0.85)
-      .attr('stroke', d => d.is_sampler ? '#fff' : 'rgba(255,255,255,0.15)')
-      .attr('stroke-width', d => d.is_sampler ? 2.5 : 0.5)
+      .attr('fill-opacity', 0.28)
+      .attr('stroke', d => d.is_sampler ? INSTRUMENT.goldHi : siteColor(d.site || 'unknown'))
+      .attr('stroke-width', d => d.is_sampler ? 2 : 1.2)
+      .attr('stroke-opacity', 0.9)
+      .style('filter', d => d.is_sampler ? 'url(#topo-glow)' : null)
 
     node.filter(d => d.is_sampler).append('circle')
-      .attr('r', 3).attr('fill', '#fff').attr('fill-opacity', 0.9)
+      .attr('r', 2.6).attr('fill', INSTRUMENT.goldHi).attr('fill-opacity', 0.95)
 
     const labelThreshold = d3.quantile(
       nodes.map(n => n.bytes).sort(d3.ascending), 0.75
@@ -265,40 +313,64 @@ function ForceGraph({
       .text(d => d.sampler_name || d.id)
       .attr('dy', d => -rScale(d.bytes) - 5)
       .attr('text-anchor', 'middle')
-      .attr('fill', '#d1d5db').attr('font-size', '10px')
+      .attr('fill', '#dcd6c9').attr('font-size', '10px')
       .attr('pointer-events', 'none')
 
     // Tooltip
     const { tip, show: showTip, move: moveTip, hide: hideTip } = attachTooltip()
 
+    // Hovering a node leaves only that node's own traffic running. The eye
+    // follows movement before anything else, so unrelated charges would pull
+    // attention away from the thing being inspected.
+    const touches = (l: D3Link, id: string) => {
+      const src = typeof l.source === 'string' ? l.source : (l.source as D3Node)._id
+      const dst = typeof l.target === 'string' ? l.target : (l.target as D3Node)._id
+      return src === id || dst === id
+    }
+
     node
-      .on('mouseenter', (ev, d) => showTip(ev, `
-        <b>${d.sampler_name || d.id}</b>
-        ${d.site ? `<br><span style="color:#9ca3af">Site: ${d.site}</span>` : ''}
-        <br>Bytes: ${fmtBytes(d.bytes)}
-        <br>Flows: ${d.flows.toLocaleString()}
-        ${d.is_sampler ? '<br><span style="color:#60a5fa">★ NetFlow sampler</span>' : ''}
-      `))
-      .on('mousemove', moveTip).on('mouseleave', hideTip)
+      .on('mouseenter', (ev, d) => {
+        pulse.style('display', l => touches(l, d._id) ? null : 'none')
+        link.attr('stroke-opacity', l => touches(l, d._id) ? 0.9 : 0.12)
+        showTip(ev, `
+          <b>${d.sampler_name || d.id}</b>
+          ${d.site ? `<br><span style="color:#a9a294">Site: ${d.site}</span>` : ''}
+          <br>Bytes: ${fmtBytes(d.bytes)}
+          <br>Flows: ${d.flows.toLocaleString()}
+          ${d.is_sampler ? '<br><span style="color:#8ad8ea">★ NetFlow sampler</span>' : ''}
+        `)
+      })
+      .on('mousemove', moveTip)
+      .on('mouseleave', () => {
+        pulse.style('display', null)
+        link.attr('stroke-opacity', l => (l as any).is_asymmetric ? 0.85 : 0.55)
+        hideTip()
+      })
 
     link
       .on('mouseenter', (ev, d) => {
+        pulse.style('display', l => l === d ? null : 'none')
         const src = typeof d.source === 'string' ? d.source : (d.source as D3Node)._id
         const dst = typeof d.target === 'string' ? d.target : (d.target as D3Node)._id
         const fwd = (d as any).bytes_fwd ?? 0
         const rev = (d as any).bytes_rev ?? 0
         const asymFlag = (d as any).is_asymmetric
-          ? `<br><span style="color:#f59e0b">⚠ Asymmetric — ${fwd > rev ? src : dst} sent ${fwd > rev ? (fwd/Math.max(rev,1)).toFixed(0) : (rev/Math.max(fwd,1)).toFixed(0)}× more</span>`
+          ? `<br><span style="color:#f3c265">⚠ Asymmetric — ${fwd > rev ? src : dst} sent ${fwd > rev ? (fwd/Math.max(rev,1)).toFixed(0) : (rev/Math.max(fwd,1)).toFixed(0)}× more</span>`
           : ''
         showTip(ev, `
           <b>${src} ↔ ${dst}</b>
           <br>Total: ${fmtBytes(d.bytes)} · ${d.flows.toLocaleString()} flows
           ${fwd || rev ? `<br>→ ${fmtBytes(fwd)} &nbsp; ← ${fmtBytes(rev)}` : ''}
-          <br><span style="color:#9ca3af">${protoShort(d.protocol)}${d.dst_port ? `:${d.dst_port}` : ''}</span>
+          <br><span style="color:#a9a294">${protoShort(d.protocol)}${d.dst_port ? `:${d.dst_port}` : ''}</span>
           ${asymFlag}
         `)
       })
-      .on('mousemove', moveTip).on('mouseleave', hideTip)
+      .on('mousemove', moveTip)
+      .on('mouseleave', () => {
+        pulse.style('display', null)
+        link.attr('stroke-opacity', l => (l as any).is_asymmetric ? 0.85 : 0.55)
+        hideTip()
+      })
 
     // Site target positions
     const siteList = [...siteNodes.keys()]
@@ -326,6 +398,11 @@ function ForceGraph({
     sim.on('tick', () => {
       updateHulls()
       link
+        .attr('x1', d => (d.source as D3Node).x ?? 0)
+        .attr('y1', d => (d.source as D3Node).y ?? 0)
+        .attr('x2', d => (d.target as D3Node).x ?? 0)
+        .attr('y2', d => (d.target as D3Node).y ?? 0)
+      pulse
         .attr('x1', d => (d.source as D3Node).x ?? 0)
         .attr('y1', d => (d.source as D3Node).y ?? 0)
         .attr('x2', d => (d.target as D3Node).x ?? 0)
@@ -617,7 +694,7 @@ function HierarchicalGraph({
       .attr('id', 'arr-h')
       .attr('viewBox', '0 -4 8 8').attr('refX', 8).attr('refY', 0)
       .attr('markerWidth', 5).attr('markerHeight', 5).attr('orient', 'auto')
-      .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', '#4b5563')
+      .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', '#5c6470')
 
     const linkGenV = d3.linkVertical<{ source: { x: number; y: number }; target: { x: number; y: number } }, { x: number; y: number }>()
       .x(d => d.x).y(d => d.y)
@@ -653,44 +730,84 @@ function HierarchicalGraph({
       .data(layout.subnetBoxes).join('rect')
       .attr('class', 'subnet-box')
       .attr('x', d => d.x).attr('y', d => d.y).attr('width', d => d.w).attr('height', d => d.h)
-      .attr('rx', 10).attr('fill', 'none').attr('stroke', '#374151').attr('stroke-width', 1)
+      .attr('rx', 10).attr('fill', 'none').attr('stroke', '#2a2418').attr('stroke-width', 1)
     boxGroup.selectAll('text.subnet-label')
       .data(layout.subnetBoxes).join('text')
       .attr('class', 'subnet-label')
       .attr('x', d => d.x + 12).attr('y', d => d.y + 18)
-      .attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#9ca3af')
+      .attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#a9a294')
       .text(d => d.label)
     boxGroup.selectAll('rect.ext-box')
       .data(layout.externalBoxes).join('rect')
       .attr('class', 'ext-box')
       .attr('x', d => d.x).attr('y', d => d.y).attr('width', d => d.w).attr('height', d => d.h)
-      .attr('rx', 10).attr('fill', 'none').attr('stroke', '#374151').attr('stroke-width', 1)
+      .attr('rx', 10).attr('fill', 'none').attr('stroke', '#2a2418').attr('stroke-width', 1)
     boxGroup.selectAll('text.ext-label')
       .data(layout.externalBoxes).join('text')
       .attr('class', 'ext-label')
       .attr('x', d => d.x + 12).attr('y', d => d.y + 18)
-      .attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#9ca3af')
+      .attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#a9a294')
       .text(d => d.label)
 
     g.append('g').selectAll('text.sampler-header')
       .data(layout.headers).join('text')
       .attr('class', 'sampler-header')
       .attr('x', d => d.x).attr('y', d => d.y)
-      .attr('font-size', '12px').attr('font-weight', '700').attr('fill', '#e5e7eb')
+      .attr('font-size', '12px').attr('font-weight', '700').attr('fill', '#e9e4d8')
       .text(d => d.text)
 
     // ── Links ─────────────────────────────────────────────────────────────────
     // private<->private links draw thin and dashed (they never cross the L3
     // boundary at all); private-l3/l3-external links carry real aggregated
     // weight and get an arrowhead showing the direction of the hierarchy.
+    // Live layer for this view. The hierarchical layout is the default one the
+    // page opens on, so it needs the treatment at least as much as the force
+    // graph does.
+    const hDefs = svg.append('defs')
+    const hf = hDefs.append('filter').attr('id', 'topoh-glow')
+      .attr('x', '-40%').attr('y', '-40%').attr('width', '180%').attr('height', '180%')
+    hf.append('feGaussianBlur').attr('stdDeviation', 1.8).attr('result', 'b')
+    const hm = hf.append('feMerge')
+    hm.append('feMergeNode').attr('in', 'b')
+    hm.append('feMergeNode').attr('in', 'SourceGraphic')
+    svg.append('style').text(`
+      @keyframes topoh-flow { to { stroke-dashoffset: -120; } }
+      .topoh-pulse {
+        stroke-dasharray: 12 108;
+        stroke-linecap: round;
+        animation: topoh-flow 4s linear infinite;
+        pointer-events: none;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .topoh-pulse { animation: none; opacity: 0 !important; }
+      }
+    `)
+
     const linkSel = g.append('g').selectAll<SVGPathElement, typeof validLines[number]>('path')
       .data(validLines).join('path')
       .attr('fill', 'none')
-      .attr('stroke', d => d.line.kind === 'private-private' ? '#6b7280' : '#4b5563')
+      .attr('stroke', d => d.line.kind === 'private-private' ? 'rgba(216,180,110,.45)' : 'rgba(216,180,110,.55)')
       .attr('stroke-dasharray', d => d.line.kind === 'private-private' ? '4,3' : null)
       .attr('stroke-width', d => wScale(d.line.bytes))
       .attr('stroke-opacity', 0.65)
       .attr('marker-end', d => d.line.kind === 'private-private' ? null : 'url(#arr-h)')
+      .attr('d', d => (d.line.kind === 'private-private' ? linkGenH(d.pts) : linkGenV(d.pts))!)
+
+    // A charge runs each link, speed scaled by volume on the same curve the
+    // Sankey, GeoMap and force graph use.
+    const hMaxBytes = Math.max(1, ...validLines.map(v => v.line.bytes))
+    const pulseSel = g.append('g').selectAll<SVGPathElement, typeof validLines[number]>('path')
+      .data(validLines).join('path')
+      .attr('class', 'topoh-pulse')
+      .attr('fill', 'none')
+      .attr('stroke', d => d.line.kind === 'private-private' ? INSTRUMENT.goldHi : INSTRUMENT.ice)
+      .attr('stroke-width', d => Math.min(Math.max(wScale(d.line.bytes) * 1.1, 1.6), 3.4))
+      .attr('filter', 'url(#topoh-glow)')
+      .style('animation-duration', d => {
+        const frac = Math.min(1, Math.max(0, d.line.bytes / hMaxBytes))
+        return `${(7 - Math.sqrt(frac) * 4.6).toFixed(2)}s`
+      })
+      .style('animation-delay', (_, i) => `${(i % 6) * 0.4}s`)
       .attr('d', d => (d.line.kind === 'private-private' ? linkGenH(d.pts) : linkGenV(d.pts))!)
 
     // ── L3 nodes — generic by design: no IP, no stats, just what it is ─────────
@@ -701,19 +818,19 @@ function HierarchicalGraph({
 
     l3Sel.append('rect')
       .attr('x', -L3_W / 2).attr('y', -L3_H / 2).attr('width', L3_W).attr('height', L3_H)
-      .attr('rx', 8).attr('ry', 8)
-      .attr('fill', '#111827')
-      .attr('stroke', '#6b7280').attr('stroke-width', 1.5).attr('stroke-dasharray', '4,2')
+      .attr('fill', 'rgba(13,18,25,.92)')
+      .attr('stroke', INSTRUMENT.gold).attr('stroke-opacity', 0.5)
+      .attr('stroke-width', 1).attr('stroke-dasharray', '3,4')
 
     l3Sel.append('text')
       .text('L3')
       .attr('text-anchor', 'middle').attr('y', -4)
-      .attr('font-size', '13px').attr('font-weight', '700').attr('fill', '#d1d5db').attr('letter-spacing', '0.05em')
+      .attr('font-size', '13px').attr('font-weight', '700').attr('fill', '#dcd6c9').attr('letter-spacing', '0.05em')
 
     l3Sel.append('text')
       .text('network boundary')
       .attr('text-anchor', 'middle').attr('y', 12)
-      .attr('font-size', '8px').attr('fill', '#6b7280')
+      .attr('font-size', '8px').attr('fill', '#a9a294')
 
     // ── Device cards (private + external) ───────────────────────────────────────
     const TEXT_X = -CARD_W / 2 + 14
@@ -724,34 +841,57 @@ function HierarchicalGraph({
       .attr('cursor', 'pointer')
       .on('click', (_, c) => navigate(`/explorer?src_ip=${encodeURIComponent(c.node.id)}&any_direction=true&window=${window_}`))
 
+    // Cards as instrument panels rather than rounded filled boxes: flat corners,
+    // near-black body, a lit spine in the site colour, and bracket ticks — the
+    // same housing language the charts wear.
     cardSel.append('rect')
       .attr('class', 'card-border')
       .attr('x', -CARD_W / 2).attr('y', -CARD_H / 2)
       .attr('width', CARD_W).attr('height', CARD_H)
-      .attr('rx', 8).attr('ry', 8)
-      .attr('fill', '#1f2937')
+      .attr('fill', 'rgba(13,18,25,.92)')
       .attr('stroke', c => siteColor(c.node.site || 'unknown'))
-      .attr('stroke-width', 1.25)
+      .attr('stroke-opacity', 0.55)
+      .attr('stroke-width', 1)
 
+    // lit spine
     cardSel.append('rect')
       .attr('x', -CARD_W / 2).attr('y', -CARD_H / 2)
-      .attr('width', 4).attr('height', CARD_H)
+      .attr('width', 2.5).attr('height', CARD_H)
       .attr('fill', c => siteColor(c.node.site || 'unknown'))
+      .style('filter', 'url(#topoh-glow)')
+
+    // corner brackets
+    cardSel.each(function (c) {
+      const col = siteColor(c.node.site || 'unknown')
+      const x0 = -CARD_W / 2, y0 = -CARD_H / 2, x1 = CARD_W / 2, y1 = CARD_H / 2
+      const T = 6
+      const corners = [
+        `M${x0},${y0 + T} L${x0},${y0} L${x0 + T},${y0}`,
+        `M${x1 - T},${y0} L${x1},${y0} L${x1},${y0 + T}`,
+        `M${x0},${y1 - T} L${x0},${y1} L${x0 + T},${y1}`,
+        `M${x1 - T},${y1} L${x1},${y1} L${x1},${y1 - T}`,
+      ]
+      const sel = d3.select(this)
+      corners.forEach(d => {
+        sel.append('path').attr('d', d).attr('fill', 'none')
+          .attr('stroke', col).attr('stroke-width', 1.2).attr('stroke-opacity', 0.95)
+      })
+    })
 
     cardSel.append('text')
       .text(c => truncateLabel(c.node.sampler_name || c.node.id, 21))
       .attr('x', TEXT_X).attr('y', -6)
-      .attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#f3f4f6')
+      .attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#e9e4d8')
 
     cardSel.append('text')
       .text(c => c.node.sampler_name ? c.node.id : (c.node.site || (c.kind === 'external' ? 'external' : '')))
       .attr('x', TEXT_X).attr('y', 8)
-      .attr('font-size', '9px').attr('font-family', 'monospace').attr('fill', '#9ca3af')
+      .attr('font-size', '9px').attr('font-family', 'monospace').attr('fill', '#a9a294')
 
     cardSel.append('text')
       .text(c => `${fmtBytes(c.node.bytes)} · ${c.node.flows.toLocaleString()} fl`)
       .attr('x', TEXT_X).attr('y', 20)
-      .attr('font-size', '8.5px').attr('fill', '#6b7280')
+      .attr('font-size', '8.5px').attr('fill', '#a9a294')
 
     // ── Tooltip + hover highlight ────────────────────────────────────────────────
     // Always-on: hovering a device highlights its own line to L3 plus only the
@@ -783,8 +923,9 @@ function HierarchicalGraph({
       return keep
     }
 
-    const HIGHLIGHT_COLOR = '#60a5fa'
-    const baseLinkColor = (d: typeof validLines[number]) => d.line.kind === 'private-private' ? '#6b7280' : '#4b5563'
+    const HIGHLIGHT_COLOR = '#8ad8ea'
+    const baseLinkColor = (d: typeof validLines[number]) =>
+      d.line.kind === 'private-private' ? 'rgba(216,180,110,.45)' : 'rgba(216,180,110,.55)'
 
     function isLineActive(d: typeof validLines[number], keep: Set<string>): boolean {
       const { line } = d
@@ -803,6 +944,12 @@ function HierarchicalGraph({
         .attr('opacity', d => isLineActive(d, keep) ? 1 : 0.12)
         .attr('stroke', d => isLineActive(d, keep) ? HIGHLIGHT_COLOR : baseLinkColor(d))
         .attr('stroke-width', d => isLineActive(d, keep) ? Math.max(2, wScale(d.line.bytes)) : wScale(d.line.bytes))
+      // Only the hovered object's own traffic keeps running. Leaving every
+      // charge in motion while the rest of the view is dimmed defeats the
+      // point of the highlight — the eye follows movement first, so unrelated
+      // motion pulls attention away from the thing being inspected.
+      pulseSel
+        .style('display', d => isLineActive(d, keep) ? null : 'none')
     }
     function clearHighlight() {
       cardSel.attr('opacity', 1)
@@ -814,6 +961,7 @@ function HierarchicalGraph({
         .attr('opacity', 1)
         .attr('stroke', d => baseLinkColor(d))
         .attr('stroke-width', d => wScale(d.line.bytes))
+      pulseSel.style('display', null)
     }
 
     // The card itself already shows name/id/bytes/flows — repeating that in
@@ -824,13 +972,13 @@ function HierarchicalGraph({
       const rows = data.edges
         .filter(e => e.sampler_ip === samplerId && (e.source === deviceId || e.target === deviceId))
         .sort((a, b) => b.bytes - a.bytes)
-      if (!rows.length) return '<br><span style="color:#9ca3af">No recorded connections</span>'
+      if (!rows.length) return '<br><span style="color:#a9a294">No recorded connections</span>'
       const shown = rows.slice(0, MAX_TOOLTIP_ROWS).map(e => {
         const peer = e.source === deviceId ? e.target : e.source
         const port = e.dst_port ? `:${e.dst_port}` : ''
-        return `<br>${peer}${port} <span style="color:#6b7280">${protoShort(e.protocol)} · ${fmtBytes(e.bytes)}</span>`
+        return `<br>${peer}${port} <span style="color:#a9a294">${protoShort(e.protocol)} · ${fmtBytes(e.bytes)}</span>`
       }).join('')
-      const more = rows.length > MAX_TOOLTIP_ROWS ? `<br><span style="color:#6b7280">+${rows.length - MAX_TOOLTIP_ROWS} more</span>` : ''
+      const more = rows.length > MAX_TOOLTIP_ROWS ? `<br><span style="color:#a9a294">+${rows.length - MAX_TOOLTIP_ROWS} more</span>` : ''
       return shown + more
     }
 
@@ -850,7 +998,7 @@ function HierarchicalGraph({
         applyHighlight(computeKeep('l3', '', d.sampler.id))
         showTip(ev, `
           <b>L3 — network boundary</b>
-          <br><span style="color:#9ca3af">Every private↔external conversation ${d.sampler.sampler_name || d.sampler.id} observed passes through here. Generic by design — this represents the boundary itself, not a specific guessed router.</span>
+          <br><span style="color:#a9a294">Every private↔external conversation ${d.sampler.sampler_name || d.sampler.id} observed passes through here. Generic by design — this represents the boundary itself, not a specific guessed router.</span>
         `)
       })
       .on('mousemove', moveTip)
@@ -871,22 +1019,22 @@ function HierarchicalGraph({
         if (line.kind === 'private-private') {
           const e = line.edge!
           const asymFlag = e.is_asymmetric
-            ? `<br><span style="color:#f59e0b">⚠ Asymmetric — one side sent ≥10× the other</span>`
+            ? `<br><span style="color:#f3c265">⚠ Asymmetric — one side sent ≥10× the other</span>`
             : ''
           showTip(ev, `
             <b>${e.source} ↔ ${e.target}</b>
             <br>Total: ${fmtBytes(e.bytes)} · ${e.flows.toLocaleString()} flows
             <br>→ ${fmtBytes(e.bytes_fwd)} &nbsp; ← ${fmtBytes(e.bytes_rev)}
-            <br><span style="color:#9ca3af">${protoShort(e.protocol)}${e.dst_port ? `:${e.dst_port}` : ''}</span>
+            <br><span style="color:#a9a294">${protoShort(e.protocol)}${e.dst_port ? `:${e.dst_port}` : ''}</span>
             ${asymFlag}
-            <br><span style="color:#9ca3af">Click to view these flows in Explorer</span>
+            <br><span style="color:#a9a294">Click to view these flows in Explorer</span>
           `)
         } else {
           const label = line.kind === 'private-l3' ? line.aId : line.bId
           showTip(ev, `
             <b>${label} ↔ L3</b>
             <br>Total: ${fmtBytes(line.bytes)} · ${line.flows.toLocaleString()} flows
-            <br><span style="color:#9ca3af">Click ${label} directly to view its flows in Explorer</span>
+            <br><span style="color:#a9a294">Click ${label} directly to view its flows in Explorer</span>
           `)
         }
       })
@@ -1010,7 +1158,7 @@ export default function Topology() {
     const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
     bg.setAttribute('x', String(vx)); bg.setAttribute('y', String(vy))
     bg.setAttribute('width', String(vw)); bg.setAttribute('height', String(vh))
-    bg.setAttribute('fill', '#111827')
+    bg.setAttribute('fill', '#0d1219')
     cloneZoomG?.insertBefore(bg, cloneZoomG.firstChild)
 
     clone.setAttribute('viewBox', `${vx} ${vy} ${vw} ${vh}`)
@@ -1041,7 +1189,7 @@ export default function Topology() {
       const c = document.createElement('canvas')
       c.width = w; c.height = h
       const ctx = c.getContext('2d')!
-      ctx.fillStyle = '#111827'
+      ctx.fillStyle = '#0d1219'
       ctx.fillRect(0, 0, w, h)
       ctx.drawImage(img, 0, 0)
       c.toBlob(b => { if (b) dlBlob(b, 'pktflow-topology.png') }, 'image/png')
@@ -1059,9 +1207,9 @@ export default function Topology() {
   function doExportDOT() {
     if (!data) return
     let dot = 'digraph pktflow_topology {\n'
-    dot += '  graph [bgcolor="#111827" fontcolor="#d1d5db"];\n'
-    dot += '  node [shape=circle fontcolor="#d1d5db" style=filled fontsize=10];\n'
-    dot += '  edge [color="#4b5563" fontsize=9 fontcolor="#9ca3af"];\n\n'
+    dot += '  graph [bgcolor="#0d1219" fontcolor="#dcd6c9"];\n'
+    dot += '  node [shape=circle fontcolor="#dcd6c9" style=filled fontsize=10];\n'
+    dot += '  edge [color="#5c6470" fontsize=9 fontcolor="#a9a294"];\n\n'
     data.nodes.forEach(n => {
       const label = (n.sampler_name || n.id).replace(/"/g, '\\"')
       const tooltip = `${fmtBytes(n.bytes)}, ${n.flows} flows`.replace(/"/g, '\\"')
@@ -1091,7 +1239,7 @@ export default function Topology() {
       const x = 60 + (i % cols) * 160
       const y = 60 + Math.floor(i / cols) * 160
       const color = SITE_COLORS[0]
-      xml += `    <mxCell id="n_${i}" value="${label}" style="ellipse;fillColor=${color};strokeColor=#1d4ed8;fontColor=#ffffff;fontSize=10;fontStyle=1;" vertex="1" parent="1">`
+      xml += `    <mxCell id="n_${i}" value="${label}" style="ellipse;fillColor=${color};strokeColor=#469fb4;fontColor=#f5f1e8;fontSize=10;fontStyle=1;" vertex="1" parent="1">`
       xml += `<mxGeometry x="${x}" y="${y}" width="80" height="80" as="geometry"/></mxCell>\n`
     })
 
@@ -1103,7 +1251,7 @@ export default function Topology() {
       const ti = nodeIndex.get(dst)
       if (si === undefined || ti === undefined) return
       const lbl = esc(fmtBytes(e.bytes))
-      xml += `    <mxCell id="e_${i}" value="${lbl}" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;exitX=0.5;exitY=0;entryX=0.5;entryY=1;fontSize=9;fontColor=#9ca3af;" edge="1" source="n_${si}" target="n_${ti}" parent="1">`
+      xml += `    <mxCell id="e_${i}" value="${lbl}" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;exitX=0.5;exitY=0;entryX=0.5;entryY=1;fontSize=9;fontColor=#a9a294;" edge="1" source="n_${si}" target="n_${ti}" parent="1">`
       xml += `<mxGeometry relative="1" as="geometry"/></mxCell>\n`
     })
 

@@ -10,12 +10,13 @@ import { useEffect, useState, useCallback } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend,
-  AreaChart, Area,
+  AreaChart, Area, CartesianGrid,
 } from 'recharts'
 import { api, ProtocolStat, PortStat, DeviceSummary, FlowRecord } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import { protoLabel } from '../utils/protocols'
 import HelpButton from '../components/HelpButton'
+import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT, InstrumentFrame, RadialRing , liveEdgeDot , LinePulseGradient, BarPulseGradients } from '../components/instrument'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -32,11 +33,14 @@ function fmtNum(n: number): string {
   return String(n)
 }
 
+// Protocols are an identity encoding, so they take categorical slots.
+// Status hues (green/amber/red) are reserved for state and must never
+// stand in for a series, or a healthy ICMP share reads as 'good'.
 const PROTO_COLORS: Record<string, string> = {
-  TCP: '#3b82f6', UDP: '#8b5cf6', ICMP: '#10b981',
-  GRE: '#f59e0b', ESP: '#ef4444',
+  TCP: '#ab9017', UDP: '#007dab', ICMP: '#d86353',
+  GRE: '#00a49e', ESP: '#8561bd',
 }
-const BAR_COLORS = ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4','#ec4899','#84cc16']
+const BAR_COLORS = ['#ab9017','#007dab','#d86353','#00a49e','#8561bd','#007b43','#466cc8','#be7125']
 
 function fmtDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
@@ -170,20 +174,31 @@ function ProtocolMixPanel({ window, sampler_ip }: { window: string; sampler_ip?:
 
   if (!data.length) return <div className="h-40 flex items-center justify-center text-white text-sm">No data</div>
 
-  const pieData = data.map(d => ({ name: d.name, value: d.bytes }))
+  // Concentric arcs rather than a pie: same part-to-whole reading, but arc
+  // lengths on a shared radius are an easier comparison than pie angles, and
+  // it wears the console's geometry.
+  const segments = data.slice(0, 5).map((d, i) => ({
+    name: d.name,
+    value: d.bytes,
+    color: PROTO_COLORS[d.name] || BAR_COLORS[i % BAR_COLORS.length],
+  }))
+  const totalBytes = data.reduce((s, d) => s + d.bytes, 0)
+
   return (
-    <div className="h-44">
-      <ResponsiveContainer width="100%" height="100%">
-        <PieChart>
-          <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70}>
-            {pieData.map((_, i) => (
-              <Cell key={i} fill={PROTO_COLORS[pieData[i].name] || BAR_COLORS[i % BAR_COLORS.length]} />
-            ))}
-          </Pie>
-          <Tooltip formatter={(v: any) => fmtBytes(Number(v))} contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8, fontSize: 12 }} labelStyle={{ color: '#9ca3af' }} itemStyle={{ color: '#fff' }} />
-          <Legend iconSize={8} wrapperStyle={{ fontSize: 11, color: '#fff' }} />
-        </PieChart>
-      </ResponsiveContainer>
+    <div className="h-44 flex items-center gap-4">
+      <RadialRing segments={segments} size={168} label="protocols" total={fmtBytes(totalBytes)} />
+      <div className="flex-1 min-w-0 space-y-1.5">
+        {segments.map(seg => (
+          <div key={seg.name} className="flex items-center gap-2">
+            <span className="w-2 h-2 flex-none" style={{ background: seg.color, boxShadow: `0 0 6px ${seg.color}88` }} />
+            <span className="font-mono text-[10.5px] text-gray-300 truncate">{seg.name}</span>
+            <span className="flex-1" />
+            <span className="font-mono text-[10px] text-gray-500">
+              {totalBytes > 0 ? `${((seg.value / totalBytes) * 100).toFixed(1)}%` : '—'}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -214,25 +229,33 @@ function TopPortsPanel({
     port: d.port, protocol: d.protocol,
   }))
 
+  const barColors = chartData.map((_, i) => BAR_COLORS[i % BAR_COLORS.length])
+
   return (
-    <div className="h-44">
+    <InstrumentFrame height={176} live>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData} layout="vertical" margin={{ left: 0, right: 8, top: 0, bottom: 0 }}>
-          <XAxis type="number" tick={{ fill: '#fff', fontSize: 10 }} tickFormatter={metric === 'bytes' ? fmtBytes : fmtNum} />
-          <YAxis type="category" dataKey="label" tick={{ fill: '#fff', fontSize: 10 }} width={70} />
+          <defs>
+            <BarPulseGradients colors={barColors} idPrefix="f-topport" />
+          </defs>
+          <XAxis type="number" {...axisProps} tickFormatter={metric === 'bytes' ? fmtBytes : fmtNum} />
+          <YAxis type="category" dataKey="label" {...axisProps} width={70} />
           <Tooltip
-            cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-            contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8, fontSize: 12 }}
-            labelStyle={{ color: '#9ca3af' }}
-            itemStyle={{ color: '#fff' }}
+            cursor={{ fill: 'rgba(216,180,110,0.06)' }}
+            contentStyle={tooltipProps.contentStyle}
+            labelStyle={tooltipProps.labelStyle}
+            itemStyle={{ color: '#f5f1e8' }}
             formatter={(v: any) => metric === 'bytes' ? fmtBytes(Number(v)) : fmtNum(Number(v))}
           />
-          <Bar dataKey="value" radius={[0, 4, 4, 0]} onClick={(d: any) => onPortClick(d.port, d.protocol)}>
-            {chartData.map((_, i) => <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />)}
+          <Bar dataKey="value" radius={[0, 2, 2, 0]} onClick={(d: any) => onPortClick(d.port, d.protocol)}>
+            {chartData.map((_, i) => (
+              <Cell key={i} fill={`url(#f-topport-${i})`}
+                    stroke={barColors[i]} strokeOpacity={0.55} strokeWidth={0.75} />
+            ))}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-    </div>
+    </InstrumentFrame>
   )
 }
 
@@ -264,28 +287,43 @@ function TrafficTimelinePanel({
           <button onClick={onClear} className="text-xs text-white hover:text-white">clear</button>
         </div>
       )}
-      <div className="h-36">
+      <InstrumentFrame height={176} live>
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+          <AreaChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
             <defs>
-              <linearGradient id="portGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+              <LinePulseGradient id="f-pulse-ports" color="#8ad8ea" />
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             <linearGradient id="portGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#8ad8ea" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#8ad8ea" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <XAxis dataKey="timestamp" hide />
-            <YAxis hide />
+            <CartesianGrid {...gridProps} />
+            <XAxis
+              dataKey="timestamp"
+              tick={axisProps.tick}
+              tickLine={false} axisLine={false}
+              interval="preserveStartEnd" minTickGap={40}
+              tickFormatter={(t: any) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            />
+            <YAxis
+              tick={axisProps.tick}
+              tickLine={false} axisLine={false}
+              width={52}
+              tickFormatter={(v: any) => fmtBytes(Number(v))}
+            />
             <Tooltip
-              contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8, fontSize: 12 }}
-              labelStyle={{ color: '#9ca3af' }}
+              contentStyle={tooltipProps.contentStyle}
+              labelStyle={tooltipProps.labelStyle}
               itemStyle={{ color: '#fff' }}
               formatter={(v: any) => fmtBytes(Number(v))}
               labelFormatter={(l: any) => new Date(l).toLocaleTimeString()}
             />
-            <Area type="monotone" dataKey="bytes" stroke="#3b82f6" fill="url(#portGrad)" strokeWidth={1.5} dot={false} />
+            <Area type="monotone" dataKey="bytes" stroke="url(#f-pulse-ports)" style={glow("#8ad8ea", 5)}
+                  fill="url(#portGrad)" strokeWidth={1.5}
+                  dot={liveEdgeDot(data.length, '#8ad8ea')} activeDot={{ r: 3, strokeWidth: 0, fill: '#8ad8ea' }} />
           </AreaChart>
         </ResponsiveContainer>
-      </div>
+      </InstrumentFrame>
     </div>
   )
 }
