@@ -134,9 +134,13 @@ function ForceGraph({
     gm.append('feMergeNode').attr('in', 'b')
     gm.append('feMergeNode').attr('in', 'SourceGraphic')
     svg.append('style').text(`
-      @keyframes topo-flow { to { stroke-dashoffset: -240; } }
+      /* One distinct charge per edge, not a stream of dots. A short dash with
+         a long gap reads as a single packet running the link; the offset moves
+         exactly one dash+gap per cycle so the loop is seamless. */
+      @keyframes topo-flow { to { stroke-dashoffset: -120; } }
       .topo-pulse {
-        stroke-dasharray: 2 20;
+        stroke-dasharray: 12 108;
+        stroke-linecap: round;
         animation: topo-flow 4s linear infinite;
         pointer-events: none;
       }
@@ -253,9 +257,9 @@ function ForceGraph({
     // Asymmetric edges (one side sent >10× the other) render in amber as a visual flag
     const link = g.append('g').selectAll<SVGLineElement, D3Link>('line')
       .data(links).join('line')
-      .attr('stroke', d => (d as any).is_asymmetric ? '#f3c265' : '#2a2418')
+      .attr('stroke', d => (d as any).is_asymmetric ? '#f3c265' : 'rgba(216,180,110,.42)')
       .attr('stroke-width', d => wScale(d.bytes))
-      .attr('stroke-opacity', d => (d as any).is_asymmetric ? 0.85 : 0.7)
+      .attr('stroke-opacity', d => (d as any).is_asymmetric ? 0.85 : 0.55)
       .attr('marker-end', 'url(#arr)')
 
     // Charge travelling source -> target. Speed carries volume, busiest fastest,
@@ -265,8 +269,8 @@ function ForceGraph({
     const pulse = g.append('g').selectAll<SVGLineElement, D3Link>('line')
       .data(links).join('line')
       .attr('class', 'topo-pulse')
-      .attr('stroke', d => (d as any).is_asymmetric ? '#f3c265' : INSTRUMENT.ice)
-      .attr('stroke-width', d => Math.min(Math.max(wScale(d.bytes) * 0.9, 0.8), 2.6))
+      .attr('stroke', d => (d as any).is_asymmetric ? INSTRUMENT.goldHi : INSTRUMENT.ice)
+      .attr('stroke-width', d => Math.min(Math.max(wScale(d.bytes) * 1.1, 1.6), 3.4))
       .attr('stroke-linecap', 'round')
       .attr('filter', 'url(#topo-glow)')
       .style('animation-duration', d => {
