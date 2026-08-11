@@ -76,12 +76,14 @@ export function InstrumentFrame({
   ticks = 48,
   className = '',
   live = false,
+  sweep = true,
 }: {
   children: ReactNode
   height: number | string
   ticks?: number
   className?: string
   live?: boolean
+  sweep?: boolean
 }) {
   const collar = Array.from({ length: ticks }, (_, i) => {
     const long = i % 6 === 0
@@ -90,6 +92,8 @@ export function InstrumentFrame({
 
   return (
     <div className={`relative ${className}`} style={{ height }}>
+      <LiveChartDefs />
+      {sweep && <SweepOverlay />}
       {/* corner brackets — the housing. Percent coordinates are not valid in
           SVG path data, so these are positioned elements, not a path. */}
       {([
@@ -380,4 +384,84 @@ export function RadialRing({
       </div>
     </div>
   )
+}
+
+// ── Making a line chart feel live ────────────────────────────────────────────
+//
+// Three devices, none of which touch the plotted values:
+//
+//   sweep       a slow light bar crossing the plot, behind the data — the
+//               console is scanning, the way a radar face does
+//   live edge   a pulsing marker on the newest sample: "this is now"
+//   breathing   the stroke's glow rises and falls gently
+//
+// The constraint throughout: nothing may move a datum, change its apparent
+// value, or imply a reading that is not in the series. Everything here is
+// either behind the data or anchored to a real point.
+
+/** Keyframes for the live-chart devices. Mount once per chart. */
+export function LiveChartDefs() {
+  return (
+    <style>{`
+      @keyframes f-sweep {
+        0%   { transform: translateX(-12%); opacity: 0; }
+        8%   { opacity: 1; }
+        92%  { opacity: 1; }
+        100% { transform: translateX(112%); opacity: 0; }
+      }
+      @keyframes f-pulse-ring {
+        0%   { r: 3; opacity: 0.75; }
+        70%  { r: 11; opacity: 0; }
+        100% { r: 11; opacity: 0; }
+      }
+      @keyframes f-glow-breathe {
+        0%, 100% { opacity: 0.85; }
+        50%      { opacity: 1; }
+      }
+      .f-sweep-bar { animation: f-sweep 9s cubic-bezier(.4,0,.6,1) infinite; }
+      .f-pulse-ring { animation: f-pulse-ring 2.4s ease-out infinite; }
+      .f-breathe-stroke { animation: f-glow-breathe 3.6s ease-in-out infinite; }
+      @media (prefers-reduced-motion: reduce) {
+        .f-sweep-bar, .f-pulse-ring, .f-breathe-stroke { animation: none; }
+        .f-sweep-bar { opacity: 0; }
+      }
+    `}</style>
+  )
+}
+
+/**
+ * A light bar that crosses the plot area on a long loop. Sits behind the data
+ * at low opacity — it is chrome, and must never be mistaken for a value.
+ */
+export function SweepOverlay() {
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+      <div
+        className="f-sweep-bar absolute top-0 bottom-0 w-[16%]"
+        style={{
+          background:
+            'linear-gradient(90deg, transparent, rgba(216,180,110,.10) 45%, rgba(245,226,182,.16) 50%, rgba(216,180,110,.10) 55%, transparent)',
+        }}
+      />
+    </div>
+  )
+}
+
+/**
+ * Recharts dot renderer that marks only the newest sample, with a pulsing
+ * halo. Anchored to a real datum, so it cannot mislead about position.
+ *
+ *   <Area dot={liveEdgeDot(data.length, colour)} … />
+ */
+export function liveEdgeDot(dataLength: number, color: string) {
+  return function LiveEdge(props: any) {
+    const { cx, cy, index } = props
+    if (index !== dataLength - 1 || cx == null || cy == null) return <g />
+    return (
+      <g>
+        <circle cx={cx} cy={cy} r="3" className="f-pulse-ring" fill="none" stroke={color} strokeWidth="1.2" />
+        <circle cx={cx} cy={cy} r="2.4" fill={color} style={{ filter: `drop-shadow(0 0 5px ${color})` }} />
+      </g>
+    )
+  }
 }
