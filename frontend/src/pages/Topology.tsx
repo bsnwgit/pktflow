@@ -10,6 +10,7 @@ import { api, TopologyNode, TopologyEdge, DeviceSummary } from '../api/client'
 import { protoShort } from '../utils/protocols'
 import IpLink from '../components/IpLink'
 import HelpButton from '../components/HelpButton'
+import { INSTRUMENT } from '../components/instrument'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -122,6 +123,27 @@ function ForceGraph({
         .scaleExtent([0.08, 10])
         .on('zoom', ev => g.attr('transform', ev.transform))
     )
+
+    // Live layer: a charge travels each edge, exactly as the Sankey ribbons do,
+    // so the same motion means the same thing in both views. Mounted once.
+    const liveDefs = svg.append('defs')
+    const gf = liveDefs.append('filter').attr('id', 'topo-glow')
+      .attr('x', '-40%').attr('y', '-40%').attr('width', '180%').attr('height', '180%')
+    gf.append('feGaussianBlur').attr('stdDeviation', 1.8).attr('result', 'b')
+    const gm = gf.append('feMerge')
+    gm.append('feMergeNode').attr('in', 'b')
+    gm.append('feMergeNode').attr('in', 'SourceGraphic')
+    svg.append('style').text(`
+      @keyframes topo-flow { to { stroke-dashoffset: -240; } }
+      .topo-pulse {
+        stroke-dasharray: 2 20;
+        animation: topo-flow 4s linear infinite;
+        pointer-events: none;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .topo-pulse { animation: none; opacity: 0 !important; }
+      }
+    `)
 
     svg.append('defs').append('marker')
       .attr('id', 'arr')
@@ -236,6 +258,23 @@ function ForceGraph({
       .attr('stroke-opacity', d => (d as any).is_asymmetric ? 0.85 : 0.7)
       .attr('marker-end', 'url(#arr)')
 
+    // Charge travelling source -> target. Speed carries volume, busiest fastest,
+    // on the same scale as the Sankey ribbons. Drawn on the same geometry as
+    // the edge, so it cannot imply a path that is not there.
+    const maxLinkBytes = Math.max(1, ...links.map(l => l.bytes))
+    const pulse = g.append('g').selectAll<SVGLineElement, D3Link>('line')
+      .data(links).join('line')
+      .attr('class', 'topo-pulse')
+      .attr('stroke', d => (d as any).is_asymmetric ? '#f3c265' : INSTRUMENT.ice)
+      .attr('stroke-width', d => Math.min(Math.max(wScale(d.bytes) * 0.9, 0.8), 2.6))
+      .attr('stroke-linecap', 'round')
+      .attr('filter', 'url(#topo-glow)')
+      .style('animation-duration', d => {
+        const frac = Math.min(1, Math.max(0, d.bytes / maxLinkBytes))
+        return `${(7 - Math.sqrt(frac) * 4.6).toFixed(2)}s`
+      })
+      .style('animation-delay', (_, i) => `${(i % 6) * 0.4}s`)
+
     const node = g.append('g').selectAll<SVGGElement, D3Node>('g')
       .data(nodes).join('g')
       .attr('cursor', 'pointer')
@@ -247,15 +286,20 @@ function ForceGraph({
       )
       .on('click', (_, d) => onNodeClick(d))
 
+    // Nodes as instrument terminals: a dim body with a bright rim, so the edge
+    // charges arriving at them stay the brightest thing on screen. Radius still
+    // encodes bytes exactly as before.
     node.append('circle')
       .attr('r', d => rScale(d.bytes))
       .attr('fill', d => siteColor(d.site || 'unknown'))
-      .attr('fill-opacity', 0.85)
-      .attr('stroke', d => d.is_sampler ? '#fff' : 'rgba(255,255,255,0.15)')
-      .attr('stroke-width', d => d.is_sampler ? 2.5 : 0.5)
+      .attr('fill-opacity', 0.28)
+      .attr('stroke', d => d.is_sampler ? INSTRUMENT.goldHi : siteColor(d.site || 'unknown'))
+      .attr('stroke-width', d => d.is_sampler ? 2 : 1.2)
+      .attr('stroke-opacity', 0.9)
+      .style('filter', d => d.is_sampler ? 'url(#topo-glow)' : null)
 
     node.filter(d => d.is_sampler).append('circle')
-      .attr('r', 3).attr('fill', '#fff').attr('fill-opacity', 0.9)
+      .attr('r', 2.6).attr('fill', INSTRUMENT.goldHi).attr('fill-opacity', 0.95)
 
     const labelThreshold = d3.quantile(
       nodes.map(n => n.bytes).sort(d3.ascending), 0.75
@@ -326,6 +370,11 @@ function ForceGraph({
     sim.on('tick', () => {
       updateHulls()
       link
+        .attr('x1', d => (d.source as D3Node).x ?? 0)
+        .attr('y1', d => (d.source as D3Node).y ?? 0)
+        .attr('x2', d => (d.target as D3Node).x ?? 0)
+        .attr('y2', d => (d.target as D3Node).y ?? 0)
+      pulse
         .attr('x1', d => (d.source as D3Node).x ?? 0)
         .attr('y1', d => (d.source as D3Node).y ?? 0)
         .attr('x2', d => (d.target as D3Node).x ?? 0)
