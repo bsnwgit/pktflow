@@ -11,6 +11,7 @@ import { api, TimeSeriesPoint, TopologyResponse } from '../api/client'
 import { GeoMapCard } from './GeoMap'
 import { useWebSocket, type WsMessage, type IngestStats } from '../hooks/useWebSocket'
 import HelpButton from '../components/HelpButton'
+import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT } from '../components/instrument'
 
 // ── Colour palette ─────────────────────────────────────────────────────────────
 const COLORS = ['#ab9017','#007dab','#d86353','#00a49e','#8561bd','#007b43','#466cc8','#be7125']
@@ -392,16 +393,16 @@ export default function Analytics() {
                   <stop offset="95%" stopColor="#8ad8ea" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#211c14" />
-              <XAxis dataKey="t" tick={{ fill:'#a9a294', fontSize:10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-              <YAxis tick={{ fill:'#a9a294', fontSize:10 }} tickLine={false} axisLine={false}
+              <CartesianGrid {...gridProps} />
+              <XAxis dataKey="t" tick={axisProps.tick} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+              <YAxis tick={axisProps.tick} tickLine={false} axisLine={false}
                 tickFormatter={v => metric === 'bytes' ? fmt(v) : fmt(v, 'flows')} />
               <Tooltip
-                contentStyle={{ background:'#0d1219', border:'1px solid #2a2418', borderRadius:8, fontSize:12 }}
-                labelStyle={{ color:'#a9a294' }}
+                contentStyle={tooltipProps.contentStyle}
+                labelStyle={tooltipProps.labelStyle}
                 formatter={(v: number) => [metric === 'bytes' ? fmt(v) : fmt(v, 'flows'), metricLabel]}
               />
-              <Area type="monotone" dataKey={metric} stroke="#8ad8ea" fill="url(#areaGrad)" strokeWidth={2} dot={false} />
+              <Area type="monotone" dataKey={metric} stroke="#8ad8ea" style={glow("#8ad8ea", 5)} fill="url(#areaGrad)" strokeWidth={2} dot={false} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -452,15 +453,15 @@ export default function Analytics() {
                     <stop offset="95%" stopColor="#7ee0a8" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#211c14" />
-                <XAxis dataKey="t" tick={{ fill: '#a9a294', fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fill: '#a9a294', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => fmt(v)} />
+                <CartesianGrid {...gridProps} />
+                <XAxis dataKey="t" tick={axisProps.tick} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis tick={axisProps.tick} tickLine={false} axisLine={false} tickFormatter={v => fmt(v)} />
                 <Tooltip
-                  contentStyle={{ background: '#0d1219', border: '1px solid #2a2418', borderRadius: 8, fontSize: 12 }}
-                  labelStyle={{ color: '#a9a294' }}
+                  contentStyle={tooltipProps.contentStyle}
+                  labelStyle={tooltipProps.labelStyle}
                   formatter={(v: number) => [fmt(v), 'Bytes']}
                 />
-                <Area type="monotone" dataKey="bytes" stroke="#7ee0a8" fill="url(#histGrad)" strokeWidth={2} dot={false} />
+                <Area type="monotone" dataKey="bytes" stroke="#7ee0a8" style={glow("#7ee0a8", 5)} fill="url(#histGrad)" strokeWidth={2} dot={false} />
               </AreaChart>
             </ResponsiveContainer>
           )}

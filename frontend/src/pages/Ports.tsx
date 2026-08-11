@@ -16,6 +16,7 @@ import { api, ProtocolStat, PortStat, DeviceSummary, FlowRecord } from '../api/c
 import { useAutoRefresh } from '../store/autoRefresh'
 import { protoLabel } from '../utils/protocols'
 import HelpButton from '../components/HelpButton'
+import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT } from '../components/instrument'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -183,7 +184,7 @@ function ProtocolMixPanel({ window, sampler_ip }: { window: string; sampler_ip?:
               <Cell key={i} fill={PROTO_COLORS[pieData[i].name] || BAR_COLORS[i % BAR_COLORS.length]} />
             ))}
           </Pie>
-          <Tooltip formatter={(v: any) => fmtBytes(Number(v))} contentStyle={{ background: '#0d1219', border: '1px solid #2a2418', borderRadius: 8, fontSize: 12 }} labelStyle={{ color: '#a9a294' }} itemStyle={{ color: '#fff' }} />
+          <Tooltip formatter={(v: any) => fmtBytes(Number(v))} contentStyle={tooltipProps.contentStyle} labelStyle={tooltipProps.labelStyle} itemStyle={{ color: '#fff' }} />
           <Legend iconSize={8} wrapperStyle={{ fontSize: 11, color: '#fff' }} />
         </PieChart>
       </ResponsiveContainer>
@@ -225,8 +226,8 @@ function TopPortsPanel({
           <YAxis type="category" dataKey="label" tick={{ fill: '#fff', fontSize: 10 }} width={70} />
           <Tooltip
             cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-            contentStyle={{ background: '#0d1219', border: '1px solid #2a2418', borderRadius: 8, fontSize: 12 }}
-            labelStyle={{ color: '#a9a294' }}
+            contentStyle={tooltipProps.contentStyle}
+            labelStyle={tooltipProps.labelStyle}
             itemStyle={{ color: '#fff' }}
             formatter={(v: any) => metric === 'bytes' ? fmtBytes(Number(v)) : fmtNum(Number(v))}
           />
@@ -276,28 +277,28 @@ function TrafficTimelinePanel({
                 <stop offset="95%" stopColor="#8ad8ea" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(216,180,110,.12)" vertical={false} />
+            <CartesianGrid {...gridProps} />
             <XAxis
               dataKey="timestamp"
-              tick={{ fill: '#a9a294', fontSize: 9 }}
+              tick={axisProps.tick}
               tickLine={false} axisLine={false}
               interval="preserveStartEnd" minTickGap={40}
               tickFormatter={(t: any) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             />
             <YAxis
-              tick={{ fill: '#a9a294', fontSize: 9 }}
+              tick={axisProps.tick}
               tickLine={false} axisLine={false}
               width={52}
               tickFormatter={(v: any) => fmtBytes(Number(v))}
             />
             <Tooltip
-              contentStyle={{ background: '#0d1219', border: '1px solid #2a2418', borderRadius: 8, fontSize: 12 }}
-              labelStyle={{ color: '#a9a294' }}
+              contentStyle={tooltipProps.contentStyle}
+              labelStyle={tooltipProps.labelStyle}
               itemStyle={{ color: '#fff' }}
               formatter={(v: any) => fmtBytes(Number(v))}
               labelFormatter={(l: any) => new Date(l).toLocaleTimeString()}
             />
-            <Area type="monotone" dataKey="bytes" stroke="#8ad8ea" fill="url(#portGrad)" strokeWidth={1.5} dot={false} />
+            <Area type="monotone" dataKey="bytes" stroke="#8ad8ea" style={glow("#8ad8ea", 5)} fill="url(#portGrad)" strokeWidth={1.5} dot={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>

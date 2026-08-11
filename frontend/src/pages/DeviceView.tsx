@@ -10,6 +10,7 @@ import { PortsTabContent } from './Ports'
 import { protoLabel } from '../utils/protocols'
 import IpLink from '../components/IpLink'
 import HelpButton from '../components/HelpButton'
+import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT } from '../components/instrument'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -817,11 +818,11 @@ export default function DeviceView() {
                         <stop offset="95%" stopColor="#8ad8ea" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#211c14" vertical={false} />
-                    <XAxis dataKey="ts" tick={{ fill: '#a9a294', fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <YAxis tickFormatter={v => fmtBytes(v)} tick={{ fill: '#a9a294', fontSize: 11 }} tickLine={false} axisLine={false} width={72} />
+                    <CartesianGrid {...gridProps} />
+                    <XAxis dataKey="ts" tick={axisProps.tick} tickLine={false} axisLine={false} />
+                    <YAxis tickFormatter={v => fmtBytes(v)} tick={axisProps.tick} tickLine={false} axisLine={false} width={72} />
                     <Tooltip content={<TimeTooltip />} />
-                    <Area type="monotone" dataKey="bytes" name="Bytes" stroke="#8ad8ea" strokeWidth={2} fill="url(#gB)" dot={false} />
+                    <Area type="monotone" dataKey="bytes" name="Bytes" stroke="#8ad8ea" style={glow("#8ad8ea", 5)} strokeWidth={2} fill="url(#gB)" dot={false} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -835,11 +836,11 @@ export default function DeviceView() {
                         <stop offset="95%" stopColor="#9784cb" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#211c14" vertical={false} />
-                    <XAxis dataKey="ts" tick={{ fill: '#a9a294', fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fill: '#a9a294', fontSize: 11 }} tickLine={false} axisLine={false} width={72} />
+                    <CartesianGrid {...gridProps} />
+                    <XAxis dataKey="ts" tick={axisProps.tick} tickLine={false} axisLine={false} />
+                    <YAxis tick={axisProps.tick} tickLine={false} axisLine={false} width={72} />
                     <Tooltip content={<TimeTooltip />} />
-                    <Area type="monotone" dataKey="packets" name="Packets" stroke="#9784cb" strokeWidth={2} fill="url(#gP)" dot={false} />
+                    <Area type="monotone" dataKey="packets" name="Packets" stroke="#9784cb" style={glow("#9784cb", 5)} strokeWidth={2} fill="url(#gP)" dot={false} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
