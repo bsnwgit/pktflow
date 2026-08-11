@@ -395,9 +395,41 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
     const maxArcBytes  = Math.max(...visible.arcs.map(a => a.bytes), 1)
     const widthScale   = d3.scaleSqrt().domain([0, maxArcBytes]).range([0.8, 4])
 
+    // ── live layer: keyframes + glow, mounted once into the overlay SVG ──
+    // Leaflet redraws this group on every pan/zoom, so the defs are guarded
+    // rather than appended each pass.
+    function ensureLiveDefs() {
+      const node = arcG.node() as SVGGElement | null
+      const svg = node?.ownerSVGElement
+      if (!svg) return
+      const sel = d3.select(svg)
+      if (!sel.select('#geo-live-defs').empty()) return
+
+      const defs = sel.append('defs').attr('id', 'geo-live-defs')
+      const f = defs.append('filter').attr('id', 'geo-glow')
+        .attr('x', '-40%').attr('y', '-40%').attr('width', '180%').attr('height', '180%')
+      f.append('feGaussianBlur').attr('stdDeviation', 2).attr('result', 'b')
+      const merge = f.append('feMerge')
+      merge.append('feMergeNode').attr('in', 'b')
+      merge.append('feMergeNode').attr('in', 'SourceGraphic')
+
+      sel.append('style').text(`
+        @keyframes geo-flow { to { stroke-dashoffset: -260; } }
+        .geo-arc-pulse {
+          stroke-dasharray: 2 22;
+          animation: geo-flow 4s linear infinite;
+          pointer-events: none;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .geo-arc-pulse { animation: none; opacity: 0 !important; }
+        }
+      `)
+    }
+
     function drawArcs() {
       if (!mapRef.current) return
       arcG.selectAll('*').remove()
+      ensureLiveDefs()
 
       const pathDs = visible.arcs.map(arc => {
         const src = mapRef.current!.latLngToLayerPoint([arc.src_lat, arc.src_lng])
@@ -425,6 +457,52 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
           .style('pointer-events', 'none')
           .node()
         return node
+      })
+
+      // 1.5th pass — a charge travelling src -> dst along each arc. Speed
+      // carries volume (busiest arc fastest), matching the Sankey ribbons, and
+      // it is drawn on the same path so it cannot imply a route that is not
+      // there. Pointer events stay off so the hit areas below still own
+      // interaction.
+      const maxArcBytes = Math.max(1, ...visible.arcs.map(a => a.bytes))
+      pathDs.forEach((d, i) => {
+        const arc = visible.arcs[i]
+        const frac = Math.min(1, Math.max(0, arc.bytes / maxArcBytes))
+        const dur = (7 - Math.sqrt(frac) * 4.6).toFixed(2)   // 7s quiet -> 2.4s busiest
+        arcG.append('path')
+          .attr('d', d)
+          .attr('stroke', arc.color)
+          .attr('stroke-width', Math.min(widthScale(arc.bytes) * 0.9, 3))
+          .attr('stroke-linecap', 'round')
+          .attr('fill', 'none')
+          .attr('class', 'geo-arc-pulse')
+          .attr('filter', 'url(#geo-glow)')
+          .style('animation-duration', `${dur}s`)
+          .style('animation-delay', `${(i % 6) * 0.4}s`)
+      })
+
+      // Radar pings on the locations. Drawn in the overlay rather than on the
+      // Leaflet markers so they redraw with pan/zoom and never intercept
+      // clicks. SMIL rather than CSS because animating the r geometry
+      // attribute through CSS is not reliable across browsers.
+      visible.locations.forEach((loc, i) => {
+        const pt = mapRef.current!.latLngToLayerPoint([loc.lat, loc.lng])
+        const gcfg = configRef.current
+        const stroke = gcfg.siteStrokes[loc.site_key ?? ''] ?? gcfg.defaultStroke
+        const ring = arcG.append('circle')
+          .attr('cx', pt.x).attr('cy', pt.y)
+          .attr('r', 3)
+          .attr('fill', 'none')
+          .attr('stroke', stroke)
+          .attr('stroke-width', 1.1)
+          .style('pointer-events', 'none')
+        const begin = `${((i % 5) * 0.7).toFixed(2)}s`
+        ring.append('animate')
+          .attr('attributeName', 'r').attr('values', '3;18')
+          .attr('dur', '3s').attr('begin', begin).attr('repeatCount', 'indefinite')
+        ring.append('animate')
+          .attr('attributeName', 'opacity').attr('values', '0.65;0')
+          .attr('dur', '3s').attr('begin', begin).attr('repeatCount', 'indefinite')
       })
 
       // 2nd pass — wide transparent hit areas
