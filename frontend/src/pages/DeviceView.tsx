@@ -10,7 +10,7 @@ import { PortsTabContent } from './Ports'
 import { protoLabel } from '../utils/protocols'
 import IpLink from '../components/IpLink'
 import HelpButton from '../components/HelpButton'
-import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT , InstrumentFrame } from '../components/instrument'
+import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT , InstrumentFrame, RadialRing, FlowDefs, NodeRail } from '../components/instrument'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -197,31 +197,38 @@ function TalkerPieCharts({ talkers, totalBytes }: { talkers: TopTalker[]; totalB
     )
   }
 
-  const PieCard = ({ title, data, mono = false }: { title: string; data: { name: string; bytes: number }[]; mono?: boolean }) => (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-      <p className="text-xs text-white mb-2 font-medium">{title}</p>
-      <div className="flex items-center gap-2">
-        <ResponsiveContainer width="50%" height={120}>
-          <PieChart>
-            <Pie data={data} dataKey="bytes" nameKey="name" cx="50%" cy="50%"
-              innerRadius={28} outerRadius={52} paddingAngle={2}>
-              {data.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-            </Pie>
-            <Tooltip content={<PieTip />} />
-          </PieChart>
-        </ResponsiveContainer>
-        <div className="flex flex-col gap-1 flex-1 min-w-0">
-          {data.slice(0, 5).map((d, i) => (
-            <div key={d.name} className="flex items-center gap-1.5 text-xs">
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
-              <span className={`${mono ? 'font-mono' : ''} text-white truncate flex-1`}>{d.name}</span>
-              <span className="text-white shrink-0">{totalBytes > 0 ? ((d.bytes / totalBytes) * 100).toFixed(0) + '%' : '-'}</span>
-            </div>
-          ))}
+  // Concentric arcs rather than donuts, matching the protocol-mix dial: the
+  // same part-to-whole reading in the console's geometry, and arc lengths on a
+  // shared radius are easier to compare than slice angles. Percentages live in
+  // the legend so identity is never colour-alone.
+  const PieCard = ({ title, data, mono = false }: { title: string; data: { name: string; bytes: number }[]; mono?: boolean }) => {
+    const segments = data.slice(0, 5).map((d, i) => ({
+      name: d.name,
+      value: d.bytes,
+      color: PIE_COLORS[i % PIE_COLORS.length],
+    }))
+    const shown = segments.reduce((sum, x) => sum + x.value, 0)
+    return (
+      <div className="f-panel p-4">
+        <div className="f-lbl mb-2.5">{title}</div>
+        <div className="flex items-center gap-3">
+          <RadialRing segments={segments} size={112} total={fmtBytes(shown)} />
+          <div className="flex flex-col gap-1 flex-1 min-w-0">
+            {segments.map(seg => (
+              <div key={seg.name} className="flex items-center gap-1.5 text-xs">
+                <span className="w-2 h-2 shrink-0"
+                      style={{ background: seg.color, boxShadow: `0 0 5px ${seg.color}88` }} />
+                <span className={`${mono ? 'font-mono' : ''} text-gray-300 truncate flex-1 text-[11px]`}>{seg.name}</span>
+                <span className="font-mono text-[10px] text-gray-500 shrink-0">
+                  {totalBytes > 0 ? ((seg.value / totalBytes) * 100).toFixed(0) + '%' : '—'}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
-    </div>
-  )
+    )
+  }
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
@@ -527,19 +534,38 @@ function SankeyBand({ link, onClick }: { link: SankeyLink; onClick?: () => void 
     C ${mx} ${link.y1 + link.w1}, ${mx} ${link.y0 + link.w0}, ${link.x0} ${link.y0 + link.w0}
     Z
   `
+  // Centreline for the travelling dash. Width already encodes volume, so the
+  // dash carries no magnitude — it only shows direction and liveness.
+  const mid = `M ${link.x0} ${link.y0 + link.w0 / 2}
+    C ${mx} ${link.y0 + link.w0 / 2}, ${mx} ${link.y1 + link.w1 / 2}, ${link.x1} ${link.y1 + link.w1 / 2}`
+  const avgW = (link.w0 + link.w1) / 2
+
   return (
-    <path
-      d={path}
-      fill={link.color}
-      fillOpacity={hovered ? 0.6 : 0.35}
-      stroke={link.color}
-      strokeOpacity={hovered ? 0.9 : 0.6}
-      strokeWidth={0.5}
+    <g
       style={{ cursor: onClick ? 'pointer' : 'default' }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={onClick}
-    />
+    >
+      <path
+        d={path}
+        fill={link.color}
+        fillOpacity={hovered ? 0.5 : 0.22}
+        stroke={link.color}
+        strokeOpacity={hovered ? 0.9 : 0.45}
+        strokeWidth={0.5}
+      />
+      <path
+        d={mid}
+        fill="none"
+        stroke={link.color}
+        strokeWidth={Math.min(Math.max(avgW * 0.3, 0.8), 2.6)}
+        strokeLinecap="round"
+        opacity={hovered ? 1 : 0.85}
+        className="f-ribbon-pulse"
+        filter="url(#f-ribbon-glow)"
+      />
+    </g>
   )
 }
 
@@ -567,11 +593,16 @@ function SankeyTab({ talkers, onDrillDown }: { talkers: TopTalker[]; onDrillDown
       {nodes.map(n => (
         <g key={n.key}>
           <rect x={n.x} y={n.y} width={COL_W} height={n.h}
-            rx={3} fill="#8ad8ea" fillOpacity={0.8} />
+            fill={INSTRUMENT.ice} fillOpacity={0.16}
+            stroke={INSTRUMENT.ice} strokeOpacity={0.55} strokeWidth={1} />
+          <rect x={n.x} y={n.y - 1} width={COL_W} height={2}
+            fill={INSTRUMENT.goldHi} opacity={0.85} />
+          <rect x={n.x} y={n.y + n.h - 1} width={COL_W} height={2}
+            fill={INSTRUMENT.goldHi} opacity={0.85} />
           <text
             x={n.x + COL_W / 2} y={n.y + n.h / 2}
             textAnchor="middle" dominantBaseline="middle"
-            fontSize={9} fill="white" fontFamily="monospace"
+            fontSize={9} fill={INSTRUMENT.ink} fontFamily="ui-monospace, SF Mono, Menlo, monospace"
           >
             {n.key.length > 14 ? n.key.slice(0, 13) + '…' : n.key}
           </text>
@@ -632,6 +663,8 @@ function SankeyTab({ talkers, onDrillDown }: { talkers: TopTalker[]; onDrillDown
 
       <div className="overflow-x-auto">
         <svg width="100%" viewBox={`0 0 ${W} ${H + 24}`} xmlns="http://www.w3.org/2000/svg">
+          {/* animation keyframes + glow used by the flow ribbons */}
+          <FlowDefs ribbons={[]} />
           <text x={COL_W / 2} y={12} textAnchor="middle" fontSize={10} fill="#a9a294">Source IP</text>
           <text x={W / 2} y={12} textAnchor="middle" fontSize={10} fill="#a9a294">Dst Port</text>
           <text x={W - COL_W / 2} y={12} textAnchor="middle" fontSize={10} fill="#a9a294">Dest IP</text>
