@@ -311,17 +311,20 @@ export function RadialRing({
   total?: string
 }) {
   const sum = segments.reduce((s, x) => s + x.value, 0) || 1
-  const R0 = 78          // outermost ring radius
-  const STEP = 13        // spacing between rings
+  // Data rings pulled inward to leave room for the survey collar and the two
+  // counter-rotating orbit rings outside them — the orbiting dots are what
+  // make the dial read as an instrument rather than a static donut.
+  const R0 = 72          // outermost data ring
+  const STEP = 12        // spacing between rings
   const C = (r: number) => 2 * Math.PI * r
 
   const ticks = Array.from({ length: 60 }, (_, i) => {
     const a = (i / 60) * Math.PI * 2 - Math.PI / 2
     const long = i % 5 === 0
-    const r1 = long ? 88 : 91
+    const r1 = long ? 77 : 79.5
     return {
       x1: 96 + Math.cos(a) * r1, y1: 96 + Math.sin(a) * r1,
-      x2: 96 + Math.cos(a) * 94, y2: 96 + Math.sin(a) * 94,
+      x2: 96 + Math.cos(a) * 82, y2: 96 + Math.sin(a) * 82,
       o: long ? 0.6 : 0.24,
     }
   })
@@ -330,6 +333,21 @@ export function RadialRing({
     <div className="grid place-items-center">
       <div className="relative" style={{ width: size, height: size }}>
         <svg width={size} height={size} viewBox="0 0 192 192" fill="none">
+          {/* orbit rings — slow, counter-rotating, each carrying a floating dot */}
+          <g className="f-spin-slow">
+            <circle cx="96" cy="96" r="92" stroke="rgba(216,180,110,.14)" />
+            <circle cx="96" cy="96" r="92" stroke="rgba(216,180,110,.5)" strokeDasharray="2 20" />
+            <circle cx="96" cy="4" r="2.4" fill={INSTRUMENT.gold}
+                    style={{ filter: `drop-shadow(0 0 4px ${INSTRUMENT.gold})` }} />
+          </g>
+          <g className="f-spin-rev">
+            <circle cx="96" cy="96" r="86" stroke="rgba(138,216,234,.2)" />
+            <circle cx="96" cy="96" r="86" strokeDasharray="30 240" strokeLinecap="round"
+                    stroke="rgba(138,216,234,.5)" />
+            <circle cx="10" cy="96" r="1.9" fill={INSTRUMENT.ice}
+                    style={{ filter: `drop-shadow(0 0 4px ${INSTRUMENT.ice})` }} />
+          </g>
+
           <g stroke="rgba(216,180,110,.3)">
             {ticks.map((t, i) => (
               <line key={i} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} opacity={t.o} />

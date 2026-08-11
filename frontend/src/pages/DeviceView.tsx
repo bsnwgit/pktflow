@@ -524,7 +524,21 @@ function buildSankeyLayout(talkers: TopTalker[], W: number, H: number) {
   return { srcNodes, portNodes, dstNodes, links1, links2, COL_W }
 }
 
-function SankeyBand({ link, onClick }: { link: SankeyLink; onClick?: () => void }) {
+
+// Dash speed carries the ribbon's throughput: the busiest link runs fastest.
+// Scaled against the busiest ribbon in view rather than an absolute rate, so
+// it reads as "this one is moving more than that one" rather than implying a
+// bytes/sec the animation cannot honestly convey. sqrt keeps mid-sized flows
+// visibly distinct instead of bunching them all near the slow end.
+function flowDuration(value: number, maxValue: number): string {
+  const FAST_S = 1.6, SLOW_S = 9
+  const frac = Math.min(1, Math.max(0, value / (maxValue || 1)))
+  return `${(SLOW_S - Math.sqrt(frac) * (SLOW_S - FAST_S)).toFixed(2)}s`
+}
+
+function SankeyBand({ link, onClick, maxBytes = 1 }: {
+  link: SankeyLink; onClick?: () => void; maxBytes?: number
+}) {
   const [hovered, setHovered] = useState(false)
   const mx = (link.x0 + link.x1) / 2
   const path = `
@@ -564,6 +578,7 @@ function SankeyBand({ link, onClick }: { link: SankeyLink; onClick?: () => void 
         opacity={hovered ? 1 : 0.85}
         className="f-ribbon-pulse"
         filter="url(#f-ribbon-glow)"
+        style={{ animationDuration: flowDuration(link.bytes, maxBytes) }}
       />
     </g>
   )
@@ -587,6 +602,10 @@ function SankeyTab({ talkers, onDrillDown }: { talkers: TopTalker[]; onDrillDown
   }
 
   const { srcNodes, portNodes, dstNodes, links1, links2, COL_W } = layout
+
+  // One scale across both link layers, so a ribbon's speed means the same
+  // thing on the src->port hop as on the port->dst hop.
+  const maxLinkBytes = Math.max(1, ...links1.map(l => l.bytes), ...links2.map(l => l.bytes))
 
   const NodeGroup = ({ nodes }: { nodes: SankeyNode[] }) => (
     <g>
@@ -671,11 +690,11 @@ function SankeyTab({ talkers, onDrillDown }: { talkers: TopTalker[]; onDrillDown
 
           <g transform="translate(0,20)">
             {links1.map((l, i) => (
-              <SankeyBand key={i} link={l}
+              <SankeyBand key={i} link={l} maxBytes={maxLinkBytes}
                 onClick={l.flow ? () => setSelectedFlow(l.flow!) : undefined} />
             ))}
             {links2.map((l, i) => (
-              <SankeyBand key={i} link={l}
+              <SankeyBand key={i} link={l} maxBytes={maxLinkBytes}
                 onClick={l.flow ? () => setSelectedFlow(l.flow!) : undefined} />
             ))}
             <NodeGroup nodes={srcNodes} />

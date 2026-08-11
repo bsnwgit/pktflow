@@ -157,6 +157,18 @@ function SankeyChart({ topology }: { topology: TopologyResponse }) {
     to:   COLORS[(p ? p.target : i) % COLORS.length],
   }))
 
+  // Dash speed carries the ribbon's throughput: the busiest link runs fastest.
+  // Scaled against the busiest ribbon in view rather than an absolute rate, so
+  // the comparison is between links on screen — it reads as "this one is
+  // moving more than that one", not as an absolute bytes/sec.
+  const maxVal = Math.max(1, ...paths.filter(Boolean).map(p => (p as any).value))
+  const FAST_S = 1.6, SLOW_S = 9   // seconds per dash cycle
+  const flowDuration = (value: number) => {
+    const frac = Math.min(1, Math.max(0, value / maxVal))
+    // sqrt keeps mid-sized flows visibly different rather than all near-slow
+    return `${(SLOW_S - Math.sqrt(frac) * (SLOW_S - FAST_S)).toFixed(2)}s`
+  }
+
   return (
     <div ref={containerRef} className="w-full h-full relative">
       <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} className="overflow-visible">
@@ -177,7 +189,10 @@ function SankeyChart({ topology }: { topology: TopologyResponse }) {
               opacity={0.9}
               className="f-ribbon-pulse"
               filter="url(#f-ribbon-glow)"
-              style={{ animationDelay: `${(i % 7) * 0.45}s` }}
+              style={{
+                animationDelay: `${(i % 7) * 0.45}s`,
+                animationDuration: flowDuration(p.value),
+              }}
             />
           </g>
         ))}
@@ -206,11 +221,14 @@ function SankeyChart({ topology }: { topology: TopologyResponse }) {
         ))}
       </svg>
 
-      {/* the dash means "this way", not "this much" */}
-      <div className="absolute bottom-0 left-0 flex items-center gap-2 pointer-events-none">
-        <span className="f-lbl">source</span>
-        <span className="h-px w-8" style={{ background: 'linear-gradient(90deg, rgba(216,180,110,.5), rgba(138,216,234,.5))' }} />
-        <span className="f-lbl">destination</span>
+      {/* width = volume, dash speed = throughput */}
+      <div className="absolute bottom-0 left-0 flex items-center gap-3 pointer-events-none flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="f-lbl">source</span>
+          <span className="h-px w-8" style={{ background: 'linear-gradient(90deg, rgba(216,180,110,.5), rgba(138,216,234,.5))' }} />
+          <span className="f-lbl">destination</span>
+        </div>
+        <span className="f-lbl" style={{ opacity: 0.75 }}>· width = volume · dash speed = rate</span>
       </div>
     </div>
   )
