@@ -16,7 +16,7 @@ import { api, ProtocolStat, PortStat, DeviceSummary, FlowRecord } from '../api/c
 import { useAutoRefresh } from '../store/autoRefresh'
 import { protoLabel } from '../utils/protocols'
 import HelpButton from '../components/HelpButton'
-import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT, InstrumentFrame, RadialRing } from '../components/instrument'
+import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT, InstrumentFrame, RadialRing , liveEdgeDot } from '../components/instrument'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -279,7 +279,7 @@ function TrafficTimelinePanel({
           <button onClick={onClear} className="text-xs text-white hover:text-white">clear</button>
         </div>
       )}
-      <div className="h-44">
+      <InstrumentFrame height={176} live>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
             <defs>
@@ -309,10 +309,12 @@ function TrafficTimelinePanel({
               formatter={(v: any) => fmtBytes(Number(v))}
               labelFormatter={(l: any) => new Date(l).toLocaleTimeString()}
             />
-            <Area type="monotone" dataKey="bytes" stroke="#8ad8ea" style={glow("#8ad8ea", 5)} fill="url(#portGrad)" strokeWidth={1.5} dot={false} />
+            <Area type="monotone" dataKey="bytes" stroke="#8ad8ea" style={glow("#8ad8ea", 5)}
+                  fill="url(#portGrad)" strokeWidth={1.5}
+                  dot={liveEdgeDot(data.length, '#8ad8ea')} activeDot={{ r: 3, strokeWidth: 0, fill: '#8ad8ea' }} />
           </AreaChart>
         </ResponsiveContainer>
-      </div>
+      </InstrumentFrame>
     </div>
   )
 }

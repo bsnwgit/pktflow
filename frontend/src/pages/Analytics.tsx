@@ -11,7 +11,7 @@ import { api, TimeSeriesPoint, TopologyResponse } from '../api/client'
 import { GeoMapCard } from './GeoMap'
 import { useWebSocket, type WsMessage, type IngestStats } from '../hooks/useWebSocket'
 import HelpButton from '../components/HelpButton'
-import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT, FlowDefs, NodeRail, InstrumentFrame, RadialRing } from '../components/instrument'
+import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT, FlowDefs, NodeRail, InstrumentFrame, RadialRing, liveEdgeDot } from '../components/instrument'
 
 // ── Colour palette ─────────────────────────────────────────────────────────────
 const COLORS = ['#ab9017','#007dab','#d86353','#00a49e','#8561bd','#007b43','#466cc8','#be7125']
@@ -470,7 +470,9 @@ export default function Analytics() {
                 labelStyle={tooltipProps.labelStyle}
                 formatter={(v: number) => [metric === 'bytes' ? fmt(v) : fmt(v, 'flows'), metricLabel]}
               />
-              <Area type="monotone" dataKey={metric} stroke="#8ad8ea" style={glow("#8ad8ea", 5)} fill="url(#areaGrad)" strokeWidth={2} dot={false} />
+              <Area type="monotone" dataKey={metric} stroke="#8ad8ea" style={glow("#8ad8ea", 5)}
+                    fill="url(#areaGrad)" strokeWidth={2}
+                    dot={liveEdgeDot(tsData.length, '#8ad8ea')} activeDot={{ r: 3, strokeWidth: 0, fill: '#8ad8ea' }} />
             </AreaChart>
           </ResponsiveContainer>
         </InstrumentFrame>
@@ -531,7 +533,9 @@ export default function Analytics() {
                   labelStyle={tooltipProps.labelStyle}
                   formatter={(v: number) => [fmt(v), 'Bytes']}
                 />
-                <Area type="monotone" dataKey="bytes" stroke="#7ee0a8" style={glow("#7ee0a8", 5)} fill="url(#histGrad)" strokeWidth={2} dot={false} />
+                <Area type="monotone" dataKey="bytes" stroke="#7ee0a8" style={glow("#7ee0a8", 5)}
+                      fill="url(#histGrad)" strokeWidth={2}
+                      dot={liveEdgeDot(histDays, '#7ee0a8')} activeDot={{ r: 3, strokeWidth: 0, fill: '#7ee0a8' }} />
               </AreaChart>
             </ResponsiveContainer>
         </InstrumentFrame>

@@ -10,7 +10,7 @@ import { PortsTabContent } from './Ports'
 import { protoLabel } from '../utils/protocols'
 import IpLink from '../components/IpLink'
 import HelpButton from '../components/HelpButton'
-import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT , InstrumentFrame, RadialRing, FlowDefs, NodeRail } from '../components/instrument'
+import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT , InstrumentFrame, RadialRing, FlowDefs, NodeRail , liveEdgeDot } from '../components/instrument'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -875,7 +875,9 @@ export default function DeviceView() {
                     <XAxis dataKey="ts" tick={axisProps.tick} tickLine={false} axisLine={false} />
                     <YAxis tickFormatter={v => fmtBytes(v)} tick={axisProps.tick} tickLine={false} axisLine={false} width={72} />
                     <Tooltip content={<TimeTooltip />} />
-                    <Area type="monotone" dataKey="bytes" name="Bytes" stroke="#8ad8ea" style={glow("#8ad8ea", 5)} strokeWidth={2} fill="url(#gB)" dot={false} />
+                    <Area type="monotone" dataKey="bytes" name="Bytes" stroke="#8ad8ea" style={glow("#8ad8ea", 5)}
+                          strokeWidth={2} fill="url(#gB)"
+                          dot={liveEdgeDot(chartData.length, '#8ad8ea')} activeDot={{ r: 3, strokeWidth: 0, fill: '#8ad8ea' }} />
                   </AreaChart>
                 </ResponsiveContainer>
                 </InstrumentFrame>
@@ -895,7 +897,9 @@ export default function DeviceView() {
                     <XAxis dataKey="ts" tick={axisProps.tick} tickLine={false} axisLine={false} />
                     <YAxis tick={axisProps.tick} tickLine={false} axisLine={false} width={72} />
                     <Tooltip content={<TimeTooltip />} />
-                    <Area type="monotone" dataKey="packets" name="Packets" stroke="#9784cb" style={glow("#9784cb", 5)} strokeWidth={2} fill="url(#gP)" dot={false} />
+                    <Area type="monotone" dataKey="packets" name="Packets" stroke="#9784cb" style={glow("#9784cb", 5)}
+                          strokeWidth={2} fill="url(#gP)"
+                          dot={liveEdgeDot(chartData.length, '#9784cb')} activeDot={{ r: 3, strokeWidth: 0, fill: '#9784cb' }} />
                   </AreaChart>
                 </ResponsiveContainer>
                 </InstrumentFrame>
