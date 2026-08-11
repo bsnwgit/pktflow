@@ -736,14 +736,54 @@ function HierarchicalGraph({
     // private<->private links draw thin and dashed (they never cross the L3
     // boundary at all); private-l3/l3-external links carry real aggregated
     // weight and get an arrowhead showing the direction of the hierarchy.
+    // Live layer for this view. The hierarchical layout is the default one the
+    // page opens on, so it needs the treatment at least as much as the force
+    // graph does.
+    const hDefs = svg.append('defs')
+    const hf = hDefs.append('filter').attr('id', 'topoh-glow')
+      .attr('x', '-40%').attr('y', '-40%').attr('width', '180%').attr('height', '180%')
+    hf.append('feGaussianBlur').attr('stdDeviation', 1.8).attr('result', 'b')
+    const hm = hf.append('feMerge')
+    hm.append('feMergeNode').attr('in', 'b')
+    hm.append('feMergeNode').attr('in', 'SourceGraphic')
+    svg.append('style').text(`
+      @keyframes topoh-flow { to { stroke-dashoffset: -120; } }
+      .topoh-pulse {
+        stroke-dasharray: 12 108;
+        stroke-linecap: round;
+        animation: topoh-flow 4s linear infinite;
+        pointer-events: none;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .topoh-pulse { animation: none; opacity: 0 !important; }
+      }
+    `)
+
     const linkSel = g.append('g').selectAll<SVGPathElement, typeof validLines[number]>('path')
       .data(validLines).join('path')
       .attr('fill', 'none')
-      .attr('stroke', d => d.line.kind === 'private-private' ? '#a9a294' : '#5c6470')
+      .attr('stroke', d => d.line.kind === 'private-private' ? 'rgba(216,180,110,.45)' : 'rgba(216,180,110,.55)')
       .attr('stroke-dasharray', d => d.line.kind === 'private-private' ? '4,3' : null)
       .attr('stroke-width', d => wScale(d.line.bytes))
       .attr('stroke-opacity', 0.65)
       .attr('marker-end', d => d.line.kind === 'private-private' ? null : 'url(#arr-h)')
+      .attr('d', d => (d.line.kind === 'private-private' ? linkGenH(d.pts) : linkGenV(d.pts))!)
+
+    // A charge runs each link, speed scaled by volume on the same curve the
+    // Sankey, GeoMap and force graph use.
+    const hMaxBytes = Math.max(1, ...validLines.map(v => v.line.bytes))
+    g.append('g').selectAll<SVGPathElement, typeof validLines[number]>('path')
+      .data(validLines).join('path')
+      .attr('class', 'topoh-pulse')
+      .attr('fill', 'none')
+      .attr('stroke', d => d.line.kind === 'private-private' ? INSTRUMENT.goldHi : INSTRUMENT.ice)
+      .attr('stroke-width', d => Math.min(Math.max(wScale(d.line.bytes) * 1.1, 1.6), 3.4))
+      .attr('filter', 'url(#topoh-glow)')
+      .style('animation-duration', d => {
+        const frac = Math.min(1, Math.max(0, d.line.bytes / hMaxBytes))
+        return `${(7 - Math.sqrt(frac) * 4.6).toFixed(2)}s`
+      })
+      .style('animation-delay', (_, i) => `${(i % 6) * 0.4}s`)
       .attr('d', d => (d.line.kind === 'private-private' ? linkGenH(d.pts) : linkGenV(d.pts))!)
 
     // ── L3 nodes — generic by design: no IP, no stats, just what it is ─────────
@@ -754,9 +794,9 @@ function HierarchicalGraph({
 
     l3Sel.append('rect')
       .attr('x', -L3_W / 2).attr('y', -L3_H / 2).attr('width', L3_W).attr('height', L3_H)
-      .attr('rx', 8).attr('ry', 8)
-      .attr('fill', '#0d1219')
-      .attr('stroke', '#a9a294').attr('stroke-width', 1.5).attr('stroke-dasharray', '4,2')
+      .attr('fill', 'rgba(13,18,25,.92)')
+      .attr('stroke', INSTRUMENT.gold).attr('stroke-opacity', 0.5)
+      .attr('stroke-width', 1).attr('stroke-dasharray', '3,4')
 
     l3Sel.append('text')
       .text('L3')
@@ -777,19 +817,42 @@ function HierarchicalGraph({
       .attr('cursor', 'pointer')
       .on('click', (_, c) => navigate(`/explorer?src_ip=${encodeURIComponent(c.node.id)}&any_direction=true&window=${window_}`))
 
+    // Cards as instrument panels rather than rounded filled boxes: flat corners,
+    // near-black body, a lit spine in the site colour, and bracket ticks — the
+    // same housing language the charts wear.
     cardSel.append('rect')
       .attr('class', 'card-border')
       .attr('x', -CARD_W / 2).attr('y', -CARD_H / 2)
       .attr('width', CARD_W).attr('height', CARD_H)
-      .attr('rx', 8).attr('ry', 8)
-      .attr('fill', '#211c14')
+      .attr('fill', 'rgba(13,18,25,.92)')
       .attr('stroke', c => siteColor(c.node.site || 'unknown'))
-      .attr('stroke-width', 1.25)
+      .attr('stroke-opacity', 0.55)
+      .attr('stroke-width', 1)
 
+    // lit spine
     cardSel.append('rect')
       .attr('x', -CARD_W / 2).attr('y', -CARD_H / 2)
-      .attr('width', 4).attr('height', CARD_H)
+      .attr('width', 2.5).attr('height', CARD_H)
       .attr('fill', c => siteColor(c.node.site || 'unknown'))
+      .style('filter', 'url(#topoh-glow)')
+
+    // corner brackets
+    cardSel.each(function (c) {
+      const col = siteColor(c.node.site || 'unknown')
+      const x0 = -CARD_W / 2, y0 = -CARD_H / 2, x1 = CARD_W / 2, y1 = CARD_H / 2
+      const T = 6
+      const corners = [
+        `M${x0},${y0 + T} L${x0},${y0} L${x0 + T},${y0}`,
+        `M${x1 - T},${y0} L${x1},${y0} L${x1},${y0 + T}`,
+        `M${x0},${y1 - T} L${x0},${y1} L${x0 + T},${y1}`,
+        `M${x1 - T},${y1} L${x1},${y1} L${x1},${y1 - T}`,
+      ]
+      const sel = d3.select(this)
+      corners.forEach(d => {
+        sel.append('path').attr('d', d).attr('fill', 'none')
+          .attr('stroke', col).attr('stroke-width', 1.2).attr('stroke-opacity', 0.95)
+      })
+    })
 
     cardSel.append('text')
       .text(c => truncateLabel(c.node.sampler_name || c.node.id, 21))
