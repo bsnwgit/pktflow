@@ -809,7 +809,7 @@ function PktHubTokenDisplay() {
                   if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2000) }
                 }}
                 className="px-3 py-1.5 text-xs font-medium text-white rounded-lg whitespace-nowrap transition-colors"
-                style={{ background: copied ? '#16a34a' : '#2563eb' }}
+                style={{ background: copied ? '#52cc8e' : '#63c3d8' }}
               >
                 {copied ? '\u2713 Copied' : 'Copy Token'}
               </button>
@@ -3090,7 +3090,7 @@ function SitesSection({ isAdmin }: { isAdmin: boolean }) {
   const [loading,  setLoading]  = useState(true)
   const [showAdd,  setShowAdd]  = useState(false)
   const [editId,   setEditId]   = useState<number | null>(null)
-  const blank: SiteIn = { name: '', display_name: '', fill_color: '#60a5fa', stroke_color: '#93c5fd', badge_bg: '#374151', badge_text: '#d1d5db', show_in_legend: true, ip_cidr: '' }
+  const blank: SiteIn = { name: '', display_name: '', fill_color: '#8ad8ea', stroke_color: '#93c5fd', badge_bg: '#2a2418', badge_text: '#dcd6c9', show_in_legend: true, ip_cidr: '' }
   const [form,     setForm]     = useState<SiteIn>(blank)
   const [editForm, setEditForm] = useState<SiteIn>(blank)
   const [saving,   setSaving]   = useState(false)
@@ -3364,7 +3364,7 @@ function LineStylesSection({ isAdmin }: { isAdmin: boolean }) {
   const [loading,  setLoading]  = useState(true)
   const [showAdd,  setShowAdd]  = useState(false)
   const [editId,   setEditId]   = useState<number | null>(null)
-  const blank: LineStyleIn = { name: '', label: '', color_hex: '#6b7280', dash_pattern: '' }
+  const blank: LineStyleIn = { name: '', label: '', color_hex: '#a9a294', dash_pattern: '' }
   const [form,     setForm]     = useState<LineStyleIn>(blank)
   const [editForm, setEditForm] = useState<LineStyleIn>(blank)
   const [saving,   setSaving]   = useState(false)

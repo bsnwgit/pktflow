@@ -13,7 +13,7 @@ import { useWebSocket, type WsMessage, type IngestStats } from '../hooks/useWebS
 import HelpButton from '../components/HelpButton'
 
 // ── Colour palette ─────────────────────────────────────────────────────────────
-const COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#84cc16','#ec4899','#a78bfa']
+const COLORS = ['#ab9017','#007dab','#d86353','#00a49e','#8561bd','#007b43','#466cc8','#be7125']
 
 const WINDOWS = ['1h','6h','24h','7d','30d']
 const HIST_WINDOWS = [
@@ -157,7 +157,7 @@ function SankeyChart({ topology }: { topology: TopologyResponse }) {
               textAnchor={n.x < W/2 ? 'start' : 'end'}
               dominantBaseline="middle"
               fontSize={10}
-              fill="#9ca3af"
+              fill="#a9a294"
             >{n.name}</text>
           </g>
         ))}
@@ -222,7 +222,7 @@ function NetworkMap({ topology }: { topology: TopologyResponse }) {
       .force('collision', d3.forceCollide().radius((d: any) => rScale(d.bytes) + 4))
 
     const link = g.append('g').selectAll('line').data(edges).join('line')
-      .attr('stroke','#374151').attr('stroke-opacity',0.6)
+      .attr('stroke','#2a2418').attr('stroke-opacity',0.6)
       .attr('stroke-width', (d: any) => edgeScale(d.bytes))
       .attr('marker-end','url(#arrow)')
 
@@ -235,14 +235,14 @@ function NetworkMap({ topology }: { topology: TopologyResponse }) {
 
     node.append('circle')
       .attr('r', (d: any) => rScale(d.bytes))
-      .attr('fill', (d: any) => d.is_sampler ? '#3b82f6' : '#1e40af')
-      .attr('stroke', (d: any) => d.is_sampler ? '#93c5fd' : '#3b82f6')
+      .attr('fill', (d: any) => d.is_sampler ? '#8ad8ea' : '#1e40af')
+      .attr('stroke', (d: any) => d.is_sampler ? '#93c5fd' : '#8ad8ea')
       .attr('stroke-width', (d: any) => d.is_sampler ? 2 : 1)
 
     node.append('text')
       .text((d: any) => d.sampler_name || d.id)
       .attr('dy', (d: any) => rScale(d.bytes) + 10)
-      .attr('text-anchor','middle').attr('font-size',9).attr('fill','#9ca3af')
+      .attr('text-anchor','middle').attr('font-size',9).attr('fill','#a9a294')
 
     node.append('title').text((d: any) => `${d.id}\n${fmt(d.bytes)} · ${d.flows} flows`)
 
@@ -260,9 +260,9 @@ function NetworkMap({ topology }: { topology: TopologyResponse }) {
     btnData.forEach(({ label, dy, fn }) => {
       const btn = controls.append('g').attr('transform', `translate(0,${dy})`).style('cursor','pointer').on('click', fn)
       btn.append('rect').attr('width', 22).attr('height', 22).attr('rx', 4)
-        .attr('fill','#1f2937').attr('stroke','#374151').attr('stroke-width', 0.5)
+        .attr('fill','#211c14').attr('stroke','#2a2418').attr('stroke-width', 0.5)
       btn.append('text').text(label).attr('x', 11).attr('y', 15)
-        .attr('text-anchor','middle').attr('font-size', 13).attr('fill','#9ca3af')
+        .attr('text-anchor','middle').attr('font-size', 13).attr('fill','#a9a294')
     })
 
     return () => { sim.stop() }
@@ -388,20 +388,20 @@ export default function Analytics() {
             <AreaChart data={tsData} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
               <defs>
                 <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                  <stop offset="5%"  stopColor="#8ad8ea" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#8ad8ea" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-              <XAxis dataKey="t" tick={{ fill:'#6b7280', fontSize:10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-              <YAxis tick={{ fill:'#6b7280', fontSize:10 }} tickLine={false} axisLine={false}
+              <CartesianGrid strokeDasharray="3 3" stroke="#211c14" />
+              <XAxis dataKey="t" tick={{ fill:'#a9a294', fontSize:10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+              <YAxis tick={{ fill:'#a9a294', fontSize:10 }} tickLine={false} axisLine={false}
                 tickFormatter={v => metric === 'bytes' ? fmt(v) : fmt(v, 'flows')} />
               <Tooltip
-                contentStyle={{ background:'#111827', border:'1px solid #374151', borderRadius:8, fontSize:12 }}
-                labelStyle={{ color:'#9ca3af' }}
+                contentStyle={{ background:'#0d1219', border:'1px solid #2a2418', borderRadius:8, fontSize:12 }}
+                labelStyle={{ color:'#a9a294' }}
                 formatter={(v: number) => [metric === 'bytes' ? fmt(v) : fmt(v, 'flows'), metricLabel]}
               />
-              <Area type="monotone" dataKey={metric} stroke="#3b82f6" fill="url(#areaGrad)" strokeWidth={2} dot={false} />
+              <Area type="monotone" dataKey={metric} stroke="#8ad8ea" fill="url(#areaGrad)" strokeWidth={2} dot={false} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -448,19 +448,19 @@ export default function Analytics() {
               })()} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
                 <defs>
                   <linearGradient id="histGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#10b981" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                    <stop offset="5%"  stopColor="#7ee0a8" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#7ee0a8" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                <XAxis dataKey="t" tick={{ fill: '#6b7280', fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => fmt(v)} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#211c14" />
+                <XAxis dataKey="t" tick={{ fill: '#a9a294', fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fill: '#a9a294', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => fmt(v)} />
                 <Tooltip
-                  contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8, fontSize: 12 }}
-                  labelStyle={{ color: '#9ca3af' }}
+                  contentStyle={{ background: '#0d1219', border: '1px solid #2a2418', borderRadius: 8, fontSize: 12 }}
+                  labelStyle={{ color: '#a9a294' }}
                   formatter={(v: number) => [fmt(v), 'Bytes']}
                 />
-                <Area type="monotone" dataKey="bytes" stroke="#10b981" fill="url(#histGrad)" strokeWidth={2} dot={false} />
+                <Area type="monotone" dataKey="bytes" stroke="#7ee0a8" fill="url(#histGrad)" strokeWidth={2} dot={false} />
               </AreaChart>
             </ResponsiveContainer>
           )}

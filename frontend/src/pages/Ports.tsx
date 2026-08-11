@@ -32,11 +32,14 @@ function fmtNum(n: number): string {
   return String(n)
 }
 
+// Protocols are an identity encoding, so they take categorical slots.
+// Status hues (green/amber/red) are reserved for state and must never
+// stand in for a series, or a healthy ICMP share reads as 'good'.
 const PROTO_COLORS: Record<string, string> = {
-  TCP: '#3b82f6', UDP: '#8b5cf6', ICMP: '#10b981',
-  GRE: '#f59e0b', ESP: '#ef4444',
+  TCP: '#ab9017', UDP: '#007dab', ICMP: '#d86353',
+  GRE: '#00a49e', ESP: '#8561bd',
 }
-const BAR_COLORS = ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4','#ec4899','#84cc16']
+const BAR_COLORS = ['#ab9017','#007dab','#d86353','#00a49e','#8561bd','#007b43','#466cc8','#be7125']
 
 function fmtDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
@@ -180,7 +183,7 @@ function ProtocolMixPanel({ window, sampler_ip }: { window: string; sampler_ip?:
               <Cell key={i} fill={PROTO_COLORS[pieData[i].name] || BAR_COLORS[i % BAR_COLORS.length]} />
             ))}
           </Pie>
-          <Tooltip formatter={(v: any) => fmtBytes(Number(v))} contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8, fontSize: 12 }} labelStyle={{ color: '#9ca3af' }} itemStyle={{ color: '#fff' }} />
+          <Tooltip formatter={(v: any) => fmtBytes(Number(v))} contentStyle={{ background: '#0d1219', border: '1px solid #2a2418', borderRadius: 8, fontSize: 12 }} labelStyle={{ color: '#a9a294' }} itemStyle={{ color: '#fff' }} />
           <Legend iconSize={8} wrapperStyle={{ fontSize: 11, color: '#fff' }} />
         </PieChart>
       </ResponsiveContainer>
@@ -222,8 +225,8 @@ function TopPortsPanel({
           <YAxis type="category" dataKey="label" tick={{ fill: '#fff', fontSize: 10 }} width={70} />
           <Tooltip
             cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-            contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8, fontSize: 12 }}
-            labelStyle={{ color: '#9ca3af' }}
+            contentStyle={{ background: '#0d1219', border: '1px solid #2a2418', borderRadius: 8, fontSize: 12 }}
+            labelStyle={{ color: '#a9a294' }}
             itemStyle={{ color: '#fff' }}
             formatter={(v: any) => metric === 'bytes' ? fmtBytes(Number(v)) : fmtNum(Number(v))}
           />
@@ -269,8 +272,8 @@ function TrafficTimelinePanel({
           <AreaChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
             <defs>
               <linearGradient id="portGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                <stop offset="5%" stopColor="#8ad8ea" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#8ad8ea" stopOpacity={0} />
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(216,180,110,.12)" vertical={false} />
@@ -288,13 +291,13 @@ function TrafficTimelinePanel({
               tickFormatter={(v: any) => fmtBytes(Number(v))}
             />
             <Tooltip
-              contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8, fontSize: 12 }}
-              labelStyle={{ color: '#9ca3af' }}
+              contentStyle={{ background: '#0d1219', border: '1px solid #2a2418', borderRadius: 8, fontSize: 12 }}
+              labelStyle={{ color: '#a9a294' }}
               itemStyle={{ color: '#fff' }}
               formatter={(v: any) => fmtBytes(Number(v))}
               labelFormatter={(l: any) => new Date(l).toLocaleTimeString()}
             />
-            <Area type="monotone" dataKey="bytes" stroke="#3b82f6" fill="url(#portGrad)" strokeWidth={1.5} dot={false} />
+            <Area type="monotone" dataKey="bytes" stroke="#8ad8ea" fill="url(#portGrad)" strokeWidth={1.5} dot={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
