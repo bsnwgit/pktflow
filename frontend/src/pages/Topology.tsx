@@ -34,7 +34,7 @@ function attachTooltip() {
     .style('position', 'fixed').style('background', '#0d1219')
     .style('border', '1px solid #2a2418').style('border-radius', '8px')
     .style('padding', '8px 12px').style('font-size', '12px')
-    .style('color', '#f3f4f6').style('pointer-events', 'none')
+    .style('color', '#e9e4d8').style('pointer-events', 'none')
     .style('opacity', '0').style('z-index', '9999')
     .style('max-width', '260px').style('line-height', '1.6')
   const show = (_ev: MouseEvent, html: string) => tip.style('opacity', '1').html(html)
@@ -127,7 +127,7 @@ function ForceGraph({
       .attr('id', 'arr')
       .attr('viewBox', '0 -4 8 8').attr('refX', 22).attr('refY', 0)
       .attr('markerWidth', 5).attr('markerHeight', 5).attr('orient', 'auto')
-      .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', '#4b5563')
+      .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', '#5c6470')
 
     // ── Cluster hulls ─────────────────────────────────────────────────────────
     const HULL_PADDING = 32
@@ -617,7 +617,7 @@ function HierarchicalGraph({
       .attr('id', 'arr-h')
       .attr('viewBox', '0 -4 8 8').attr('refX', 8).attr('refY', 0)
       .attr('markerWidth', 5).attr('markerHeight', 5).attr('orient', 'auto')
-      .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', '#4b5563')
+      .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', '#5c6470')
 
     const linkGenV = d3.linkVertical<{ source: { x: number; y: number }; target: { x: number; y: number } }, { x: number; y: number }>()
       .x(d => d.x).y(d => d.y)
@@ -686,7 +686,7 @@ function HierarchicalGraph({
     const linkSel = g.append('g').selectAll<SVGPathElement, typeof validLines[number]>('path')
       .data(validLines).join('path')
       .attr('fill', 'none')
-      .attr('stroke', d => d.line.kind === 'private-private' ? '#a9a294' : '#4b5563')
+      .attr('stroke', d => d.line.kind === 'private-private' ? '#a9a294' : '#5c6470')
       .attr('stroke-dasharray', d => d.line.kind === 'private-private' ? '4,3' : null)
       .attr('stroke-width', d => wScale(d.line.bytes))
       .attr('stroke-opacity', 0.65)
@@ -741,7 +741,7 @@ function HierarchicalGraph({
     cardSel.append('text')
       .text(c => truncateLabel(c.node.sampler_name || c.node.id, 21))
       .attr('x', TEXT_X).attr('y', -6)
-      .attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#f3f4f6')
+      .attr('font-size', '11px').attr('font-weight', '600').attr('fill', '#e9e4d8')
 
     cardSel.append('text')
       .text(c => c.node.sampler_name ? c.node.id : (c.node.site || (c.kind === 'external' ? 'external' : '')))
@@ -784,7 +784,7 @@ function HierarchicalGraph({
     }
 
     const HIGHLIGHT_COLOR = '#8ad8ea'
-    const baseLinkColor = (d: typeof validLines[number]) => d.line.kind === 'private-private' ? '#a9a294' : '#4b5563'
+    const baseLinkColor = (d: typeof validLines[number]) => d.line.kind === 'private-private' ? '#a9a294' : '#5c6470'
 
     function isLineActive(d: typeof validLines[number], keep: Set<string>): boolean {
       const { line } = d
@@ -1061,7 +1061,7 @@ export default function Topology() {
     let dot = 'digraph pktflow_topology {\n'
     dot += '  graph [bgcolor="#0d1219" fontcolor="#dcd6c9"];\n'
     dot += '  node [shape=circle fontcolor="#dcd6c9" style=filled fontsize=10];\n'
-    dot += '  edge [color="#4b5563" fontsize=9 fontcolor="#a9a294"];\n\n'
+    dot += '  edge [color="#5c6470" fontsize=9 fontcolor="#a9a294"];\n\n'
     data.nodes.forEach(n => {
       const label = (n.sampler_name || n.id).replace(/"/g, '\\"')
       const tooltip = `${fmtBytes(n.bytes)}, ${n.flows} flows`.replace(/"/g, '\\"')
@@ -1091,7 +1091,7 @@ export default function Topology() {
       const x = 60 + (i % cols) * 160
       const y = 60 + Math.floor(i / cols) * 160
       const color = SITE_COLORS[0]
-      xml += `    <mxCell id="n_${i}" value="${label}" style="ellipse;fillColor=${color};strokeColor=#469fb4;fontColor=#ffffff;fontSize=10;fontStyle=1;" vertex="1" parent="1">`
+      xml += `    <mxCell id="n_${i}" value="${label}" style="ellipse;fillColor=${color};strokeColor=#469fb4;fontColor=#f5f1e8;fontSize=10;fontStyle=1;" vertex="1" parent="1">`
       xml += `<mxGeometry x="${x}" y="${y}" width="80" height="80" as="geometry"/></mxCell>\n`
     })
 

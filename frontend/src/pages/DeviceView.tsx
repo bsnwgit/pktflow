@@ -387,7 +387,7 @@ function TopTalkersTable({ talkers, totalBytes, window, externalExpanded, onExte
 
 const SANKEY_PORT_GROUPS: Array<{ label: string; ports: Set<number>; color: string }> = [
   { label: 'HTTPS',    ports: new Set([443, 8443]),                                 color: '#9784cb' },
-  { label: 'HTTP',     ports: new Set([80, 8080, 8000]),                            color: '#14b8a6' },
+  { label: 'HTTP',     ports: new Set([80, 8080, 8000]),                            color: '#00a49e' },
   { label: 'DNS',      ports: new Set([53]),                                         color: '#7ee0a8' },
   { label: 'SSH',      ports: new Set([22]),                                         color: '#f3c265' },
   { label: 'Database', ports: new Set([3306, 5432, 1433, 5433, 27017, 6379, 5984]), color: '#b58ab0' },

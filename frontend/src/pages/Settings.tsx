@@ -3090,7 +3090,7 @@ function SitesSection({ isAdmin }: { isAdmin: boolean }) {
   const [loading,  setLoading]  = useState(true)
   const [showAdd,  setShowAdd]  = useState(false)
   const [editId,   setEditId]   = useState<number | null>(null)
-  const blank: SiteIn = { name: '', display_name: '', fill_color: '#8ad8ea', stroke_color: '#93c5fd', badge_bg: '#2a2418', badge_text: '#dcd6c9', show_in_legend: true, ip_cidr: '' }
+  const blank: SiteIn = { name: '', display_name: '', fill_color: '#8ad8ea', stroke_color: '#63c3d8', badge_bg: '#2a2418', badge_text: '#dcd6c9', show_in_legend: true, ip_cidr: '' }
   const [form,     setForm]     = useState<SiteIn>(blank)
   const [editForm, setEditForm] = useState<SiteIn>(blank)
   const [saving,   setSaving]   = useState(false)

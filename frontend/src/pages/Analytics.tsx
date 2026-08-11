@@ -193,7 +193,7 @@ function NetworkMap({ topology }: { topology: TopologyResponse }) {
     defs.append('marker').attr('id','arrow').attr('viewBox','0 -4 8 8')
       .attr('refX',16).attr('refY',0).attr('markerWidth',6).attr('markerHeight',6)
       .attr('orient','auto')
-      .append('path').attr('d','M0,-4L8,0L0,4').attr('fill','#4b5563')
+      .append('path').attr('d','M0,-4L8,0L0,4').attr('fill','#5c6470')
 
     const g = svg.append('g')
 
@@ -235,8 +235,8 @@ function NetworkMap({ topology }: { topology: TopologyResponse }) {
 
     node.append('circle')
       .attr('r', (d: any) => rScale(d.bytes))
-      .attr('fill', (d: any) => d.is_sampler ? '#8ad8ea' : '#1e40af')
-      .attr('stroke', (d: any) => d.is_sampler ? '#93c5fd' : '#8ad8ea')
+      .attr('fill', (d: any) => d.is_sampler ? '#8ad8ea' : '#466cc8')
+      .attr('stroke', (d: any) => d.is_sampler ? '#63c3d8' : '#8ad8ea')
       .attr('stroke-width', (d: any) => d.is_sampler ? 2 : 1)
 
     node.append('text')
