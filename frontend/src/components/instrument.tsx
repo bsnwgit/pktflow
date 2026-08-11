@@ -527,3 +527,65 @@ export function LinePulseGradient({
     </linearGradient>
   )
 }
+
+/**
+ * The line pulse, adapted to bars.
+ *
+ * A horizontal bar is a line with thickness, so the same travelling band works
+ * — a charge running the length of each bar. Two differences from the line
+ * version:
+ *
+ *   - each bar gets its own gradient with a staggered start, so the row reads
+ *     as a bank of instruments rather than everything strobing in unison.
+ *   - the band runs the direction the bar grows, so it reinforces the
+ *     magnitude reading instead of cutting across it.
+ *
+ * The bar's length is untouched: only fill colour moves, so the value a bar
+ * states is exactly the value it states when static.
+ */
+export function BarPulseGradients({
+  colors,
+  idPrefix = 'f-bar-pulse',
+  duration = 4.5,
+  width = 0.22,
+  baseOpacity = 0.62,
+  stagger = 0.22,
+  intensity = '#ffffff',
+}: {
+  colors: string[]
+  idPrefix?: string
+  duration?: number
+  width?: number
+  baseOpacity?: number
+  stagger?: number
+  intensity?: string
+}) {
+  const from = -width * 2
+  const to = 1 + width * 2
+  return (
+    <>
+      {colors.map((color, i) => {
+        const seq = (shift: number) => `${from + shift};${to + shift}`
+        const begin = `${(i * stagger).toFixed(2)}s`
+        return (
+          <linearGradient key={i} id={`${idPrefix}-${i}`} x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor={color} stopOpacity={baseOpacity} />
+            <stop offset="0" stopColor={color} stopOpacity={baseOpacity}>
+              <animate attributeName="offset" values={seq(0)} dur={`${duration}s`}
+                       begin={begin} repeatCount="indefinite" />
+            </stop>
+            <stop offset="0" stopColor={intensity} stopOpacity="0.9">
+              <animate attributeName="offset" values={seq(width / 2)} dur={`${duration}s`}
+                       begin={begin} repeatCount="indefinite" />
+            </stop>
+            <stop offset="0" stopColor={color} stopOpacity={baseOpacity}>
+              <animate attributeName="offset" values={seq(width)} dur={`${duration}s`}
+                       begin={begin} repeatCount="indefinite" />
+            </stop>
+            <stop offset="1" stopColor={color} stopOpacity={baseOpacity} />
+          </linearGradient>
+        )
+      })}
+    </>
+  )
+}
