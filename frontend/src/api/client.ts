@@ -162,8 +162,6 @@ export const api = {
   ackEvent: (id: number) => request(`/alerts/events/${id}/ack`, { method: 'POST' }),
   ackAllEvents: () => request('/alerts/events/ack-all', { method: 'POST' }),
 
-  aiChat: (question: string, context: Record<string, unknown> = {}) =>
-    request<{ answer: string; provider?: string; tokens_used: number }>('/ai/chat', { method: 'POST', body: JSON.stringify({ question, context }) }),
 
   getSettings: () => request<Record<string, unknown>>('/settings/'),
   updateSetting: (key: string, value: unknown) =>

@@ -88,25 +88,6 @@ DEFAULTS: dict[str, Any] = {
     "base_url": "http://localhost:8766",
     "timezone": "UTC",
 
-    # AI assistant (Phase 5) — providers tried in order: local ones first
-    # (private), then cloud (paid). Each provider has its own enabled flag;
-    # the first enabled provider with valid config is used to answer a chat request.
-    "ai_provider_ollama_enabled": False,
-    "ai_provider_ollama_base_url": "http://localhost:11434",
-    "ai_provider_ollama_model": "llama3.1",
-
-    # Arbitrary additional self-hosted/local providers exposing an OpenAI-
-    # compatible /v1/chat/completions API (LM Studio, LocalAI, vLLM, etc.):
-    # list of {id, name, base_url, api_key, model, enabled}.
-    "ai_local_providers": [],
-
-    "ai_provider_anthropic_enabled": True,
-    "anthropic_api_key": "",          # Anthropic API key for in-app Claude assistant
-    "ai_model": "claude-haiku-4-5-20251001",
-
-    "ai_provider_openai_enabled": False,
-    "openai_api_key": "",             # OpenAI API key, alternative cloud provider
-    "openai_model": "gpt-4o",
 
     # Integrations
     "lucid_api_token": "",            # Lucidchart Personal Access Token for diagram export
@@ -144,41 +125,9 @@ DEFAULTS: dict[str, Any] = {
 _MASK = "••••••••"
 _SECRET_KEYS = frozenset({
     "ingest_token", "notify_email_password",
-    "notify_pagerduty_integration_key", "anthropic_api_key", "lucid_api_token",
-    "okta_saml_sp_key", "notify_tracecat_api_token", "openai_api_key",
+    "notify_pagerduty_integration_key", "lucid_api_token",
+    "okta_saml_sp_key", "notify_tracecat_api_token",
 })
-
-
-def _mask_local_providers(providers: Any) -> Any:
-    """Mask each entry's api_key, same convention as the flat _SECRET_KEYS."""
-    if not isinstance(providers, list):
-        return providers
-    masked = []
-    for p in providers:
-        if isinstance(p, dict) and p.get("api_key"):
-            p = {**p, "api_key": _MASK}
-        masked.append(p)
-    return masked
-
-
-async def _unmask_local_providers(db: aiosqlite.Connection, new_value: Any) -> Any:
-    """Preserve existing api_key for any entry whose api_key round-tripped as the mask."""
-    if not isinstance(new_value, list):
-        return new_value
-    async with db.execute("SELECT value FROM settings WHERE key='ai_local_providers'") as cur:
-        row = await cur.fetchone()
-    old_by_id = {}
-    if row:
-        for p in json.loads(row[0]) or []:
-            if isinstance(p, dict) and p.get("id"):
-                old_by_id[p["id"]] = p.get("api_key", "")
-
-    result = []
-    for p in new_value:
-        if isinstance(p, dict) and p.get("api_key") == _MASK:
-            p = {**p, "api_key": old_by_id.get(p.get("id"), "")}
-        result.append(p)
-    return result
 
 
 async def _ensure_defaults(db: aiosqlite.Connection) -> None:
@@ -213,8 +162,6 @@ async def get_all_settings(_: CurrentUser, db: aiosqlite.Connection = Depends(ge
         if result.get(secret_key):
             result[secret_key] = _MASK
 
-    if result.get("ai_local_providers"):
-        result["ai_local_providers"] = _mask_local_providers(result["ai_local_providers"])
 
     return result
 
@@ -232,8 +179,6 @@ async def get_setting(key: str, _: CurrentUser, db: aiosqlite.Connection = Depen
     # non-admin user (e.g. viewer) would otherwise see.
     if key in _SECRET_KEYS and value:
         value = _MASK
-    elif key == "ai_local_providers":
-        value = _mask_local_providers(value)
 
     return {key: value}
 
@@ -269,8 +214,6 @@ async def update_setting(
         old_value = bool(json.loads(row[0])) if row else False
 
     value = body.value
-    if key == "ai_local_providers":
-        value = await _unmask_local_providers(db, value)
 
     await db.execute(
         "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) "
@@ -340,8 +283,6 @@ async def bulk_update(
         if key in _SECRET_KEYS and value == _MASK:
             skipped.append(key)
             continue
-        if key == "ai_local_providers":
-            value = await _unmask_local_providers(db, value)
         await db.execute(
             "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
