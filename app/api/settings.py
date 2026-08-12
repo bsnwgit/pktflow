@@ -4,6 +4,7 @@ All settings are stored as JSON values in the SQLite settings table.
 """
 from __future__ import annotations
 
+import logging
 import json
 from typing import Any
 
@@ -13,6 +14,8 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.dependencies import AdminUser, CurrentUser
+
+log = logging.getLogger("pktflow.settings")
 
 router = APIRouter()
 
@@ -497,5 +500,8 @@ async def test_notification(
                 return {"status": "sent", "detail": f"TraceCat webhook returned HTTP {resp.status_code}"}
             return {"status": "failed", "detail": f"TraceCat returned HTTP {resp.status_code}: {resp.text[:200]}"}
 
-    except Exception as e:
-        return {"status": "failed", "detail": str(e)}
+    except Exception:
+
+        log.exception("provider test call failed")
+
+        return {"status": "failed", "detail": "Request failed — see the app log for detail"}
