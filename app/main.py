@@ -20,7 +20,7 @@ from app.storage.factory import init_storage, get_storage
 from app.ingest.buffer import IngestBuffer
 
 # ── Routers ───────────────────────────────────────────────────────────────────
-from app.api import ingest, flows, devices, alerts, settings as settings_router, auth, users, ai, system as system_router, ws as ws_router
+from app.api import ingest, flows, devices, alerts, settings as settings_router, auth, users, system as system_router, ws as ws_router
 from app.api import logs as logs_router
 from app.api import suite as suite_router
 from app.api import nat_mappings as nat_mappings_router
@@ -202,7 +202,6 @@ app.include_router(flows.router,           prefix="/api/flows",    tags=["flows"
 app.include_router(devices.router,         prefix="/api/devices",  tags=["devices"])
 app.include_router(alerts.router,          prefix="/api/alerts",   tags=["alerts"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
-app.include_router(ai.router,              prefix="/api/ai",       tags=["ai"])
 app.include_router(system_router.router,   prefix="/api/system",   tags=["system"])
 app.include_router(logs_router.router,     prefix="/api/logs",     tags=["logs"])
 app.include_router(ws_router.router,       prefix="/api",          tags=["ws"])
