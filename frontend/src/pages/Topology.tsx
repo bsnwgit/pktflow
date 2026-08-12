@@ -1206,13 +1206,19 @@ export default function Topology() {
 
   function doExportDOT() {
     if (!data) return
+    // DOT string escaping: backslash must go first, or escaping the quote
+    // re-escapes the backslash that was meant to escape it.
+    const dotEsc = (v: string) => String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
     let dot = 'digraph pktflow_topology {\n'
     dot += '  graph [bgcolor="#0d1219" fontcolor="#dcd6c9"];\n'
     dot += '  node [shape=circle fontcolor="#dcd6c9" style=filled fontsize=10];\n'
     dot += '  edge [color="#5c6470" fontsize=9 fontcolor="#a9a294"];\n\n'
     data.nodes.forEach(n => {
-      const label = (n.sampler_name || n.id).replace(/"/g, '\\"')
-      const tooltip = `${fmtBytes(n.bytes)}, ${n.flows} flows`.replace(/"/g, '\\"')
+      // Backslash first, then quote — escaping the quote alone leaves a name
+      // ending in a backslash escaping its own closing quote and breaking out
+      // of the DOT string.
+      const label = dotEsc(n.sampler_name || n.id)
+      const tooltip = dotEsc(`${fmtBytes(n.bytes)}, ${n.flows} flows`)
       dot += `  "${n.id}" [label="${label}" tooltip="${tooltip}"];\n`
     })
     dot += '\n'
