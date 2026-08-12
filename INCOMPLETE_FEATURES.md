@@ -35,26 +35,6 @@ service / Tracecat webhook in production.
 
 ---
 
-## AI Assistant — LOCAL PROVIDER CONFIRMED LIVE; CLOUD PROVIDERS STILL UNCONFIRMED
-
-`app/api/ai.py` is complete — multi-provider now: local/self-hosted (Ollama, or any
-OpenAI-compatible endpoint) tried first, then cloud (Anthropic, OpenAI), each independently
-enabled in Settings → Security → AI Assistant. Anthropic's model is configurable (default
-`claude-haiku-4-5-20251001`, selectable Sonnet `claude-sonnet-5` or Opus `claude-opus-4-8`).
-`AiAssistant.tsx` renders the chat panel. `anthropic>=0.30.0` is a declared dependency in
-`requirements.txt` for the Anthropic provider; the local and OpenAI providers use plain
-`httpx` calls, no extra dependency.
-
-**2026-08-03: confirmed working end-to-end in production against a real Ollama server**, after
-fixing a bug where the chat request never sent the session's auth token and always failed
-pktFlow's own login check with "Not authenticated" (unrelated to provider config — see
-[Known Issues & Quirks](README.md#known-issues--quirks) item 8 in the README). Connection/timeout
-failures talking to a provider now also surface an actionable message instead of a blank one.
-Still unverified: the Anthropic and OpenAI cloud providers haven't been confirmed against a real
-API key in production.
-
----
-
 ## DuckDB Storage Backend — CORE PATHS WORKING, ALERT-ENGINE GAPS BY DESIGN
 
 `app/storage/duckdb.py` implements the core query paths used by the main UI (search, top
@@ -114,7 +94,6 @@ trusting it in production, but this is no longer a known code-level gap.
 | goflow2/Vector ingest | ✅ Built | N/A | ✅ Yes |
 | Direct UDP ingest | ✅ Built (`app/ingest/udp_listener.py`) | ✅ Settings UI | Selectable, off by default |
 | Slack / Email / PagerDuty / Webhook / Tracecat notifications | ✅ Written | ✅ Settings UI + Send Test | ❌ Not confirmed against a live service |
-| AI assistant | ✅ Written | ✅ Written | ❌ Not confirmed with a live API key |
 | DuckDB backend | ✅ Core paths | N/A | ⚠️ Alert-engine gaps by design; production volume unconfirmed |
 | SSL/TLS auto-detect | ✅ Fixed — wired into `app/server.py`'s real entrypoint | ✅ Settings UI | ⚠️ Code path confirmed correct; live cert-upload+restart not confirmed in this environment |
 | Storage Test Connection | ✅ Built (`/api/system/test-connection`) | ✅ UI button | ✅ Yes |

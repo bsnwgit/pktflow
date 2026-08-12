@@ -82,7 +82,6 @@ The traffic geo-visualization system, rebuilt end-to-end this cycle around a sim
 
 All settings live in the Settings UI, stored in SQLite (except Port — see below), no file edits required post-install.
 
-- ✅ **Regrouped tab structure** — flattened per-feature tabs were consolidated this cycle into **General · Security · Data · Notifications · User Keys · Sources · Geo Map · Ingest** (the "Sources" tab was called "Collectors" until a later rename for suite-wide naming consistency), with Security (Users/Auth/Suite Integration/AI Assistant/SSL-TLS) and Data (Storage/Backups) each getting their own left-hand sub-tab strip instead of adding more top-level tabs. Old top-level "Auth", "Storage", "Backup", "Integrations", "Users", and "API Keys" tabs no longer exist as such — their content moved into the groupings above.
 - ✅ **General → Port** — new field; writes `port:` directly into `config.yaml` (`GET`/`POST /api/system/port`) rather than the SQLite settings table, since the port has to be known before the DB connects. Takes effect on next restart.
 - ✅ **Ingest** — token, buffer tuning, UDP toggle/port, raw-flow WebSocket streaming toggle.
 - ✅ **Sources (Devices)** — registry CRUD, CSV import/export + template, Unknown Samplers panel with dismiss support.
@@ -94,9 +93,7 @@ All settings live in the Settings UI, stored in SQLite (except Port — see belo
 - ✅ **Backups** (Data tab) — one-click or scheduled (SQLite backup API + optional ClickHouse CSV export), configurable rotation.
 - ✅ **SSL/TLS** (Security tab) — drag-and-drop PFX/P12 or separate PEM cert+key; auto-detected and forwarded to uvicorn on startup by `app/server.py`'s real entrypoint (previously dead code in `app/main.py` — see Known Constraints below).
 - ✅ **General → Restart Service** — button (tries `sudo systemctl restart`, falls back to self-SIGTERM relying on `Restart=always`); moved off the old "System" tab onto General.
-- ⚠️ **AI Assistant** (Security tab) — `app/api/ai.py` fully implemented, now multi-provider: local/self-hosted (Ollama, or any OpenAI-compatible endpoint) tried first, then cloud (Anthropic — model configurable, default `claude-haiku-4-5-20251001`, selectable Sonnet/Opus — and OpenAI), each independently enabled. Frontend chat panel exists; `anthropic` package remains a declared dependency in `requirements.txt` for the Anthropic provider. **Local/Ollama provider confirmed working end-to-end in production 2026-08-03** (after fixing a false "Not authenticated" error caused by the chat request not sending its auth token — see [Known Issues & Quirks](README.md#known-issues--quirks) item 8). Anthropic and OpenAI cloud providers still not confirmed used with a live key/server in production.
 - ✅ **Default Admin** (Security → Users) — ★ toggle, see Authentication & Users above.
-- ✅ **App-wide contextual help** — the "?" `HelpButton` modal pattern, originally built for just Address Mappings/Traffic Rules, is now on every main nav page (Analytics, Flow Explorer, Device View, Topology, Geo Map, Traffic by Port, NAT Translations, Alerts, Logs) and every Settings section, including the newer Security sub-tabs (Auth, Suite Integration, AI Assistant, SSL/TLS). No longer a planned/partial item — see Known Constraints for what (if anything) is still missing.
 
 ## Integrations
 
@@ -116,7 +113,7 @@ All settings live in the Settings UI, stored in SQLite (except Port — see belo
 
 ## Planned Features
 
-Nothing currently tracked here — the previous entry (app-wide contextual help) shipped and is now listed as done under Settings & Configuration above. Check [INCOMPLETE_FEATURES.md](INCOMPLETE_FEATURES.md) for built-but-unverified items (notifications, AI assistant, DuckDB in production) rather than not-yet-started ones.
+Nothing currently tracked here — the previous entry (app-wide contextual help) shipped and is now listed as done under Settings & Configuration above. Check [INCOMPLETE_FEATURES.md](INCOMPLETE_FEATURES.md) for built-but-unverified items (notifications, DuckDB in production) rather than not-yet-started ones.
 
 ## Known Constraints
 

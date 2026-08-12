@@ -183,7 +183,6 @@ See [requirements.txt](requirements.txt). Key dependencies:
 - `aiosqlite` — app database
 - `python-jose[cryptography]`, `passlib[bcrypt]` — JWT auth
 - `python3-saml` — SAML 2.0 SSO
-- `anthropic` — AI assistant's Anthropic cloud provider (optional; the local/Ollama and OpenAI-compatible providers don't need it — see Settings → Security → AI Assistant)
 
 ### Frontend
 
@@ -371,7 +370,7 @@ Selecting a section swaps the tab bar beneath it, so only one group's tabs are v
 
 ### Security
 
-Left-hand sub-tabs: **Users** (admin only) · **Auth** · **Suite Integration** · **AI Assistant** · **SSL / TLS**.
+Left-hand sub-tabs: **Users** (admin only) · **Auth** · **Suite Integration** · **SSL / TLS**.
 
 #### Security → Users (admin only)
 
@@ -399,21 +398,6 @@ Two sections on this sub-tab:
 
 - **Suite Integration (inbound)** — the Suite Token pktHub's App Manager uses to proxy into pktFlow with users already signed in. Regenerating it immediately revokes the old one.
 - **Sibling pkt Apps (outbound)** — named connections *from* pktFlow to one or more pktIPAM instances, powering the Internal IP Lookup feature (see [Features](#features) above). Add a connection with a name, pktIPAM's base URL, and the Suite Token copied from that pktIPAM's own Settings → Integrations → Suite Integration page. Each has Test/Edit/Delete actions; "Test Connection" round-trips a real authenticated call to `/api/suite/whoami` on the target, so a wrong or revoked token fails the test instead of just checking the port is open.
-
-#### Security → AI Assistant
-
-Providers are grouped **Local / Self-Hosted (Private)** first, then **Cloud (Paid)** below — each with its own enable toggle. Local providers are tried first; the first enabled provider with valid config answers each chat question.
-
-| Setting | Description |
-|---------|-------------|
-| Ollama | Local models via a running Ollama server — base URL + model name |
-| Local providers (+ Add) | Any number of additional OpenAI-compatible local endpoints (LM Studio, LocalAI, vLLM, etc.) — name, base URL, model, optional API key |
-| Anthropic API key + model | From console.anthropic.com — separate from a Claude Enterprise seat. Default `claude-haiku-4-5-20251001` (fast/cheap); selectable alternatives are Sonnet (`claude-sonnet-5`, balanced) and Opus (`claude-opus-4-8`, most capable) |
-| OpenAI API key + model | From platform.openai.com. Model is a free-text field (default `gpt-4o`) |
-
-Each provider call gets up to **180 seconds** to return an answer. That ceiling is sized for a local model on modest hardware working through a complex, multi-part question — cloud providers almost never come close to it. Past that the request fails with a message saying so, rather than hanging indefinitely.
-
-The assistant is scoped strictly to pktFlow's own domain (NetFlow traffic, top talkers, anomalies). A server-side pre-filter blocks prompt-injection/override attempts (e.g. "ignore your previous instructions") and questions naming another pktApp suite tool before they ever reach the AI provider, and the system prompt itself refuses anything else off-topic. Each pktApp has its own similarly-scoped assistant.
 
 #### Security → SSL / TLS
 
@@ -590,7 +574,6 @@ pktflow/
 │   │   ├── suite.py        Inbound pktHub Suite Integration token + /api/suite/whoami
 │   │   ├── system.py       Health, restart, port, SSL upload, cleanup, backup, test-connection
 │   │   ├── ws.py           WebSocket endpoint + broadcast helpers
-│   │   └── ai.py           AI assistant (Ollama/local, Anthropic, or OpenAI)
 │   ├── alerts/
 │   │   ├── engine.py       Alert evaluation loop (all rule types) + notification dispatch
 │   │   │                     (Slack, Email/SMTP, PagerDuty, generic Webhook, Tracecat — all
@@ -623,7 +606,6 @@ pktflow/
 ├── frontend/src/
 │   ├── pages/              Analytics (dashboard + timeseries), DeviceView, FlowExplorer,
 │   │                         Topology, GeoMap, Ports, NatTranslations, Alerts, Logs, Settings
-│   ├── components/         Layout, AiAssistant, Pagination, IpLink (public + internal/pktIPAM
 │   │                         lookup modals; also exports linkifyIps, used to auto-link IPs
 │   │                         embedded in alert message text), AsnLink (ASxxxx click-through
 │   │                         to an ipinfo.io ASN-details modal), HelpButton (app-wide
@@ -817,7 +799,6 @@ After pktFlow restarts, Vector detects the connection reset and immediately retr
 5. **passlib/bcrypt on Python 3.12+** — Pin `passlib==1.7.4` and `bcrypt==4.0.1` to avoid attribute errors.
 6. **Direct UDP ingest depends on a `netflow` library workaround** — the third-party `netflow` package (`bitkeks/python-netflow-v9-softflowd`) initializes its own template cache as a list, but its NetFlow v9 parser then indexes into that same object using the exporter's raw Template ID (commonly ≥256 for real hardware) as a dict-style key — this raises `IndexError` for any realistic Template ID, silently dropping every flow record after the first template arrives. `app/ingest/udp_listener.py` works around this by pre-seeding the template cache as `{"netflow": {}, "ipfix": {}}` (dicts) before the library ever gets a chance to install its own broken list default. If you upgrade the `netflow` dependency, re-verify this workaround is still needed (or still effective) against a real capture before relying on direct UDP ingest.
 7. **SSL/TLS auto-detection — fixed, no longer a dead code path.** Previously the code that read `ssl_enabled`/`ssl_certfile`/`ssl_keyfile` from the settings DB and passed them to uvicorn lived in an `if __name__ == "__main__":` block in `app/main.py` that neither the systemd entrypoint (`python -m app.server`) nor a direct `uvicorn app.main:app ...` invocation ever executed. This is now fixed: `app/server.py::main()` (the real entrypoint) reads those three settings itself and forwards `ssl_certfile`/`ssl_keyfile` to `uvicorn.run()`. The orphaned `start.sh` wrapper was removed since its logic is now in the actual entrypoint. Still worth confirming end-to-end (upload cert → restart → `curl -k https://localhost:<port>/api/health`) in your own environment before depending on it in production.
-8. **AI Assistant chat gave a false "Not authenticated" error — fixed.** `AiAssistant.tsx` was sending its chat request with a bare `fetch()` that never attached the session's bearer token, so every request was rejected by pktFlow's own login check before it ever reached the configured AI provider — this had nothing to do with Ollama/Anthropic/OpenAI settings. It now goes through the same authenticated `api` client every other request uses. Also improved: a connection failure or timeout talking to the provider (e.g. Ollama unreachable) used to surface as a blank `"Ollama error:"` message — it now names the provider's base URL and whether it was a connection or timeout failure.
 
 ---
 
@@ -828,7 +809,6 @@ This list is kept in sync with [FEATURES.md](FEATURES.md), which is the canonica
 | Feature | Status |
 |---------|--------|
 | Notification channels (Slack, Email, PagerDuty, Webhook, Tracecat) | Code written, including a real `POST /api/settings/test-notification` behind the "Send Test" buttons — not yet confirmed fired against a live service in production |
-| AI assistant | Code written (`app/api/ai.py`, `AiAssistant.tsx`) — multi-provider: local/self-hosted (Ollama, OpenAI-compatible endpoints), Anthropic, OpenAI. `anthropic` is a declared dependency in `requirements.txt` for the Anthropic provider; not yet confirmed used with a live API key in production |
 | Okta OIDC | **Deliberately dropped, not pending** — `app/auth/okta.py` is an intentional no-op; SAML 2.0 covers Okta SSO |
 | SSL/TLS auto-detection | **Done, not pending** — the code that wires an uploaded cert into uvicorn now lives in `app/server.py`'s actual entrypoint (previously dead code in `app/main.py`); see Known Issues & Quirks above |
 | `ingest_http_port` Settings field | Vestigial — displayed in Settings → Ingest but not read anywhere in the backend; the real listen port is Settings → General → Port |
