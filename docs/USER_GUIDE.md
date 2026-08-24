@@ -78,6 +78,16 @@ Any IP address shown anywhere in the app is a clickable link:
 
 Manage your own password from the user menu. Your personal API keys for IP lookup providers and Lucidchart live under **Settings → User Keys** — these are private to your account, not visible to anyone else including admins.
 
+## The assistant
+
+If your administrator has set it up, a launcher sits in the bottom corner of every page. Click it to ask questions in a chat panel. The panel comes from the resonance server, so what it can help with depends on how your administrator configured it there.
+
+Depending on what your administrator has allowed for your role, it can look at flow records, top talkers, the exporters sending data, sites, alerts and logs — never anything your own account could not already open. It may also be able to **act**: acknowledge an alert, acknowledge all of them, or switch an alert rule on or off. It will always say exactly what it is about to do and wait for you to say yes.
+
+Flow searches always cover a time window and come back a page at a time, with the true number of matches, so ask it to narrow rather than expecting a full list.
+
+If the launcher never appears, either your role is set to *No access* or the assistant could not load. Your administrator can see both under Settings → Resonance.
+
 ## Getting help in the app
 
 A small blue **?** button next to almost every page heading and Settings section opens a short explainer for that specific feature, including anything non-obvious about how it behaves.
