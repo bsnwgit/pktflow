@@ -49,6 +49,7 @@ A section bar at the top of the page splits Settings in two: **Common** (**Gener
 | | Data | Storage | Backend (ClickHouse default / DuckDB), retention days, cleanup, Test Connection | backend switch: yes |
 | | | Backups | Schedule, rotation, manual run, restore | restore of config.yaml: yes |
 | | Notifications | — | Slack/Email/PagerDuty/Webhook/Tracecat channels | no |
+| | Resonance | — | Embedded assistant — server address, key, who may open it, placement (admin only) | no |
 | | User Keys | — | Per-user lookup API keys + Lucidchart token (per-user, private) | no |
 | | System | — | Version/build info, host and runtime details, open-source notices | no |
 | **pktFlow** | Sources | — | Device/sampler registry (CSV import/export) | no |
@@ -136,6 +137,40 @@ Upload a PFX/P12 bundle or separate PEM cert+key on Settings → Security → SS
 - **goflow2 "template error" after a restart is normal** — NetFlow v9 templates are cached in-memory and lost on restart; resolves within seconds once the router sends its next template packet.
 - **Orphaned goflow2 process holding the ingest port** — if the collector pipeline restarts while flows are active, the old process can survive and squat on the port; symptom is "service active, no flows arriving." Fix: find and `kill -9` the old process.
 - **`ingest_http_port` in Settings → Ingest is informational only** — it does not control the app's actual listen port; that's Settings → General → Port.
+
+## Resonance (embedded assistant)
+
+Settings → Resonance (admin only). Adds an assistant launcher to the bottom corner of every page. The assistant itself runs on the resonance server; pktFlow only decides who may open it.
+
+**Setting it up.** Paste the **interface server** address — not resonance's admin portal, which answers on a different address and serves `embed.js` too, so it looks right until the session call returns "not found" — then the key you were issued. Choose which roles may use it, press **Test Connection**, and only then switch **Enabled** on. Test Connection works whether or not the feature is enabled; always prove a key before putting the widget in front of users. Every field ships blank, so a fresh install shows nothing until it is pointed at a resonance server of its own.
+
+Two things have to line up on the resonance side, and both fail silently when they don't:
+
+- **This install's origin** must be on the key's allow-list. The exact string is shown ready to copy on the same page. Behind a reverse proxy, fill in **pktFlow's own address** yourself — what the app detects is the internal address, not the one users type.
+- **Speakers Name** must be on for the key. Without it resonance records nothing, so there is no trace of who asked what.
+
+**Reachability, twice over.**
+
+- Resonance must be reachable **from the browser**, over HTTPS, with a certificate those browsers already trust. An untrusted certificate produces an empty widget and nothing in the console to explain it.
+- pktFlow also calls resonance **server to server**, so this host must resolve resonance's name and trust its certificate — the browser doing both is not enough. Python verifies against its own bundled roots rather than the system store, so a certificate signed by an internal CA is trusted by every browser on the network and still rejected here. Point **CA bundle** at the system store instead (`/etc/ssl/certs/ca-certificates.crt` on Debian and Ubuntu).
+
+**What it can reach.** Individual flow records, the top talkers in a window, the exporters sending flow data, the configured sites and their ranges, the collection summary, alert rules and the alerts they have fired, and pktFlow's own diagnostic log. Every call is made by pktFlow's own page on the session of whoever is signed in, so it reaches only what that person could already open. `/.well-known/resonance.json` lists exactly what is on offer.
+
+**Flow search is capped harder than anything else in the suite**, and deliberately: a flow record is wide and an unbounded window over a busy exporter is millions of them. A window is always applied (an hour by default), the page is a fraction of what the Flow Explorer returns, and the true match count comes back alongside — so the assistant reports "eleven thousand matched, here are twenty-five" instead of presenting a page as the whole answer.
+
+**What it can never do**, at any role level: purge a sampler's history, change retention, or create, edit or delete a site, NAT mapping or traffic rule.
+
+Documentation is published separately at `GET /api/resonance/docs`, to a suite token or an admin session — the guides shipped with the running version.
+
+**What each role can do.** Set per role. *No access* hides the launcher entirely. *Read only* lets the assistant look at the operations above. *Read and write* also lets it act — and adds exactly three things, no more: acknowledge one alert, acknowledge all of them, and switch an existing alert rule on or off. Resonance stops and reads the actual values back to the person before it runs any of them.
+
+**A level never exceeds the role.** Two checks have to agree: the level set here, and pktFlow's own rule for the thing being done. Switching a rule is an analyst's to do in the interface, so a viewer set to *Read and write* still cannot.
+
+Where no role is set to *Read and write*, the write operations are withheld from the published grant altogether, so there is nothing at the resonance end that could be turned on. Every write the assistant performs is recorded in the application log with who asked for it.
+
+**Credentials.** pktFlow never sends a login to resonance. It vouches for whoever is signed in and gets back a short-lived, single-use code the browser spends on opening the panel. The key is encrypted at rest and never reaches the browser.
+
+**If it never appears.** Diagnostics reports how many users could not load the widget in the last week; the usual causes are an ad blocker, a wrong server address, or resonance being unreachable. Repeated failures pause the integration for a few minutes rather than hammering resonance — the panel says so while it is paused, and a successful Test Connection clears it.
 
 ## Troubleshooting
 
