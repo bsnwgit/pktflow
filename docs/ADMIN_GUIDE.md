@@ -84,7 +84,6 @@ A NAT Mapping's own Destination CIDR/Port is resolved **per flow pair**, not onc
 - **HTTP method** (recommended): a goflow2 + Vector collector pipeline transforms raw NetFlow v9 into JSON and POSTs it with a bearer token to `/api/ingest/flows`. See the README's [Collector Configuration](../README.md#collector-configuration) section for the full pipeline setup.
 - **Direct UDP method**: a built-in listener accepts NetFlow v5/v9/IPFIX/sFlow with no external collector. Changing the ingest method or UDP ports needs a service restart — the listener only starts/stops at process boot.
 - **Source IP allowlist**: comma-separated IPs/CIDRs restricting who may POST flows at all, in addition to the bearer token and device-registry checks. A rejected source fires the same unknown-sampler alert as an unregistered device.
-- **NAT Translations** only populate from the direct UDP path (the goflow2/Vector HTTP path normalizes into a schema with no NAT fields) and only when the exporting device actually sends NAT event telemetry (Cisco ASA/ISR NSEL, Juniper SRX, pfSense/OPNsense with NAT logging) — most consumer gear doesn't support this, so an empty table there is often expected, not broken.
 
 ## Device / sampler registry
 

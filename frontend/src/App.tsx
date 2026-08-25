@@ -11,10 +11,10 @@ const GeoMapPage   = lazy(() => import('./pages/GeoMap'))
 const DeviceView   = lazy(() => import('./pages/DeviceView'))
 const FlowExplorer = lazy(() => import('./pages/FlowExplorer'))
 const Topology     = lazy(() => import('./pages/Topology'))
+const Radar        = lazy(() => import('./pages/Radar'))
 const Alerts       = lazy(() => import('./pages/Alerts'))
 const Settings     = lazy(() => import('./pages/Settings'))
 const Ports        = lazy(() => import('./pages/Ports'))
-const NatTranslations = lazy(() => import('./pages/NatTranslations'))
 const Logs         = lazy(() => import('./pages/Logs'))
 const Documentation = lazy(() => import('./pages/Documentation'))
 
@@ -69,6 +69,11 @@ export default function App() {
               <Suspense fallback={<PageFallback />}><Topology /></Suspense>
             </ProtectedRoute>
           } />
+          <Route path="/radar" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageFallback />}><Radar /></Suspense>
+            </ProtectedRoute>
+          } />
           <Route path="/alerts" element={
             <ProtectedRoute>
               <Suspense fallback={<PageFallback />}><Alerts /></Suspense>
@@ -83,11 +88,6 @@ export default function App() {
           <Route path="/ports" element={
             <ProtectedRoute>
               <Suspense fallback={<PageFallback />}><Ports /></Suspense>
-            </ProtectedRoute>
-          } />
-          <Route path="/nat-translations" element={
-            <ProtectedRoute>
-              <Suspense fallback={<PageFallback />}><NatTranslations /></Suspense>
             </ProtectedRoute>
           } />
           <Route path="/logs" element={
