@@ -195,6 +195,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def _no_heuristic_caching(request: Request, call_next):
+    """Make the browser revalidate the front-end instead of guessing.
+
+    StaticFiles sets ETag and Last-Modified but no Cache-Control. A response
+    with no freshness directive gets a *heuristic* lifetime of roughly 10% of
+    its age, so a day-old index.html is treated as fresh for hours and the
+    browser never even asks — it keeps loading the previous build's hashed
+    chunks, which are still on disk. The symptom is a deploy that is correct
+    on the server and invisible in the browser.
+
+    "no-cache" means revalidate, not "don't store": the ETag is already there,
+    so each check is a 304 with no body. API responses are left alone — they
+    carry their own semantics.
+    """
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response
+
 # ── API Routers ───────────────────────────────────────────────────────────────
 
 app.include_router(auth.router,            prefix="/api/auth",     tags=["auth"])

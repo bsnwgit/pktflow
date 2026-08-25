@@ -19,7 +19,7 @@ from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.dependencies import CurrentUser, AdminUser
-from app.models.flow import TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge, ProtocolStat, PortStat, NatTranslation
+from app.models.flow import TopTalker, TimeSeriesPoint, DeviceSummary, FlowSearchResult, TopologyNode, TopologyEdge, ProtocolStat, PortStat
 from app.storage.factory import get_storage
 
 router = APIRouter()
@@ -140,29 +140,6 @@ async def top_talkers(
         s, e = _parse_window(window)
 
     return await get_storage().get_top_talkers(sampler_ip, s, e, limit)
-
-
-@router.get("/nat-translations", response_model=list[NatTranslation])
-async def nat_translations(
-    _: CurrentUser,
-    sampler_ip: Optional[str] = Query(None),
-    window: str = Query("24h"),
-    start: Optional[datetime] = Query(None),
-    end: Optional[datetime] = Query(None),
-    limit: int = Query(500, ge=1, le=2000),
-):
-    """Observed (original address -> NAT'd address) mappings, aggregated
-    from flows carrying NAT Information Elements. Only populated for
-    exporters that send NAT event fields via the direct UDP NetFlow v9/
-    IPFIX listener (see clickhouse/schema.sql and
-    app/ingest/udp_listener.py) — most consumer/prosumer NAT gear does not
-    export these, so an empty result here is expected and not an error."""
-    if start and end:
-        s, e = start, end
-    else:
-        s, e = _parse_window(window)
-
-    return await get_storage().get_nat_translations(s, e, sampler_ip, limit)
 
 
 # ── Flow Explorer ─────────────────────────────────────────────────────────────
@@ -388,6 +365,10 @@ async def get_geo_data(
 
     DEFAULT_LINE = {"color_hex": "#6b7280", "dash_pattern": ""}  # unmapped public<->public traffic
 
+    GEO_BATCH       = 100    # ip-api.com's hard per-request limit
+    GEO_MAX_LOOKUPS = 300    # bounded so a busy window can't stall the page
+    MAX_ARCS        = 150
+
     # ── Load NAT mappings, traffic rules, sites, and the line style catalog ────
     nat_mappings_list: list[dict] = []
     traffic_rules_list: list[dict] = []
@@ -609,32 +590,45 @@ async def get_geo_data(
         return {"locations": [], "arcs": []}
 
     # ── Geolocate unique effective IPs via ip-api.com ──────────────────────────
-    unique_effective = list(set(key_to_effective.values()))[:100]
+    # `sorted`, not `list(set(...))`: set iteration order for strings is
+    # hash-randomised per process, so truncating an unsorted set meant a
+    # different arbitrary subset of endpoints got located on every restart —
+    # which is exactly what made missing arcs come and go for no visible
+    # reason. Sorted truncation is at least stable and reproducible.
+    #
+    # ip-api's batch endpoint caps at 100 queries per request, so anything
+    # busier than that needs several. A failing chunk is skipped rather than
+    # abandoning the whole lookup — partial coverage still draws a useful map,
+    # and the location list is reconciled against the arcs at the end so a
+    # half-located conversation doesn't leave a stray marker behind.
+    unique_effective = sorted(set(key_to_effective.values()))[:GEO_MAX_LOOKUPS]
     geo_map: dict[str, dict] = {}  # effective_ip -> {lat, lng, city, country, ...}
-    try:
-        body = json.dumps([
-            {"query": ip, "fields": "status,query,lat,lon,city,country,countryCode"}
-            for ip in unique_effective
-        ]).encode()
-        req = urllib.request.Request(
-            "http://ip-api.com/batch",
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=6) as resp:
-            results = json.loads(resp.read())
-        for r in results:
-            if r.get("status") == "success":
-                geo_map[r["query"]] = {
-                    "lat":          r["lat"],
-                    "lng":          r["lon"],
-                    "city":         r.get("city", ""),
-                    "country":      r.get("country", ""),
-                    "country_code": r.get("countryCode", ""),
-                }
-    except Exception:
-        pass
+    for i in range(0, len(unique_effective), GEO_BATCH):
+        chunk = unique_effective[i:i + GEO_BATCH]
+        try:
+            body = json.dumps([
+                {"query": ip, "fields": "status,query,lat,lon,city,country,countryCode"}
+                for ip in chunk
+            ]).encode()
+            req = urllib.request.Request(
+                "http://ip-api.com/batch",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                results = json.loads(resp.read())
+            for r in results:
+                if r.get("status") == "success":
+                    geo_map[r["query"]] = {
+                        "lat":          r["lat"],
+                        "lng":          r["lon"],
+                        "city":         r.get("city", ""),
+                        "country":      r.get("country", ""),
+                        "country_code": r.get("countryCode", ""),
+                    }
+        except Exception:
+            continue
 
     if not geo_map:
         return {"locations": [], "arcs": []}
@@ -724,7 +718,30 @@ async def get_geo_data(
         arc_agg[key]["bytes"] += p["bytes"]
         arc_agg[key]["flows"] += p["flows"]
 
-    arcs = sorted(arc_agg.values(), key=lambda a: a["bytes"], reverse=True)[:50]
+    arcs = sorted(arc_agg.values(), key=lambda a: a["bytes"], reverse=True)[:MAX_ARCS]
+
+    # ── Reconcile locations against the arcs ───────────────────────────────────
+    # A marker with no line attached says "traffic happened here" without
+    # saying who with, which is not something this map can express. It appears
+    # whenever an arc is dropped while its endpoints survive, and there are
+    # three independent ways for that to happen:
+    #   1. one side won't resolve at all (a private IP with no NAT mapping) —
+    #      the arc loop skips the pair, but the public side is still a location;
+    #   2. one side has no geo fix (ip-api returned "fail" for it, or it fell
+    #      past GEO_MAX_LOOKUPS) — same skip, same surviving peer;
+    #   3. the pair's arc lost the top-MAX_ARCS cut, which locations never had.
+    # Rather than patch each one, locations are made a strict function of the
+    # arcs that actually ship, keyed exactly the way the frontend pairs them up
+    # (ip + lat + lng — see locKey in frontend/src/utils/geoData.ts, which needs
+    # all three because one IP can resolve to two places via dst-scoped NAT).
+    # Guarded on arcs being non-empty: when geolocation fails wholesale there
+    # are no arcs to reconcile against, and blanking the map would hide the
+    # fact that traffic was seen at all.
+    if arcs:
+        drawn = {(a["src_ip"], a["src_lat"], a["src_lng"]) for a in arcs}
+        drawn |= {(a["dst_ip"], a["dst_lat"], a["dst_lng"]) for a in arcs}
+        locations = [l for l in locations if (l["ip"], l["lat"], l["lng"]) in drawn]
+
     return {"locations": locations, "arcs": arcs}
 
 

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   AreaChart, Area, BarChart, Bar,
@@ -426,13 +426,33 @@ function buildSankeyLayout(talkers: TopTalker[], W: number, H: number) {
   const portAgg = aggMap(t => `${protoLabel(t.protocol)}:${t.dst_port}`)
   const dstAgg  = aggMap(t => t.dst_ip)
 
+  // Node height is a compressed share of bytes, not a raw one. Real traffic is
+  // dominated by a handful of transfers, and on a raw proportional scale one
+  // flow routinely took more than half the panel while everything else
+  // collapsed into unreadable slivers. Two steps fix it without losing the
+  // ordering: a square-root scale (the usual perceptual compression for
+  // magnitude), then a hard ceiling on any single node's share, with the
+  // excess redistributed across the rest. Byte figures shown to the user —
+  // labels, tooltips, the drill-down panel — are always the true ones.
+  const MAX_SHARE = 0.34
+
   const layoutCol = (map: Map<string, number>, x: number): SankeyNode[] => {
     const entries = [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, TOP_N)
-    const total   = entries.reduce((s, [, v]) => s + v, 0)
     const avail   = H - PADDING * (entries.length - 1)
+
+    const weights = entries.map(([, v]) => Math.sqrt(Math.max(1, v)))
+    const wSum    = weights.reduce((s, v) => s + v, 0) || 1
+    let shares    = weights.map(v => v / wSum)
+
+    if (entries.length > 1 && shares[0] > MAX_SHARE) {
+      const excess   = shares.reduce((s, v) => s + Math.max(0, v - MAX_SHARE), 0)
+      const underSum = shares.reduce((s, v) => s + (v > MAX_SHARE ? 0 : v), 0) || 1
+      shares = shares.map(v => (v > MAX_SHARE ? MAX_SHARE : v + (v / underSum) * excess))
+    }
+
     let y = 0
-    return entries.map(([key, bytes]) => {
-      const h = Math.max(12, (bytes / total) * avail)
+    return entries.map(([key, bytes], i) => {
+      const h = Math.max(12, shares[i] * avail)
       const node = { key, bytes, x, y, h }
       y += h + PADDING
       return node
@@ -587,12 +607,30 @@ function SankeyBand({ link, onClick, maxBytes = 1 }: {
 function SankeyTab({ talkers, onDrillDown }: { talkers: TopTalker[]; onDrillDown: (t: TopTalker) => void }) {
   const [selectedFlow, setSelectedFlow] = useState<TopTalker | null>(null)
 
+  // The diagram is laid out to the box it is given, not to a fixed 860x520
+  // canvas — a fixed viewBox scaled to the container's *width*, which on a
+  // wide screen made the map taller than the viewport and forced a scroll to
+  // see the bottom of it. Measuring the box (same approach as the dashboard's
+  // Traffic Flow card) keeps the whole map inside its panel at any width.
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [dims, setDims] = useState({ w: 860, h: 520 })
+
+  useEffect(() => {
+    if (!wrapRef.current) return
+    const obs = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect
+      if (width > 50 && height > 50) setDims({ w: Math.round(width), h: Math.round(height) })
+    })
+    obs.observe(wrapRef.current)
+    return () => obs.disconnect()
+  }, [])
+
   if (!talkers.length) {
     return <div className="text-center py-16 text-white">No flow data available</div>
   }
 
-  const W = 860
-  const H = 520
+  const W = dims.w
+  const H = Math.max(160, dims.h - 24)   // 24px reserved for the column headings
 
   let layout
   try {
@@ -669,7 +707,7 @@ function SankeyTab({ talkers, onDrillDown }: { talkers: TopTalker[]; onDrillDown
         ]
         return (
           <div className="flex items-center gap-4 mb-3 text-xs text-white flex-wrap">
-            <span className="font-medium text-white">src IP → dst port → dst IP · band width = bytes · click a band to drill down</span>
+            <span className="font-medium text-white">src IP → dst port → dst IP · band width = bytes, compressed · click a band to drill down</span>
             {legendItems.map(({ label, color }) => (
               <span key={label} className="flex items-center gap-1">
                 <span className="w-3 h-2 rounded-sm" style={{ background: color }} />
@@ -680,8 +718,9 @@ function SankeyTab({ talkers, onDrillDown }: { talkers: TopTalker[]; onDrillDown
         )
       })()}
 
-      <div className="overflow-x-auto">
-        <svg width="100%" viewBox={`0 0 ${W} ${H + 24}`} xmlns="http://www.w3.org/2000/svg">
+      <div ref={wrapRef} className="h-[52vh] min-h-[280px] max-h-[560px]">
+        <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H + 24}`}
+             preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
           {/* animation keyframes + glow used by the flow ribbons */}
           <FlowDefs ribbons={[]} />
           <text x={COL_W / 2} y={12} textAnchor="middle" fontSize={10} fill="#a9a294">Source IP</text>
