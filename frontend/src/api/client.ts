@@ -159,8 +159,6 @@ export const api = {
     request<ProtocolStat[]>(`/flows/protocols?${new URLSearchParams(params as any)}`),
   getTopPorts: (params: TopPortsParams) =>
     request<PortStat[]>(`/flows/ports/top?${new URLSearchParams(params as any)}`),
-  getNatTranslations: (params: NatTranslationsParams) =>
-    request<NatTranslation[]>(`/flows/nat-translations?${new URLSearchParams(params as any)}`),
   getDailyTimeseries: (days: number, sampler_ip?: string) =>
     request<TimeSeriesPoint[]>(`/flows/timeseries/daily?days=${days}${sampler_ip ? `&sampler_ip=${sampler_ip}` : ''}`),
   getHourlyTimeseries: (window: string, sampler_ip?: string) =>
@@ -575,18 +573,6 @@ export interface PortStat {
   pct_bytes: number
 }
 
-export interface NatTranslation {
-  sampler_ip: string
-  sampler_name: string
-  direction: 'src' | 'dst'
-  original_ip: string
-  translated_ip: string
-  flow_count: number
-  bytes: number
-  first_seen: string
-  last_seen: string
-}
-
 export interface TopologyNode {
   id: string
   sampler_name: string
@@ -796,7 +782,6 @@ export type SearchParams = {
   offset?: string; any_direction?: string
 }
 export type TopPortsParams = { window?: string; sampler_ip?: string; site?: string; limit?: string }
-export type NatTranslationsParams = { window?: string; sampler_ip?: string; limit?: string }
 
 export interface LogRecord {
   id: number

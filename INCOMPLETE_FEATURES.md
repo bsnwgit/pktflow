@@ -100,7 +100,7 @@ trusting it in production, but this is no longer a known code-level gap.
 | Topology node click → flow drill-down | ✅ Built | ✅ Built | ✅ Yes |
 | Traffic by Port page | ✅ Built | ✅ Built (URL-only, not in sidebar nav) | ✅ Yes |
 | Sankey flow diagrams | ✅ Built (Analytics + Device View) | ✅ Built | ✅ Yes |
-| NAT Translations | ✅ Built (direct UDP path only) | ✅ Built | ✅ Yes, empty table expected unless exporter+ingest-mode support NAT event fields |
+| Radar (`/radar`) | ✅ Built (reuses `/flows/geo`) | ✅ Built (nav + dashboard card) | ✅ Yes |
 | Internal IP Lookup (pktIPAM) | ✅ Built | ✅ Built | ✅ Yes, pending a configured pktIPAM connection |
 | Default admin / auto-login | ✅ Built | ✅ Built | ✅ Yes |
 | Reverse DNS (PTR) lookup | ✅ Built (MXToolbox `ptr` command) | ✅ Built | ✅ Yes |
