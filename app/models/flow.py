@@ -183,23 +183,6 @@ class ProtocolStat(BaseModel):
     pct_bytes: float
 
 
-class NatTranslation(BaseModel):
-    """One observed (original address -> NAT'd address) mapping, aggregated
-    from flows carrying NAT Information Elements (see clickhouse/schema.sql
-    and app/ingest/udp_listener.py) — only populated when a NAT-capable
-    exporter (Cisco ASA/ISR NSEL, Juniper SRX, pfSense/OPNsense, etc.) sends
-    NAT event fields via the direct UDP NetFlow v9/IPFIX listener."""
-    sampler_ip: str
-    sampler_name: str = ""
-    direction: str                 # 'src' (source/egress NAT) or 'dst' (destination/inbound NAT)
-    original_ip: str
-    translated_ip: str
-    flow_count: int = 0
-    bytes: int = 0
-    first_seen: datetime
-    last_seen: datetime
-
-
 class TopologyNode(BaseModel):
     id: str                        # IP address
     sampler_name: str = ""

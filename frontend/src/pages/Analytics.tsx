@@ -8,7 +8,7 @@ import {
 } from 'recharts'
 import * as d3 from 'd3'
 import { api, TimeSeriesPoint, TopologyResponse } from '../api/client'
-import { GeoMapCard } from './GeoMap'
+import { RadarCard } from './Radar'
 import { useWebSocket, type WsMessage, type IngestStats } from '../hooks/useWebSocket'
 import HelpButton from '../components/HelpButton'
 import { axisProps, tooltipProps, gridProps, glow, INSTRUMENT, FlowDefs, NodeRail, InstrumentFrame, RadialRing, liveEdgeDot , LinePulseGradient } from '../components/instrument'
@@ -547,7 +547,7 @@ export default function Analytics() {
 
       {/* Network map + Traffic flow — expands to fill remaining height */}
       <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
-        <GeoMapCard timeWindow={window} />
+        <RadarCard timeWindow={window} />
         <Card title="Traffic Flow — Source → Destination" className="h-full">
           <SankeyChart topology={topology} />
         </Card>

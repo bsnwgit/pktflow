@@ -14,7 +14,7 @@ Open the app in your browser and log in with your username and password, or "Log
 
 ## Navigation
 
-Top-level pages: **Analytics** (Dashboard), **Sources** (per-device view), **Flow Explorer**, **Geo Map**, **Topology**, **NAT Translations**, **Alerts**, **Logs**, **Settings**. Settings is reachable by every role — the page itself hides admin-only tabs (Users, VPN/Site mappings, etc.) from analysts and viewers rather than hiding the whole page.
+Top-level pages: **Analytics** (Dashboard), **Sources** (per-device view), **Flow Explorer**, **Geo Map**, **Topology**, **Radar**, **Alerts**, **Logs**, **Settings**. Settings is reachable by every role — the page itself hides admin-only tabs (Users, VPN/Site mappings, etc.) from analysts and viewers rather than hiding the whole page.
 
 Inside Settings, a section bar at the top offers **Common** (General, Security, Data, Notifications, User Keys, System — the tabs shared by every pkt* app) and **pktFlow** (Sources, Geo Map, Ingest — this app's own). The tab row underneath shows one section at a time, so switch sections if the tab you want isn't listed. Links that point at a specific tab pick the right section for you.
 
@@ -51,13 +51,17 @@ A dark-themed world map with traffic arcs, colored by configurable Sites, built 
 
 If your network's own IP shows up as more than one marker on the map, that's not a bug — a NAT Mapping can be configured to translate the same private range to a different public IP depending on where the traffic is headed (e.g. DNS queries going out one public IP, everything else out another), and each real-world identity gets its own marker.
 
+## Radar
+
+The same traffic the Geo Map shows, drawn as a radar scope instead of a world map. The centre (**ORIGIN**) is the middle of your own mapped network — worked out from the Sites and NAT Mappings you've configured. Everything else sits at its real compass bearing from there, north up, with distance shown on a log scale so a 300 km hop and a 17 000 km hop are both readable on one face; the dotted rings are labelled in km.
+
+Blip size is bytes, the ring around it is flow count, and the colour is the endpoint's Site colour. Arcs keep the colour and dash style your Traffic Rules give them. The legend works exactly like the Geo Map's — click a Line Style, Site or NAT Mapping to filter down to it and everything it connects to, and Reset to clear.
+
+Click a blip to open Flow Explorer for that address, or an arc to open that conversation. Two endpoints in the same place are nudged apart along their own bearing, so the direction stays true even when the range shifts a little.
+
 ## Traffic by Port
 
 Protocol mix, top ports by bytes/flows, a traffic-over-time chart, and a full port inventory table.
-
-## NAT Translations
-
-Shows observed original-address → translated-address mappings when your network's exporters send NAT event telemetry (Cisco ASA/ISR NSEL, Juniper SRX, pfSense/OPNsense with NAT logging). If this table is empty, it's most likely because your devices don't export NAT events at all (common on consumer/prosumer gear) — that's expected, not a bug. Ask your admin if you believe NAT data should be showing up but isn't.
 
 ## Alerts
 
