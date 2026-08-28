@@ -526,7 +526,7 @@ See [DATAFLOW.md](DATAFLOW.md) for the full Vector configuration including the `
 
 ```json
 {
-  "src_addr": "10.1.2.3",     "dst_addr": "8.8.8.8",
+  "src_addr": "10.0.0.3",     "dst_addr": "203.0.113.8",
   "src_port": 54321,           "dst_port": 443,
   "proto": "UDP",              "bytes": 1500,
   "packets": 10,               "in_if": 6,   "out_if": 7,
@@ -671,7 +671,7 @@ A NAT Mapping also carries its own optional `dst_cidrs`/`dst_ports` (same comma-
 
 A Traffic Rule optionally matches a NAT Mapping (or "Any"), a destination — either `dst_cidrs` (typed, comma-separated) or `dst_site_key` (a live reference to a Site's `ip_cidr`, resolved at request time; mutually exclusive with `dst_cidrs`, enforced by a CHECK constraint) — and/or a comma-separated list of destination ports/ranges. At least one filter is required. `/api/flows/geo` resolves each arc's NAT Mapping first (for geolocation), then its Traffic Rule (for color/dash style + legend label).
 
-**Canonical example** (also documented in ADMIN_GUIDE.md): a firewall NATs `10.1.157.141` to `104.62.87.92` for destination port 53 and to `104.62.87.89` for everything else. To make the Geo Map reflect that: two NAT Mappings, same `private_cidr=10.1.157.141/32` — one with `dst_ports=53` → `public_cidr=104.62.87.92` (higher priority), one with no destination filter → `public_cidr=104.62.87.89` (lower priority, catch-all). A Traffic Rule scoped to the port-53 mapping only ever matches port-53 traffic; traffic on any other port resolves through the catch-all mapping and gets a different marker location, correctly falling through to the neutral gray default line if no rule is scoped to that mapping.
+**Canonical example** (also documented in ADMIN_GUIDE.md): a firewall NATs `10.0.0.41` to `203.0.113.92` for destination port 53 and to `203.0.113.89` for everything else. To make the Geo Map reflect that: two NAT Mappings, same `private_cidr=10.0.0.41/32` — one with `dst_ports=53` → `public_cidr=203.0.113.92` (higher priority), one with no destination filter → `public_cidr=203.0.113.89` (lower priority, catch-all). A Traffic Rule scoped to the port-53 mapping only ever matches port-53 traffic; traffic on any other port resolves through the catch-all mapping and gets a different marker location, correctly falling through to the neutral gray default line if no rule is scoped to that mapping.
 
 **ISP DHCP mode** — `PUT /api/settings/isp_dhcp_enabled` with `true`/`false` toggles it, same generic settings endpoint as everything else in Settings; the side effect lives in `app/api/settings.py`, not `nat_mappings.py`. Enabling creates one `nat_mappings` row (`name='Default'`, `site_key='default'`, `private_cidr='0.0.0.0/0'`, `public_cidr=''`) and records its id in the internal `isp_dhcp_mapping_id` setting; `app/api/flows.py`'s `get_geo_data()` then ignores every other NAT mapping while the flag is on. Disabling deletes that row — `traffic_rules.nat_mapping_id` is `ON DELETE CASCADE`, so any rule scoped to it is deleted too.
 
