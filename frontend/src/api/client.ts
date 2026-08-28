@@ -649,7 +649,7 @@ export interface TrafficRule {
   id:                  number
   name:                string
   nat_mapping_id:      number | null   // null = applies to any NAT mapping
-  dst_cidrs:           string | null   // comma-separated IPs/CIDRs, e.g. "1.1.1.1,9.9.9.9" — mutually exclusive with dst_site_key
+  dst_cidrs:           string | null   // comma-separated IPs/CIDRs, e.g. "203.0.113.1,203.0.113.9" — mutually exclusive with dst_site_key
   dst_site_key:        string | null   // live reference to a Site's ip_cidr — mutually exclusive with dst_cidrs; locked once set (see PUT /api/traffic-rules/{id})
   dst_ports:           string | null   // comma-separated ports/ranges, e.g. "53,8000-9000"
   line_style_id:       number | null

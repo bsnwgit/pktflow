@@ -1,9 +1,9 @@
 -- 016_traffic_rules_multi_value.sql
 -- Traffic Rules: allow multiple destination IPs/CIDRs and multiple ports (or
 -- port ranges) per rule instead of exactly one each. Previously the DNS
--- example (1.1.1.1 and 9.9.9.9) needed two separate rules with the same Line
+-- example (203.0.113.1 and 203.0.113.9) needed two separate rules with the same Line
 -- Style; now one rule can list both. dst_cidr -> dst_cidrs and
--- dst_port -> dst_ports, both comma-separated TEXT (e.g. "1.1.1.1,9.9.9.9"
+-- dst_port -> dst_ports, both comma-separated TEXT (e.g. "203.0.113.1,203.0.113.9"
 -- or "53,8000-9000"). Existing single-value rows are preserved as one-item
 -- lists. Matching is still first-hit wins in priority order — a rule now
 -- matches if the destination falls in ANY of its listed CIDRs and/or ANY of
