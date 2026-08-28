@@ -320,8 +320,8 @@ async def widget_geo_map():
 <div id="map"></div>
 <script>
 const GD={geo_json};
-const map=L.map('map',{{attributionControl:false,zoomControl:true}});
-L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',{{subdomains:'abcd'}}).addTo(map);
+const map=L.map('map',{{attributionControl:true,zoomControl:true}});
+L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{{z}}/{{y}}/{{x}}',{{attribution:'Tiles &copy; Esri',maxZoom:16}}).addTo(map);
 GD.arcs.forEach(a=>L.polyline([[a.src_lat,a.src_lng],[a.dst_lat,a.dst_lng]],{{color:'#60a5fa',weight:1.2,opacity:0.45}}).addTo(map));
 const pts=[];
 GD.locations.forEach(loc=>{{
