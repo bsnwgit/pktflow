@@ -71,6 +71,9 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   )
 }
 
+// pktHub mirrors this menu in its own APPS sidebar, reading it from
+// app/api/nav.py's NAV_MANIFEST. Add or rename an entry here and it belongs
+// there too, or the hub keeps offering the old one.
 const NAV = [
   { to: '/',          label: 'Analytics',     icon: '◑', adminOnly: false },
   { to: '/devices',   label: 'Sources',       icon: '◈', adminOnly: false },
@@ -156,7 +159,12 @@ export default function Layout({ children, chromeless = false }: { children: Rea
   if (chromeless) {
     return (
       <AutoRefreshProvider>
-        <div className="relative z-10 text-white min-h-screen p-6">
+        {/* Definite height, not min-height: pages that fill their container
+            (Geo Map's d3 mount, Radar's 100%-sized SVG) size themselves with
+            h-full, which collapses to zero against an auto-height parent.
+            This mirrors <main> below, so dropping the chrome changes what is
+            on screen and not how the page lays out. */}
+        <div className="relative z-10 text-white h-screen overflow-auto p-6">
           {children}
         </div>
       </AutoRefreshProvider>

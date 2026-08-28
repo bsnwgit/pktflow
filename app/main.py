@@ -27,6 +27,7 @@ from app.api import nat_mappings as nat_mappings_router
 from app.api import traffic_rules as traffic_rules_router
 from app.api import geo_config    as geo_config_router
 from app.api import widgets       as widgets_router
+from app.api import nav           as nav_router
 from app.api import user_api_keys as user_api_keys_router
 from app.api import ip_info       as ip_info_router
 from app.api import mxtoolbox     as mxtoolbox_router
@@ -233,6 +234,7 @@ app.include_router(nat_mappings_router.router, prefix="/api/nat-mappings", tags=
 app.include_router(traffic_rules_router.router,    prefix="/api/traffic-rules",    tags=["traffic-rules"])
 app.include_router(geo_config_router.router,    prefix="/api/geo-config",    tags=["geo-config"])
 app.include_router(widgets_router.router,       prefix="/api",               tags=["widgets"])
+app.include_router(nav_router.router,           prefix="/api",               tags=["nav"])
 app.include_router(user_api_keys_router.router, prefix="/api/user-api-keys", tags=["user-api-keys"])
 app.include_router(ip_info_router.router,       prefix="/api/ip-info",       tags=["ip-info"])
 app.include_router(mxtoolbox_router.router,     prefix="/api/mxtoolbox",     tags=["mxtoolbox"])
