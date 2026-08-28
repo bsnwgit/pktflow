@@ -3395,7 +3395,7 @@ function SitesSection({ isAdmin }: { isAdmin: boolean }) {
           </div>
           <div>
             <label className="block text-xs text-gray-400 mb-1">IP/CIDR (comma-separated, optional)</label>
-            <input placeholder="e.g. 1.2.3.4,5.6.0.0/16" value={form.ip_cidr} onChange={e => setForm(f => ({ ...f, ip_cidr: e.target.value }))}
+            <input placeholder="e.g. 203.0.113.4,198.51.100.0/24" value={form.ip_cidr} onChange={e => setForm(f => ({ ...f, ip_cidr: e.target.value }))}
               className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           {error && <p className="text-xs text-red-400">{error}</p>}
@@ -3433,7 +3433,7 @@ function SitesSection({ isAdmin }: { isAdmin: boolean }) {
                       className={`${inp} w-24 disabled:opacity-50 disabled:cursor-not-allowed`} />
                   </td>
                   <td className="px-2 py-2"><input value={editForm.display_name} onChange={e => setEditForm(f => ({ ...f, display_name: e.target.value }))} className={`${inp} w-28`} /></td>
-                  <td className="px-2 py-2"><input value={editForm.ip_cidr} onChange={e => setEditForm(f => ({ ...f, ip_cidr: e.target.value }))} placeholder="e.g. 1.2.3.4,5.6.0.0/16" className={`${inp} w-40 font-mono text-xs`} /></td>
+                  <td className="px-2 py-2"><input value={editForm.ip_cidr} onChange={e => setEditForm(f => ({ ...f, ip_cidr: e.target.value }))} placeholder="e.g. 203.0.113.4,198.51.100.0/24" className={`${inp} w-40 font-mono text-xs`} /></td>
                   <td className="px-2 py-2">
                     <div className="flex items-center gap-2">
                       <input type="color" value={editForm.fill_color} onChange={e => setEditForm(f => ({ ...f, fill_color: e.target.value }))}
@@ -3907,7 +3907,7 @@ function NatMappingsSection({ isAdmin }: { isAdmin: boolean }) {
           <h2 className="text-lg font-semibold text-white">Private/Public NAT Mapping</h2>
           <HelpButton title="Private/Public NAT Mapping — How It Works">
             <p>Tells the Geo Map "this private range is really at this location" — nothing more. This section has <span className="text-gray-300 font-medium">no effect on line colors or styling</span>; that all happens in Traffic Rules below, which references these entries by name.</p>
-            <p><span className="text-gray-300 font-medium">Private CIDR/IP is required</span> — it's the only thing that makes an entry match real traffic (a flow's private-side IP falling inside it). <span className="text-gray-300 font-medium">Public/External CIDR or IP</span> is what gets geolocated to place it on the map: a single firewall IP for a site (e.g. <code className="text-gray-400">10.10.0.0/16</code> → <code className="text-gray-400">23.92.28.254/32</code>), or a whole block if a site's traffic egresses from a range (e.g. a VPN exit node's <code className="text-gray-400">/24</code>). If you're trying to classify traffic to some external service instead of mapping one of your own ranges, you want a Traffic Rule, not an entry here — see the "Any" option there.</p>
+            <p><span className="text-gray-300 font-medium">Private CIDR/IP is required</span> — it's the only thing that makes an entry match real traffic (a flow's private-side IP falling inside it). <span className="text-gray-300 font-medium">Public/External CIDR or IP</span> is what gets geolocated to place it on the map: a single firewall IP for a site (e.g. <code className="text-gray-400">10.0.0.0/16</code> → <code className="text-gray-400">203.0.113.10/32</code>), or a whole block if a site's traffic egresses from a range (e.g. a VPN exit node's <code className="text-gray-400">/24</code>). If you're trying to classify traffic to some external service instead of mapping one of your own ranges, you want a Traffic Rule, not an entry here — see the "Any" option there.</p>
             <p>Multiple entries may share the same private and/or public CIDR — drag rows to reorder; whichever entry is higher in this list wins when more than one matches the same flow, and is also the one whose Traffic Rules get checked for that arc's style.</p>
             <p><span className="text-gray-300 font-medium">Destination CIDR/IP and Port</span> (optional) scope this mapping to only apply when the flow's remote end matches — this is what lets the SAME private range resolve to a DIFFERENT public CIDR depending on where the traffic is headed. E.g. a firewall that NATs DNS traffic (port 53) out one public IP and everything else out another: two entries, same Private CIDR, one with Destination Port <code className="text-gray-400">53</code> above the other (blank Destination Port) in priority order. Leave both blank to match any destination — the common case.</p>
             <p><span className="text-gray-300 font-medium">Show in legend</span> controls whether this entry appears in the Geo Map's NAT Mappings legend section.</p>
@@ -3968,13 +3968,13 @@ function NatMappingsSection({ isAdmin }: { isAdmin: boolean }) {
             </div>
             <div>
               <label className="block text-xs text-gray-400 mb-1">Public/External CIDR or IP</label>
-              <input placeholder="e.g. 23.92.28.254/32" value={form.public_cidr}
+              <input placeholder="e.g. 203.0.113.10/32" value={form.public_cidr}
                 onChange={e => setForm(f => ({ ...f, public_cidr: e.target.value }))}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
               <label className="block text-xs text-gray-400 mb-1">Destination CIDR/IP (optional)</label>
-              <input placeholder="e.g. 1.1.1.1,9.9.9.9" value={form.dst_cidrs ?? ''}
+              <input placeholder="e.g. 203.0.113.1,203.0.113.9" value={form.dst_cidrs ?? ''}
                 onChange={e => setForm(f => ({ ...f, dst_cidrs: e.target.value || null }))}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
@@ -4277,9 +4277,9 @@ function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
           <HelpButton title="Traffic Rules — How It Works">
             <p>This is the <span className="text-gray-300 font-medium">only</span> place a line color/style gets chosen for the Geo Map. NAT Mappings above just supplies locations — a rule decides what a matching flow looks like.</p>
             <p><span className="text-gray-300 font-medium">Matching is top-to-bottom, first hit wins.</span> Each rule can filter on any combination of: which NAT Mapping the traffic belongs to ("Any" = every mapping), Destination IPs/CIDRs, and Destination Ports. At least one filter is required. Rules are checked in the order shown below — as soon as one matches, its Line Style is used and nothing else is checked.</p>
-            <p><span className="text-gray-300 font-medium">Multiple values:</span> list several IPs/CIDRs or ports/ranges in one rule by separating them with commas — a destination matching <span className="text-gray-300">any</span> listed value counts as a match. Destinations: <code className="text-gray-400">1.1.1.1, 9.9.9.9</code>. Ports: <code className="text-gray-400">53, 8000-9000</code> (ranges use a dash and are inclusive on both ends).</p>
+            <p><span className="text-gray-300 font-medium">Multiple values:</span> list several IPs/CIDRs or ports/ranges in one rule by separating them with commas — a destination matching <span className="text-gray-300">any</span> listed value counts as a match. Destinations: <code className="text-gray-400">203.0.113.1, 203.0.113.9</code>. Ports: <code className="text-gray-400">53, 8000-9000</code> (ranges use a dash and are inclusive on both ends).</p>
             <p><span className="text-gray-300 font-medium">Destination: manual entry or a Site.</span> Type CIDRs/IPs directly, or pick a Site instead — matching then uses that Site's own IP/CIDR field, live (edit the Site later and every rule pointing at it picks up the change automatically). One or the other, never both. Once a rule is created with one, it's locked to that mode — delete and recreate it to switch.</p>
-            <p><span className="text-gray-300 font-medium">Examples:</span> NAT Mapping = "Site A", Destinations = <code className="text-gray-400">1.1.1.1, 9.9.9.9</code>, Ports = blank → "Site A's traffic to Cloudflare or Quad9 DNS, any port." NAT Mapping = "Any", Destinations = blank, Ports = <code className="text-gray-400">53</code> → "any DNS traffic, from anywhere I've mapped, to anywhere." NAT Mapping = "Site A", Destinations = blank, Ports = blank → "everything else from Site A" — a catch-all/default for that one mapping.</p>
+            <p><span className="text-gray-300 font-medium">Examples:</span> NAT Mapping = "Site A", Destinations = <code className="text-gray-400">203.0.113.1, 203.0.113.9</code>, Ports = blank → "Site A's traffic to Cloudflare or Quad9 DNS, any port." NAT Mapping = "Any", Destinations = blank, Ports = <code className="text-gray-400">53</code> → "any DNS traffic, from anywhere I've mapped, to anywhere." NAT Mapping = "Site A", Destinations = blank, Ports = blank → "everything else from Site A" — a catch-all/default for that one mapping.</p>
             <p><span className="text-amber-500 font-medium">Ordering matters most for catch-alls:</span> a rule with no Destination or Port filter matches everything for that NAT Mapping, so it will shadow any more specific rule listed below it. Always drag your specific rules (like the DNS example) above a catch-all for the same mapping, or the catch-all wins first and the specific one never gets reached.</p>
             <p>Traffic that matches no rule at all falls back to a plain gray line.</p>
           </HelpButton>
@@ -4337,7 +4337,7 @@ function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
                 </div>
               </div>
               {addDestMode === 'cidr' ? (
-                <input placeholder="e.g. 1.1.1.1, 9.9.9.9" value={form.dst_cidrs ?? ''}
+                <input placeholder="e.g. 203.0.113.1, 203.0.113.9" value={form.dst_cidrs ?? ''}
                   onChange={e => setForm(f => ({ ...f, dst_cidrs: e.target.value }))}
                   className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
               ) : (
@@ -4356,7 +4356,7 @@ function TrafficRulesSection({ isAdmin }: { isAdmin: boolean }) {
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
-          <p className="text-xs text-gray-500">At least one filter is required. List multiple values separated by commas (e.g. "1.1.1.1, 9.9.9.9" or "53, 8000-9000"). Leave Destination blank to match any destination on that port; leave Ports blank to match any port; leave both blank (with a NAT Mapping picked) to make this the default/catch-all for that mapping — put it below any more specific rules for the same mapping.</p>
+          <p className="text-xs text-gray-500">At least one filter is required. List multiple values separated by commas (e.g. "203.0.113.1, 203.0.113.9" or "53, 8000-9000"). Leave Destination blank to match any destination on that port; leave Ports blank to match any port; leave both blank (with a NAT Mapping picked) to make this the default/catch-all for that mapping — put it below any more specific rules for the same mapping.</p>
           {error && <p className="text-xs text-red-400">{error}</p>}
           <div className="flex gap-3 pt-1">
             <button onClick={handleAdd} disabled={saving}

@@ -2,7 +2,7 @@
 -- Traffic Rules: refine arc classification beyond an Address Mapping's
 -- default Line Style. A rule optionally scopes to one address_mappings row
 -- (NULL = any) and matches on a destination CIDR/IP and/or a destination
--- port (at least one required) — e.g. "traffic to 1.1.1.1 or 9.9.9.9" or
+-- port (at least one required) — e.g. "traffic to 203.0.113.1 or 203.0.113.9" or
 -- "any traffic to port 53" gets its own Line Style instead of blending into
 -- the address mapping's generic line. `priority` (lower wins) resolves
 -- conflicts when more than one rule matches the same flow.

@@ -6,11 +6,11 @@ location only, never a line style. A rule matches on a NAT mapping (None =
 any), a destination (CIDRs/IPs, entered manually or picked from a Site's
 ip_cidr), and/or a list of destination ports (or port ranges); at least one
 of the three is required. dst_cidrs and dst_ports are comma-separated (e.g.
-"1.1.1.1,9.9.9.9" or "53,8000-9000") — a rule matches if the destination
+"203.0.113.1,203.0.113.9" or "53,8000-9000") — a rule matches if the destination
 falls in ANY listed CIDR and/or ANY listed port/range. A rule with only a
 NAT mapping set (no destination filter) acts as that mapping's
 default/catch-all style, so e.g. "any of Site A's traffic" gets one line
-while "Site A's traffic to 1.1.1.1 or 9.9.9.9" or "any traffic to port 53"
+while "Site A's traffic to 203.0.113.1 or 203.0.113.9" or "any traffic to port 53"
 can be pulled out with a more specific rule above it — matching is
 first-hit in priority order, top to bottom, so a catch-all rule must be
 placed below anything more specific for the same mapping or it will shadow
@@ -84,7 +84,7 @@ def _validate_ports(value: str) -> str:
 class TrafficRuleIn(BaseModel):
     name:               str
     nat_mapping_id: Optional[int] = None
-    dst_cidrs:          Optional[str] = None  # comma-separated IPs/CIDRs, e.g. "1.1.1.1,9.9.9.9"
+    dst_cidrs:          Optional[str] = None  # comma-separated IPs/CIDRs, e.g. "203.0.113.1,203.0.113.9"
     dst_site_key:       Optional[str] = None  # alternative to dst_cidrs — live reference to a Site's ip_cidr
     dst_ports:          Optional[str] = None  # comma-separated ports/ranges, e.g. "53,8000-9000"
     line_style_id:      Optional[int] = None
