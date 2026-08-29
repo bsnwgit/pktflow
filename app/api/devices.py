@@ -37,6 +37,23 @@ class DeviceOut(BaseModel):
     updated_at: str
 
 
+def _import_error(exc: Exception) -> str:
+    """A row-level failure worded for the admin doing the import.
+
+    The raw exception used to go back in the response. Driver messages carry
+    schema internals and, for the connection-level errors, filesystem paths —
+    none of which belongs in an API response. The two cases an importer can
+    actually act on are named; anything else degrades to the exception type.
+    """
+    if isinstance(exc, aiosqlite.IntegrityError):
+        text = str(exc).lower()
+        if "unique" in text:
+            return "already exists"
+        if "constraint" in text:
+            return "violates a database constraint"
+    return type(exc).__name__
+
+
 @router.get("/unknown-samplers")
 async def get_unknown_samplers(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)):
     """
@@ -249,7 +266,7 @@ async def import_devices_csv(
                 )
                 created += 1
         except Exception as e:
-            errors.append({"row": i, "reason": str(e)})
+            errors.append({"row": i, "reason": _import_error(e)})
             skipped += 1
 
     await db.commit()
