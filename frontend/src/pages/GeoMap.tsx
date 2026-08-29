@@ -145,8 +145,10 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
       maxBounds: worldBounds, maxBoundsViscosity: 1.0,
     })
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      subdomains: 'abcd', maxZoom: 19,
+    // Esri dark canvas — CARTO's basemaps now serve API-KEY-REQUIRED watermarked
+    // tiles. Esri's axis order is {z}/{y}/{x}, not {z}/{x}/{y}.
+    L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 16,
       noWrap: true, bounds: worldBounds,
     }).addTo(map)
 
