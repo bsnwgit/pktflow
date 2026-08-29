@@ -233,6 +233,7 @@ def _fmt_n(n):
 # ── Top Talkers ───────────────────────────────────────────────────────────────
 @router.get("/widgets/top_talkers", response_class=HTMLResponse, include_in_schema=False)
 async def widget_top_talkers(minutes: int = 60):
+    minutes = _mins(minutes)
     rows = await asyncio.to_thread(_ch, f"""
         SELECT src_ip, dst_ip, protocol, sum(bytes) as total_bytes, count() as flow_count
         FROM flows
@@ -251,13 +252,14 @@ async def widget_top_talkers(minutes: int = 60):
         content = f"<table><thead><tr><th>Source</th><th>Destination</th><th>Proto</th><th>Bytes</th><th>Flows</th></tr></thead><tbody>{trs}</tbody></table>"
     else:
         content = _empty("No flows received in this window")
-    body = f"<div class='hdr'><div class='hdr-dot'></div><span class='hdr-title'>Top Talkers — last {_win_label(minutes)}</span></div><div class='content'>{content}</div>"
+    body = f"<div class='hdr'><div class='hdr-dot'></div><span class='hdr-title'>Top Talkers — last {html.escape(_win_label(minutes))}</span></div><div class='content'>{content}</div>"
     return HTMLResponse(_page("Top Talkers", body))
 
 
 # ── Flow Summary ──────────────────────────────────────────────────────────────
 @router.get("/widgets/flow_summary", response_class=HTMLResponse, include_in_schema=False)
 async def widget_flow_summary(minutes: int = 60):
+    minutes = _mins(minutes)
     stats_rows = await asyncio.to_thread(_ch, f"""
         SELECT count() as total_flows, sum(bytes) as total_bytes,
                uniq(src_ip) as unique_src, uniq(dst_ip) as unique_dst
@@ -324,6 +326,7 @@ async def widget_active_alerts():
 # ── Top Ports ─────────────────────────────────────────────────────────────────
 @router.get("/widgets/top_ports", response_class=HTMLResponse, include_in_schema=False)
 async def widget_top_ports(minutes: int = 60):
+    minutes = _mins(minutes)
     rows = await asyncio.to_thread(_ch, f"""
         SELECT dst_port, protocol, count() as flow_count, sum(bytes) as total_bytes
         FROM flows
@@ -352,6 +355,7 @@ async def widget_top_ports(minutes: int = 60):
 # ── Protocol Breakdown ────────────────────────────────────────────────────────
 @router.get("/widgets/protocol_breakdown", response_class=HTMLResponse, include_in_schema=False)
 async def widget_protocol_breakdown(minutes: int = 60):
+    minutes = _mins(minutes)
     rows = await asyncio.to_thread(_ch, f"""
         SELECT protocol, count() as cnt, sum(bytes) as bytes
         FROM flows WHERE timestamp >= now() - INTERVAL {int(minutes)} MINUTE
@@ -565,12 +569,16 @@ def _mins(raw) -> int:
         return 10
 
 
-def _win_label(minutes: int) -> str:
-    if minutes >= 1440:
-        return f"{minutes // 1440}d"
-    if minutes >= 60:
-        return f"{minutes // 60} hr"
-    return f"{minutes} min"
+def _win_label(minutes) -> str:
+    """Clamps its own input, so the result is always digits plus a fixed suffix.
+    This lands in HTML, and sanitising here means no call site can leak a
+    request value into the page."""
+    m = _mins(minutes)
+    if m >= 1440:
+        return f"{m // 1440}d"
+    if m >= 60:
+        return f"{m // 60} hr"
+    return f"{m} min"
 
 
 def _shell(title: str, content: str, dot: str = "#60a5fa") -> str:
