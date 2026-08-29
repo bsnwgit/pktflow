@@ -30,6 +30,23 @@ class AlertRuleIn(BaseModel):
 
 # ── Rules ─────────────────────────────────────────────────────────────────────
 
+def _import_error(exc: Exception) -> str:
+    """A row-level failure worded for the admin doing the import.
+
+    The raw exception used to go back in the response. Driver messages carry
+    schema internals and, for the connection-level errors, filesystem paths —
+    none of which belongs in an API response. The two cases an importer can
+    actually act on are named; anything else degrades to the exception type.
+    """
+    if isinstance(exc, aiosqlite.IntegrityError):
+        text = str(exc).lower()
+        if "unique" in text:
+            return "already exists"
+        if "constraint" in text:
+            return "violates a database constraint"
+    return type(exc).__name__
+
+
 @router.get("/rules")
 async def list_rules(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)):
     async with db.execute("SELECT * FROM alert_rules ORDER BY severity DESC, name") as cur:
@@ -218,7 +235,7 @@ async def import_rules_csv(
             )
             created += 1
         except Exception as exc:
-            errors.append(f"Row {lineno}: {name}: {exc}")
+            errors.append(f"Row {lineno}: {name}: {_import_error(exc)}")
             skipped += 1
 
     await db.commit()
