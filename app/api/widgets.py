@@ -438,12 +438,12 @@ async def widget_geo_map():
 <script>
 const GD={geo_json};
 const WB=L.latLngBounds([-90,-180],[90,180]);
-const map=L.map('map',{{attributionControl:false,zoomControl:true,minZoom:2,
+const map=L.map('map',{{attributionControl:true,zoomControl:true,minZoom:2,
   worldCopyJump:false,maxBounds:WB,maxBoundsViscosity:1.0}});
 // Esri dark canvas — CARTO's basemaps now return API-KEY-REQUIRED watermarked
 // tiles. Note Esri's axis order is {{z}}/{{y}}/{{x}}, not {{z}}/{{x}}/{{y}}.
 L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{{z}}/{{y}}/{{x}}',
-  {{maxZoom:16,noWrap:true,bounds:WB}}).addTo(map);
+  {{attribution:'Tiles &copy; Esri',maxZoom:16,noWrap:true,bounds:WB}}).addTo(map);
 GD.arcs.forEach(a=>L.polyline([[a.src_lat,a.src_lng],[a.dst_lat,a.dst_lng]],{{color:'#60a5fa',weight:1.2,opacity:0.45}}).addTo(map));
 const pts=[];
 GD.locations.forEach(loc=>{{

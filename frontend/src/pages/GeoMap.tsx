@@ -140,15 +140,19 @@ function LeafletGeoMap({ geoData, config }: { geoData: GeoDataResponse; config: 
 
     const map = L.map(divRef.current, {
       center: [20, 0], zoom: 2, minZoom: 2,
-      zoomControl: true, attributionControl: false,
+      zoomControl: true, attributionControl: true,
       worldCopyJump: false,
       maxBounds: worldBounds, maxBoundsViscosity: 1.0,
     })
 
-    // Esri dark canvas — CARTO's basemaps now serve API-KEY-REQUIRED watermarked
-    // tiles. Esri's axis order is {z}/{y}/{x}, not {z}/{x}/{y}.
+    // Esri's dark canvas, which needs no key. CARTO's basemaps now stamp
+    // unauthenticated tiles with an "API KEY REQUIRED" watermark, server-side.
+    // Three differences from CARTO's URL template: Esri orders the path
+    // {z}/{y}/{x} rather than {z}/{x}/{y}, serves from one host with no
+    // subdomain rotation or retina variant, and tops out at zoom 16.
+    // Attribution is a condition of use, so the control is on.
     L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 16,
+      attribution: 'Tiles &copy; Esri', maxZoom: 16,
       noWrap: true, bounds: worldBounds,
     }).addTo(map)
 
