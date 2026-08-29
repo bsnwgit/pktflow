@@ -117,6 +117,12 @@ DEFAULTS: dict[str, Any] = {
 
     # Suite integration
     "hub_settings_managed": False,  # Set by pktHub on register/deregister via /api/suite/settings-lock — not user-editable.
+    # Managed mode — pktHub forcing every user through the hub. hub_redirect_url
+    # is the one an operator sets here; pktHub refuses to lock an app without it.
+    # The other two are written by pktHub and by the lock middleware in main.py.
+    "direct_ui_locked": False,      # Set by pktHub via /api/suite/direct-access — not user-editable.
+    "hub_redirect_url": "",         # Where users are sent while locked, e.g. https://hub.example.com/app/pktflow
+    "lock_heartbeat_at": "",        # Last contact from pktHub; the lock expires without it — not user-editable.
 
     # Resonance embed — the shared assistant surface every pkt* app mounts.
     # base_url must match the address enrolled on the resonance side exactly

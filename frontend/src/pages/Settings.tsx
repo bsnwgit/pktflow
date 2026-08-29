@@ -880,6 +880,28 @@ function PktHubTokenDisplay() {
   const [copied, setCopied]         = useState(false)
   const [loaded, setLoaded]         = useState(false)
   const [regenerating, setRegen]    = useState(false)
+  const [redirectUrl, setRedirectUrl]       = useState('')
+  const [savingRedirect, setSavingRedirect] = useState(false)
+  const [redirectSaved, setRedirectSaved]   = useState(false)
+  const [redirectError, setRedirectError]   = useState('')
+
+  const saveRedirect = async () => {
+    setSavingRedirect(true); setRedirectError(''); setRedirectSaved(false)
+    try {
+      const r = await fetch('/api/suite/hub-redirect-url', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hub_redirect_url: redirectUrl.trim() }),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) setRedirectError(d.error || `Save failed (HTTP ${r.status})`)
+      else { setRedirectSaved(true); setTimeout(() => setRedirectSaved(false), 3000) }
+    } catch (e: any) {
+      setRedirectError(e?.message || 'Save failed')
+    }
+    setSavingRedirect(false)
+  }
 
   const regenerate = async () => {
     if (!confirm('Generate a new token?\n\nThe current token will stop working immediately.\nYou will need to re-register this app in pktHub with the new token.')) return
@@ -897,6 +919,10 @@ function PktHubTokenDisplay() {
       .then(r => r.json())
       .then(d => { setToken(d.suite_token || ''); setLoaded(true) })
       .catch(() => setLoaded(true))
+    fetch('/api/suite/mode', { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => { if (d.hub_redirect_url) setRedirectUrl(d.hub_redirect_url) })
+      .catch(() => {})
   }, [])
 
   const masked = token
@@ -946,6 +972,34 @@ function PktHubTokenDisplay() {
               </button>
             </div>
           )}
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-4 items-start py-3 border-b border-gray-800">
+        <div>
+          <p className="text-sm font-medium text-white">pktHub Redirect URL</p>
+          <p className="text-xs text-gray-500 mt-0.5">Where visitors land while pktHub has this app in Managed mode</p>
+        </div>
+        <div className="col-span-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              value={redirectUrl}
+              onChange={e => { setRedirectUrl(e.target.value); setRedirectSaved(false); setRedirectError('') }}
+              placeholder="https://hub.example.com/app/pktflow"
+              className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs font-mono text-gray-200"
+            />
+            <button
+              onClick={saveRedirect}
+              disabled={savingRedirect}
+              className="px-3 py-1.5 text-xs font-medium text-white rounded-lg whitespace-nowrap disabled:opacity-40 transition-colors"
+              style={{ background: redirectSaved ? '#52cc8e' : '#63c3d8' }}
+            >
+              {savingRedirect ? '…' : redirectSaved ? '✓ Saved' : 'Save'}
+            </button>
+          </div>
+          {redirectError && <p className="text-xs text-red-400 mt-1">{redirectError}</p>}
+          <p className="text-xs text-gray-500 mt-1">
+            pktHub refuses to switch this app to Managed mode until this is set. Blank leaves direct access alone.
+          </p>
         </div>
       </div>
       <div className="grid grid-cols-3 gap-4 items-start py-3">
