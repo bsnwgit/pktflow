@@ -43,10 +43,22 @@ async def list_docs() -> list[dict]:
 
 @router.get("/{slug}", dependencies=[Depends(get_current_user)])
 async def get_doc(slug: str) -> dict:
-    """Return the raw markdown content of one doc, identified by filename stem."""
+    """Return the raw markdown content of one doc, identified by filename stem.
+
+    The path is never built from the request. `slug` selects from the files
+    actually present in docs/, so the value that reaches the filesystem is one
+    this process enumerated rather than one a caller supplied — no traversal is
+    expressible, and a scanner can see that without having to trust a regex.
+    """
     if not re.fullmatch(r"[A-Za-z0-9_-]+", slug):
         raise HTTPException(400, "Invalid document identifier")
-    path = _docs_dir() / f"{slug}.md"
-    if not path.is_file():
+
+    docs_dir = _docs_dir()
+    if not docs_dir.is_dir():
         raise HTTPException(404, "Document not found")
+
+    path = next((f for f in docs_dir.glob("*.md") if f.stem == slug), None)
+    if path is None:
+        raise HTTPException(404, "Document not found")
+
     return {"slug": slug, "title": _title_from_filename(path.name), "content": path.read_text()}
