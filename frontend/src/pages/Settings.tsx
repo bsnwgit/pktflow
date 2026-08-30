@@ -977,7 +977,7 @@ function PktHubTokenDisplay() {
       <div className="grid grid-cols-3 gap-4 items-start py-3 border-b border-gray-800">
         <div>
           <p className="text-sm font-medium text-white">pktHub Redirect URL</p>
-          <p className="text-xs text-gray-500 mt-0.5">Where visitors land while pktHub has this app in Managed mode</p>
+          <p className="text-xs text-gray-500 mt-0.5">Where visitors land while pktHub has this app in Managed mode. Normally left blank.</p>
         </div>
         <div className="col-span-2">
           <div className="flex items-center gap-2 flex-wrap">
@@ -998,7 +998,9 @@ function PktHubTokenDisplay() {
           </div>
           {redirectError && <p className="text-xs text-red-400 mt-1">{redirectError}</p>}
           <p className="text-xs text-gray-500 mt-1">
-            pktHub refuses to switch this app to Managed mode until this is set. Blank leaves direct access alone.
+            pktHub fills this in when it switches this app to Managed mode — the address is built from
+            pktHub&#39;s own Base URL and this app&#39;s id there, so it is set in pktHub, not here. Leave it
+            blank; set it by hand only for an install with no pktHub in front of it.
           </p>
         </div>
       </div>
