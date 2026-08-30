@@ -139,7 +139,7 @@ function InlineFlows({ srcIp, dstIp, window }: { srcIp: string; dstIp: string; w
   return (
     <tr>
       <td colSpan={9} className="px-0 py-0 bg-gray-950 border-b border-gray-800">
-        <div className="px-6 py-3">
+        <div className="f-tbl-scroll px-6 py-3">
           <p className="text-xs text-blue-300 mb-2 font-medium">
             {flows.length} flows — <IpLink ip={srcIp} /> → <IpLink ip={dstIp} />
           </p>
@@ -311,7 +311,7 @@ function TopTalkersTable({ talkers, totalBytes, window, externalExpanded, onExte
         <button onClick={() => setFilter('')} className="text-red-400 hover:text-red-300 transition-colors text-sm font-bold">✕</button>
         <span className="text-xs text-white">{displayed.length} talkers</span>
       </div>
-      <div className="overflow-x-auto">
+      <div className="f-tbl-scroll overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-800">
