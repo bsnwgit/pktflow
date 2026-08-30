@@ -127,6 +127,16 @@ Upload a PFX/P12 bundle or separate PEM cert+key on Settings → Security → SS
 
 ## Suite Integration (pktHub + sibling apps)
 
+### Managed mode
+
+pktHub can put this app into **Managed mode**, which stops people reaching its UI directly and sends them to the hub instead. Nothing needs configuring here: the hub sends the address to redirect to when it applies the lock, because that address is built from the hub's own Base URL and this app's id in the hub's registry, and neither is visible from this side.
+
+The lock redirects rather than shuts down. Anything carrying a valid suite token passes through untouched, as do `/api/health`, `/api/suite/`, `/api/auth/` and the paths a hub-rendered page needs, so pktHub itself keeps working normally.
+
+**It expires on its own.** Every call from pktHub refreshes a heartbeat and the lock releases after five minutes without one, so it does not depend on the hub coming back — a lock only pktHub could lift would strand this app exactly when pktHub is what broke. `GET /api/suite/mode` reports the current state without authentication.
+
+The redirect address can also be set by hand at Settings → Integrations → Suite Integration, for an install with no pktHub in front of it. It takes http/https only, since every visitor follows it while the lock is on, and pktHub overwrites it whenever it applies a lock — so leaving it blank is normal.
+
 - **Inbound**: Settings → Security → Suite Integration → copy the Suite Token, register pktFlow in pktHub's App Manager with it. Regenerating the token immediately revokes the old one.
 - **Outbound (Internal IP Lookup)**: add a named connection to one or more pktIPAM instances on the same tab — name, pktIPAM base URL, and the Suite Token copied from that pktIPAM's own Suite Integration page. The first *enabled* connection is used for internal-IP lookups app-wide. **Test Connection** does a real authenticated `/api/suite/whoami` round trip, so a wrong/revoked token actually fails the test.
 

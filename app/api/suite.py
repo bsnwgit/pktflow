@@ -252,7 +252,13 @@ async def get_direct_access(request: Request):
 async def set_direct_access(request: Request):
     """
     Lock or unlock direct UI access. Auth: X-Suite-Token.
-    Body: {"locked": true|false}
+    Body: {"locked": true|false, "hub_redirect_url": "https://hub/app/10"}
+
+    hub_redirect_url is optional and comes from pktHub, which is the only party
+    able to build it: the address carries the hub's own hostname and this app's
+    id in the hub's registry, and neither is visible from here. Asking an
+    operator to type it into each app in turn was asking them to guess a foreign
+    primary key.
 
     The heartbeat is written alongside the flag so a fresh lock starts fresh
     rather than inheriting an expiry from whenever pktHub last called.
@@ -265,6 +271,16 @@ async def set_direct_access(request: Request):
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
     locked = bool(body.get("locked", False))
+    redirect_url = (body.get("hub_redirect_url") or "").strip()
+    # Same guard as PATCH /hub-redirect-url, and it counts for more here: this
+    # value arrives over the network rather than from an admin at a form, and
+    # every visitor follows it once the lock is on.
+    if redirect_url and not redirect_url.lower().startswith(("http://", "https://")):
+        return JSONResponse(
+            {"error": "hub_redirect_url must start with http:// or https://"},
+            status_code=400,
+        )
+
     from app.config import get_settings
     from datetime import datetime, timezone
     import aiosqlite
@@ -278,8 +294,17 @@ async def set_direct_access(request: Request):
                 "INSERT OR REPLACE INTO settings (key, value) VALUES ('lock_heartbeat_at', ?)",
                 (json.dumps(datetime.now(timezone.utc).isoformat()),)
             )
+            if redirect_url:
+                await db.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES ('hub_redirect_url', ?)",
+                    (json.dumps(redirect_url),)
+                )
             await db.commit()
-        return JSONResponse({"status": "ok", "direct_ui_locked": locked})
+        return JSONResponse({
+            "status": "ok",
+            "direct_ui_locked": locked,
+            "hub_redirect_url": redirect_url,
+        })
     except Exception:
         # The exception text carries the database path and internal SQL, and
         # this endpoint answers pktHub over the network — log it, don't return it.
