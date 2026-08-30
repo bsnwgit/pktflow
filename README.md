@@ -4,6 +4,9 @@
 
 A production NetFlow visualization and alerting platform. Receives live NetFlow v9 data from network samplers via [goflow2](https://github.com/netsampler/goflow2) + [Vector](https://vector.dev/), stores flows in ClickHouse, and serves a React dashboard for real-time traffic analysis.
 
+Part of the **[pkt suite](#the-pkt-suite)** — ten self-hosted apps for network and
+security operations that share one architecture and one sign-in.
+
 ---
 
 ## Quick Start
@@ -959,3 +962,31 @@ path end to end rather than assuming it works.
 - SAML SP Entity ID must exactly match Okta's "Audience URI" — both derived from Base URL in Settings
 - Only assign **Default Admin** (Settings → Security → Users) to an account whose credentials are tightly controlled — if every auth method is ever disabled, that account is the one anyone reaching the app is auto-logged in as
 - Suite Tokens (both the inbound one under Settings → Security → Suite Integration, and each outbound Sibling pkt App connection's token) are bearer credentials equivalent to a login — treat them like any other secret
+
+## The pkt suite
+
+**pktFlow** is one of ten apps in the pkt suite — self-hosted tooling for network
+and security operations. Each installs and runs standalone, so take only the ones
+you need; they share one architecture (FastAPI + React), one look, one
+`admin`/`analyst`/`viewer` role model, and a suite token that lets siblings read
+one another's data. Default ports don't collide (8760–8769), so any combination
+runs on a single host.
+
+| App | Port | What it does |
+|---|---|---|
+| **pktFlow** *(you are here)* | `8766` | NetFlow, sFlow and IPFIX collection — flow search, traffic analytics, geo and topology views |
+| **[pktSNMP](https://github.com/bsnwgit/pktsnmp)** | `8767` | SNMP polling and trap receiving for any OID — device health and metric history without a full NMS |
+| **[pktLog](https://github.com/bsnwgit/pktlog)** | `8768` | Syslog over UDP, TCP and TLS — parsing, enrichment, full-text search and forwarding |
+| **[pktPCAP](https://github.com/bsnwgit/pktpcap)** | `8765` | Packet capture analysis in the browser — drop in a `.pcap` for TCP, DNS and threat findings, no Wireshark install |
+| **[pktWiFi](https://github.com/bsnwgit/pktwifi)** | `8769` | Access point, RF and client visibility from Meraki and UniFi controllers or plain SNMP polling |
+| **[pktIPAM](https://github.com/bsnwgit/pktipam)** | `8761` | IP address management reconciling declared subnets against live DHCP, DNS and device data, flagging conflicts |
+| **[pktNode](https://github.com/bsnwgit/pktnode)** | `8764` | Endpoint monitoring and management for Mac, Windows and Linux via a lightweight Go agent |
+| **[pktSecurity](https://github.com/bsnwgit/pktsecurity)** | `8762` | Security operations across the estate — CVE exposure, threat intelligence, ATT&CK-mapped detections and case management |
+| **[pktCert](https://github.com/bsnwgit/pktcert)** | `8763` | TLS certificate discovery and expiry tracking, plus an internal CA — issue, revoke and serve CRLs |
+| **[pktHub](https://github.com/bsnwgit/pkthub)** | `8760` | The front door — one sign-in, one alert stream, NOC wallboards and user management across every registered app |
+
+[pktHub](https://github.com/bsnwgit/pkthub) is optional — it registers the others
+and puts them behind a single login with shared alerting and NOC wallboards — but
+every app is fully usable without it.
+
+More at **[pktsolution.com](https://pktsolution.com)**.
