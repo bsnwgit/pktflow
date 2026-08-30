@@ -139,38 +139,40 @@ function InlineFlows({ srcIp, dstIp, window }: { srcIp: string; dstIp: string; w
   return (
     <tr>
       <td colSpan={9} className="px-0 py-0 bg-gray-950 border-b border-gray-800">
-        <div className="f-tbl-scroll px-6 py-3">
+        <div className="px-6 py-3">
           <p className="text-xs text-blue-300 mb-2 font-medium">
             {flows.length} flows — <IpLink ip={srcIp} /> → <IpLink ip={dstIp} />
           </p>
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-white border-b border-gray-800">
-                <th className="pb-1 text-left pr-4">Time</th>
-                <th className="pb-1 text-left pr-4">Src Port</th>
-                <th className="pb-1 text-left pr-4">Dst Port</th>
-                <th className="pb-1 text-left pr-4">Proto</th>
-                <th className="pb-1 text-right pr-4">Bytes</th>
-                <th className="pb-1 text-right pr-4">Packets</th>
-                <th className="pb-1 text-right">Duration</th>
-              </tr>
-            </thead>
-            <tbody>
-              {flows.map((f, i) => (
-                <tr key={i} className="border-b border-gray-800/40 hover:bg-gray-800/30">
-                  <td className="py-1 pr-4 text-white">{new Date(f.timestamp).toLocaleTimeString()}</td>
-                  <td className="py-1 pr-4 font-mono text-white">{f.src_port}</td>
-                  <td className="py-1 pr-4 font-mono text-white">{f.dst_port}</td>
-                  <td className="py-1 pr-4">
-                    <span className="bg-gray-800 text-white px-1.5 py-0.5 rounded text-xs">{protoLabel(f.protocol)}</span>
-                  </td>
-                  <td className="py-1 pr-4 text-right text-white">{fmtBytes(f.bytes)}</td>
-                  <td className="py-1 pr-4 text-right text-white">{f.packets.toLocaleString()}</td>
-                  <td className="py-1 text-right text-white">{fmtDuration(f.duration_ms)}</td>
+          <div className="f-tbl-scroll">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-white border-b border-gray-800">
+                  <th className="pb-1 text-left pr-4">Time</th>
+                  <th className="pb-1 text-left pr-4">Src Port</th>
+                  <th className="pb-1 text-left pr-4">Dst Port</th>
+                  <th className="pb-1 text-left pr-4">Proto</th>
+                  <th className="pb-1 text-right pr-4">Bytes</th>
+                  <th className="pb-1 text-right pr-4">Packets</th>
+                  <th className="pb-1 text-right">Duration</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {flows.map((f, i) => (
+                  <tr key={i} className="border-b border-gray-800/40 hover:bg-gray-800/30">
+                    <td className="py-1 pr-4 text-white">{new Date(f.timestamp).toLocaleTimeString()}</td>
+                    <td className="py-1 pr-4 font-mono text-white">{f.src_port}</td>
+                    <td className="py-1 pr-4 font-mono text-white">{f.dst_port}</td>
+                    <td className="py-1 pr-4">
+                      <span className="bg-gray-800 text-white px-1.5 py-0.5 rounded text-xs">{protoLabel(f.protocol)}</span>
+                    </td>
+                    <td className="py-1 pr-4 text-right text-white">{fmtBytes(f.bytes)}</td>
+                    <td className="py-1 pr-4 text-right text-white">{f.packets.toLocaleString()}</td>
+                    <td className="py-1 text-right text-white">{fmtDuration(f.duration_ms)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </td>
     </tr>
