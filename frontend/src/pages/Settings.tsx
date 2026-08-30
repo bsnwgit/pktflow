@@ -1022,6 +1022,10 @@ function PktHubTokenDisplay() {
 
 
 export default function Settings() {
+  // Settings is a desk surface — dense configuration grids and the widest
+  // tables in the app. Below md it says so rather than collapsing badly,
+  // but it does not lock the door: anything might matter at 2am.
+  const [showOnPhone, setShowOnPhone] = useState(false)
   const { user: me }          = useAuth()
   const isAdmin               = me?.role === 'admin'
   const [searchParams]        = useSearchParams()
@@ -1294,7 +1298,21 @@ export default function Settings() {
   }
 
   return (
-    <div className="space-y-4">
+    <>
+      {!showOnPhone && (
+        <div className="md:hidden f-panel p-6 text-center space-y-3">
+          <p className="f-lbl">Settings</p>
+          <p className="text-sm text-white leading-relaxed">
+            This page is built for a larger screen — dense configuration grids and
+            the widest tables in the app.
+          </p>
+          <button onClick={() => setShowOnPhone(true)} className="f-chip f-chip-gold f-tap px-3">
+            Show anyway
+          </button>
+        </div>
+      )}
+
+      <div className={showOnPhone ? 'space-y-4' : 'hidden md:block space-y-4'}>
       <h1 className="text-xl font-bold text-white">pktFlow - Settings</h1>
 
       {/* Section bar */}
@@ -2212,6 +2230,8 @@ export default function Settings() {
       )}
       </div>
     </div>
+    </>
+
   )
 }
 

@@ -96,36 +96,38 @@ function InlinePortFlows({
           <p className="text-xs text-blue-300 mb-2 font-medium">
             {flows.length} recent flows — port {port}/{protoName}
           </p>
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-white border-b border-gray-800">
-                <th className="pb-1 text-left pr-4">Time</th>
-                <th className="pb-1 text-left pr-4">Source IP</th>
-                <th className="pb-1 text-left pr-4">Src Port</th>
-                <th className="pb-1 text-left pr-4">Destination IP</th>
-                <th className="pb-1 text-left pr-4">Proto</th>
-                <th className="pb-1 text-right pr-4">Bytes</th>
-                <th className="pb-1 text-right pr-4">Packets</th>
-                <th className="pb-1 text-right">Duration</th>
-              </tr>
-            </thead>
-            <tbody>
-              {flows.map((f, i) => (
-                <tr key={i} className="border-b border-gray-800/40 hover:bg-gray-800/30">
-                  <td className="py-1 pr-4 text-white">{new Date(f.timestamp).toLocaleTimeString()}</td>
-                  <td className="py-1 pr-4 font-mono text-blue-300">{f.src_ip}</td>
-                  <td className="py-1 pr-4 font-mono text-white">{f.src_port}</td>
-                  <td className="py-1 pr-4 font-mono text-purple-300">{f.dst_ip}</td>
-                  <td className="py-1 pr-4">
-                    <span className="bg-gray-800 text-white px-1.5 py-0.5 rounded">{protoLabel(f.protocol)}</span>
-                  </td>
-                  <td className="py-1 pr-4 text-right text-white">{fmtBytes(f.bytes)}</td>
-                  <td className="py-1 pr-4 text-right text-white">{f.packets.toLocaleString()}</td>
-                  <td className="py-1 text-right text-white">{fmtDuration(f.duration_ms)}</td>
+          <div className="f-tbl-scroll">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-white border-b border-gray-800">
+                  <th className="pb-1 text-left pr-4">Time</th>
+                  <th className="pb-1 text-left pr-4">Source IP</th>
+                  <th className="pb-1 text-left pr-4">Src Port</th>
+                  <th className="pb-1 text-left pr-4">Destination IP</th>
+                  <th className="pb-1 text-left pr-4">Proto</th>
+                  <th className="pb-1 text-right pr-4">Bytes</th>
+                  <th className="pb-1 text-right pr-4">Packets</th>
+                  <th className="pb-1 text-right">Duration</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {flows.map((f, i) => (
+                  <tr key={i} className="border-b border-gray-800/40 hover:bg-gray-800/30">
+                    <td className="py-1 pr-4 text-white">{new Date(f.timestamp).toLocaleTimeString()}</td>
+                    <td className="py-1 pr-4 font-mono text-blue-300">{f.src_ip}</td>
+                    <td className="py-1 pr-4 font-mono text-white">{f.src_port}</td>
+                    <td className="py-1 pr-4 font-mono text-purple-300">{f.dst_ip}</td>
+                    <td className="py-1 pr-4">
+                      <span className="bg-gray-800 text-white px-1.5 py-0.5 rounded">{protoLabel(f.protocol)}</span>
+                    </td>
+                    <td className="py-1 pr-4 text-right text-white">{fmtBytes(f.bytes)}</td>
+                    <td className="py-1 pr-4 text-right text-white">{f.packets.toLocaleString()}</td>
+                    <td className="py-1 text-right text-white">{fmtDuration(f.duration_ms)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </td>
     </tr>
@@ -386,7 +388,7 @@ function PortInventoryTable({ window, sampler_ip, site }: { window: string; samp
         <button onClick={() => setSearch('')} className="text-red-400 hover:text-red-300 transition-colors text-sm font-bold">✕</button>
         <span className="text-xs text-white">{filtered.length} ports</span>
       </div>
-      <div className="overflow-hidden rounded-xl border border-gray-800">
+      <div className="f-tbl-scroll overflow-hidden rounded-xl border border-gray-800">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-800 bg-gray-900">
