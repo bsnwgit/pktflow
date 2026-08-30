@@ -13,6 +13,13 @@ GET  /api/suite/whoami   — authenticated identity check; a sibling pkt* app's
                            "Test Connection" button calls this (not the public
                            /api/health) so a wrong/revoked token fails the test
                            instead of silently reporting a healthy connection.
+
+Managed mode — pktHub forcing every user through the hub:
+
+GET   /api/suite/direct-access   — lock state, for pktHub's pre-flight
+POST  /api/suite/direct-access   — lock/unlock, sent by pktHub
+GET   /api/suite/mode            — same state, unauthenticated, for our own UI
+PATCH /api/suite/hub-redirect-url — where locked users are sent
 """
 import logging
 import json
@@ -171,3 +178,193 @@ async def suite_whoami(user: CurrentUser):
         "via_suite_token": bool(user.get("_via_suite")),
         "role": user["role"],
     }
+
+
+# ── Managed mode ──────────────────────────────────────────────────────────────
+# pktHub can lock this app so users reach it through the hub rather than
+# directly. State lives in the settings table, not config.yaml, so a lock takes
+# effect without a restart — and it carries a heartbeat, because a lock that
+# only pktHub can lift strands the app if pktHub is the thing that broke. The
+# expiry that lifts it lives in _direct_access_lock in app/main.py.
+
+
+def _suite_token_ok(request: Request) -> bool:
+    """Constant-time check of the caller's X-Suite-Token against ours."""
+    from app.config import get_settings
+    import secrets as _sec
+    presented = request.headers.get("x-suite-token", "")
+    # get_settings() re-reads SQLite, so a regenerated token applies at once.
+    stored = (get_settings().suite_token or "").strip()
+    if not presented or not stored:
+        return False
+    return _sec.compare_digest(presented, stored)
+
+
+async def _read_lock_state() -> dict:
+    """
+    Current lock state. Values in this table are JSON-encoded, but the older
+    rows written before that convention settled are bare strings — decode
+    tolerantly, the same way app/config.py reads suite_token.
+    """
+    from app.config import get_settings
+    import aiosqlite
+    state = {"direct_ui_locked": False, "hub_redirect_url": ""}
+    async with aiosqlite.connect(get_settings().db_path) as db:
+        for key in ("direct_ui_locked", "hub_redirect_url"):
+            async with db.execute("SELECT value FROM settings WHERE key = ?", (key,)) as cur:
+                row = await cur.fetchone()
+            if not row or row[0] is None:
+                continue
+            try:
+                value = json.loads(row[0])
+            except (ValueError, TypeError):
+                value = row[0]
+            state[key] = value
+    # "is True", not bool(): a value that failed to decode comes back as the raw
+    # text, and bool("false") is True — which would report a lock that is off.
+    return {
+        "direct_ui_locked": state["direct_ui_locked"] is True,
+        "hub_redirect_url": str(state["hub_redirect_url"] or ""),
+    }
+
+
+@router.get("/direct-access")
+async def get_direct_access(request: Request):
+    """
+    Current lock state and redirect target. Auth: X-Suite-Token.
+
+    pktHub calls this before enabling Managed mode — it refuses to lock an app
+    that has no redirect URL set, since that would take the app away without
+    offering anywhere to go instead.
+    """
+    if not _suite_token_ok(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    try:
+        return JSONResponse(await _read_lock_state())
+    except Exception:
+        # The exception text carries the database path and internal SQL, and
+        # this endpoint answers pktHub over the network — log it, don't return it.
+        log.exception("suite endpoint failed")
+        return JSONResponse({"error": "Internal error"}, status_code=500)
+
+
+@router.post("/direct-access")
+async def set_direct_access(request: Request):
+    """
+    Lock or unlock direct UI access. Auth: X-Suite-Token.
+    Body: {"locked": true|false, "hub_redirect_url": "https://hub/app/10"}
+
+    hub_redirect_url is optional and comes from pktHub, which is the only party
+    able to build it: the address carries the hub's own hostname and this app's
+    id in the hub's registry, and neither is visible from here. Asking an
+    operator to type it into each app in turn was asking them to guess a foreign
+    primary key.
+
+    The heartbeat is written alongside the flag so a fresh lock starts fresh
+    rather than inheriting an expiry from whenever pktHub last called.
+    """
+    if not _suite_token_ok(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    locked = bool(body.get("locked", False))
+    redirect_url = (body.get("hub_redirect_url") or "").strip()
+    # Same guard as PATCH /hub-redirect-url, and it counts for more here: this
+    # value arrives over the network rather than from an admin at a form, and
+    # every visitor follows it once the lock is on.
+    if redirect_url and not redirect_url.lower().startswith(("http://", "https://")):
+        return JSONResponse(
+            {"error": "hub_redirect_url must start with http:// or https://"},
+            status_code=400,
+        )
+
+    from app.config import get_settings
+    from datetime import datetime, timezone
+    import aiosqlite
+    try:
+        async with aiosqlite.connect(get_settings().db_path) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('direct_ui_locked', ?)",
+                (json.dumps(locked),)
+            )
+            await db.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('lock_heartbeat_at', ?)",
+                (json.dumps(datetime.now(timezone.utc).isoformat()),)
+            )
+            if redirect_url:
+                await db.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES ('hub_redirect_url', ?)",
+                    (json.dumps(redirect_url),)
+                )
+            await db.commit()
+        return JSONResponse({
+            "status": "ok",
+            "direct_ui_locked": locked,
+            "hub_redirect_url": redirect_url,
+        })
+    except Exception:
+        # The exception text carries the database path and internal SQL, and
+        # this endpoint answers pktHub over the network — log it, don't return it.
+        log.exception("suite endpoint failed")
+        return JSONResponse({"error": "Internal error"}, status_code=500)
+
+
+@router.get("/mode")
+async def get_mode():
+    """
+    Lock state, unauthenticated. This app's own login page reads it to explain
+    why it bounced the user to pktHub, and that page holds no suite token and
+    no session. It exposes nothing a locked-out visitor cannot already see from
+    the redirect itself.
+    """
+    try:
+        return JSONResponse(await _read_lock_state())
+    except Exception:
+        log.exception("suite endpoint failed")
+        return JSONResponse({"error": "Internal error"}, status_code=500)
+
+
+@router.patch("/hub-redirect-url")
+async def set_hub_redirect_url(request: Request, user: AdminUser):
+    """
+    Where users are sent while direct access is locked — normally this app's
+    address on pktHub. Set from this app's own Settings, so it takes a session
+    rather than a suite token.
+
+    Admin-only, and http/https only: once the lock is on, every visitor to this
+    app follows this URL, so whoever can set it can redirect the whole user
+    base. That is an admin decision, and a "javascript:" target would make it
+    an XSS sink.
+
+    Body: {"hub_redirect_url": "https://hub.example.com/app/pktflow"}
+    """
+    from app.config import get_settings
+    import aiosqlite
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    url = (body.get("hub_redirect_url") or "").strip()
+    if url and not url.lower().startswith(("http://", "https://")):
+        return JSONResponse(
+            {"error": "hub_redirect_url must start with http:// or https://"},
+            status_code=400,
+        )
+
+    try:
+        async with aiosqlite.connect(get_settings().db_path) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('hub_redirect_url', ?)",
+                (json.dumps(url),)
+            )
+            await db.commit()
+        return JSONResponse({"status": "ok", "hub_redirect_url": url})
+    except Exception:
+        # The exception text carries the database path and internal SQL, and
+        # this endpoint answers pktHub over the network — log it, don't return it.
+        log.exception("suite endpoint failed")
+        return JSONResponse({"error": "Internal error"}, status_code=500)
