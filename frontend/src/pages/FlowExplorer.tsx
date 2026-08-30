@@ -525,7 +525,7 @@ export default function FlowExplorer() {
               {' flows on this page'}
             </p>
           </div>
-          <div className="overflow-x-auto">
+          <div className="f-tbl-scroll overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-gray-800">

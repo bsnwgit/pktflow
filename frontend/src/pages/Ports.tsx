@@ -92,7 +92,7 @@ function InlinePortFlows({
   return (
     <tr>
       <td colSpan={colSpan} className="px-0 py-0 bg-gray-950 border-b border-gray-800">
-        <div className="px-6 py-3">
+        <div className="f-tbl-scroll px-6 py-3">
           <p className="text-xs text-blue-300 mb-2 font-medium">
             {flows.length} recent flows — port {port}/{protoName}
           </p>
@@ -386,7 +386,7 @@ function PortInventoryTable({ window, sampler_ip, site }: { window: string; samp
         <button onClick={() => setSearch('')} className="text-red-400 hover:text-red-300 transition-colors text-sm font-bold">✕</button>
         <span className="text-xs text-white">{filtered.length} ports</span>
       </div>
-      <div className="overflow-hidden rounded-xl border border-gray-800">
+      <div className="f-tbl-scroll overflow-hidden rounded-xl border border-gray-800">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-800 bg-gray-900">
