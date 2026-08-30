@@ -400,7 +400,7 @@ export default function Analytics() {
   const metricLabel = { bytes: 'Bytes', packets: 'Packets', flow_count: 'Flows' }[metric]
 
   return (
-    <div className="flex flex-col h-full gap-4">
+    <div className="flex flex-col h-auto sm:h-full gap-4">
       {/* Header */}
       <div className="flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -546,7 +546,7 @@ export default function Analytics() {
       </div>
 
       {/* Network map + Traffic flow — expands to fill remaining height */}
-      <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
+      <div className="grid grid-cols-2 gap-4 flex-1 min-h-0 max-sm:min-h-[560px]">
         <RadarCard timeWindow={window} />
         <Card title="Traffic Flow — Source → Destination" className="h-full">
           <SankeyChart topology={topology} />
