@@ -54,7 +54,6 @@ migrations/versions/
 scripts/__pycache__/
 
 # Operational / deployment-specific files (not for public repo)
-CLAUDE.md
 TODO.md
 todo_widget.html
 FLOW_VOLUME_ANALYSIS.md
