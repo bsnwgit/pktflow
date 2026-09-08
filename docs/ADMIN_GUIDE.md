@@ -183,6 +183,10 @@ Where no role is set to *Read and write*, the write operations are withheld from
 
 ## Troubleshooting
 
+The five that come up most often. For anything else — ingest paths end to end,
+storage, alerts, TLS, upgrades, performance — see
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
 | Symptom | Check |
 |---|---|
 | Service won't start | `journalctl -u pktflow -n 50`; check `config.yaml` / env vars and `PKTFLOW_SECRET_KEY` |
