@@ -13,7 +13,7 @@ from pathlib import Path
 
 import aiosqlite
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from app.config import get_settings
 from app.dependencies import require_suite_token
 
@@ -85,6 +85,14 @@ MANIFEST = [
     {"id":"traffic_by_sampler","title":"Traffic by Exporter","category":"Sites & Devices","description":"Flow volume per NetFlow exporter",                    "view_path":"/api/widgets/traffic_by_sampler","default_w":560,"default_h":320,"min_w":300,"min_h":190,
      "params":[_WINDOW_PARAM]},
     {"id":"collector_status",  "title":"Collector Status",   "category":"Sites & Devices","description":"NetFlow collector/exporter device health",            "view_path":"/api/widgets/collector_status",  "default_w":540,"default_h":320,"min_w":300,"min_h":200},
+
+    # ── Scoped to one device or port ──────────────────────────────────────────
+    {"id":"device_traffic_trend","title":"Device Traffic Trend","category":"Sites & Devices","description":"Bytes and packets over time for one NetFlow exporter","view_path":"/api/widgets/device_traffic_trend","default_w":700,"default_h":360,"min_w":320,"min_h":200,
+     "params":[{"key":"sampler_ip","label":"Exporter","type":"select","options_path":"/api/widgets/options/samplers"}, _WINDOW_PARAM]},
+    {"id":"device_protocol_mix","title":"Device Protocol Mix","category":"Sites & Devices","description":"Protocol share of one exporter's traffic","view_path":"/api/widgets/device_protocol_mix","default_w":460,"default_h":320,"min_w":260,"min_h":200,
+     "params":[{"key":"sampler_ip","label":"Exporter","type":"select","options_path":"/api/widgets/options/samplers"}, _WINDOW_PARAM]},
+    {"id":"port_traffic_trend","title":"Port Traffic Trend","category":"Trends","description":"Bytes and flows over time for one destination port","view_path":"/api/widgets/port_traffic_trend","default_w":700,"default_h":360,"min_w":320,"min_h":200,
+     "params":[{"key":"dst_port","label":"Port","type":"select","options_path":"/api/widgets/options/ports"}, _WINDOW_PARAM]},
 
     # ── Maps ──────────────────────────────────────────────────────────────────
     {"id":"geo_map",           "title":"Geo Map",            "category":"Maps",         "description":"Live world map showing traffic origins & destinations", "view_path":"/api/widgets/geo_map",           "default_w":860,"default_h":500,"min_w":480,"min_h":300},
@@ -763,6 +771,123 @@ async def widget_traffic_trend(minutes: int = 60):
         content = _empty("No flow data in window")
     return HTMLResponse(_page("Traffic Trend",
                               _shell(f"Traffic — last {_win_label(minutes)}", content)))
+
+
+# ── Scoped widgets: one exporter / one port ───────────────────────────────────
+# _ch() takes a finished query string, so a request value can never be bound as a
+# parameter here. Each value is therefore parsed into its canonical form first —
+# an IP address through `ipaddress`, a port through int() with a range check —
+# and only that canonical form is interpolated. Anything that does not parse is
+# treated as "not chosen yet".
+def _sampler_arg(raw):
+    import ipaddress
+    try:
+        return str(ipaddress.ip_address(str(raw or "").strip()))
+    except ValueError:
+        return None
+
+
+def _port_arg(raw):
+    try:
+        v = int(raw)
+        return v if 0 < v <= 65535 else None
+    except (TypeError, ValueError):
+        return None
+
+
+@router.get("/widgets/options/samplers")
+async def widget_options_samplers():
+    names = {}
+    try:
+        async with aiosqlite.connect(_DB) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT ip, name FROM devices ORDER BY name") as cur:
+                names = {r["ip"]: r["name"] for r in await cur.fetchall()}
+    except Exception as exc:
+        _note_err(exc)
+    rows = await asyncio.to_thread(_ch, "SELECT DISTINCT toString(sampler_ip) FROM flows "
+                                        "WHERE timestamp >= now() - INTERVAL 7 DAY")
+    ips = sorted({str(r[0]) for r in rows} | set(names))
+    return JSONResponse([{"value": ip, "label": f"{names[ip]} ({ip})" if names.get(ip) else ip} for ip in ips])
+
+
+@router.get("/widgets/options/ports")
+async def widget_options_ports():
+    rows = await asyncio.to_thread(_ch, """
+        SELECT dst_port, sum(bytes) AS b FROM flows
+        WHERE timestamp >= now() - INTERVAL 7 DAY AND dst_port > 0
+        GROUP BY dst_port ORDER BY b DESC LIMIT 100
+    """)
+    return JSONResponse([{"value": str(r[0]), "label": str(r[0])} for r in rows])
+
+
+@router.get("/widgets/device_traffic_trend", response_class=HTMLResponse, include_in_schema=False)
+async def widget_device_traffic_trend(sampler_ip: str = "", minutes: int = 60):
+    ip = _sampler_arg(sampler_ip)
+    if not ip:
+        return HTMLResponse(_page("Device Traffic Trend", _needs("Select an exporter")))
+    minutes = _mins(minutes)
+    bucket  = max(1, minutes // 60)
+    rows = await asyncio.to_thread(_ch, f"""
+        SELECT toStartOfInterval(timestamp, INTERVAL {bucket} MINUTE) AS b,
+               sum(bytes), sum(packets)
+        FROM flows
+        WHERE timestamp >= now() - INTERVAL {int(minutes)} MINUTE AND toString(sampler_ip) = '{ip}'
+        GROUP BY b ORDER BY b ASC
+    """)
+    if not rows:
+        return HTMLResponse(_page("Device Traffic Trend", _empty("No flow data from this exporter in window")))
+    content = (
+        "<div style='display:flex;flex-direction:column;gap:10px;height:100%'>"
+        f"<div style='flex:1;min-height:0'>{_line_chart([('Bytes', [r[1] for r in rows])], fmt=_fmt_bytes)}</div>"
+        f"<div style='flex:1;min-height:0'>{_line_chart([('Packets', [r[2] for r in rows])])}</div>"
+        "</div>"
+    )
+    return HTMLResponse(_page("Device Traffic Trend",
+                              _shell(f"{ip} — last {_win_label(minutes)}", content)))
+
+
+@router.get("/widgets/device_protocol_mix", response_class=HTMLResponse, include_in_schema=False)
+async def widget_device_protocol_mix(sampler_ip: str = "", minutes: int = 60):
+    ip = _sampler_arg(sampler_ip)
+    if not ip:
+        return HTMLResponse(_page("Device Protocol Mix", _needs("Select an exporter")))
+    minutes = _mins(minutes)
+    rows = await asyncio.to_thread(_ch, f"""
+        SELECT protocol, sum(bytes) AS b FROM flows
+        WHERE timestamp >= now() - INTERVAL {int(minutes)} MINUTE AND toString(sampler_ip) = '{ip}'
+        GROUP BY protocol ORDER BY b DESC LIMIT 6
+    """)
+    if not rows:
+        return HTMLResponse(_page("Device Protocol Mix", _empty("No flow data from this exporter in window")))
+    content = _bars([(_pname(r[0]), r[1] or 0, _fmt_bytes(r[1] or 0)) for r in rows], color="#a78bfa")
+    return HTMLResponse(_page("Device Protocol Mix",
+                              _shell(f"{ip} protocols — last {_win_label(minutes)}", content)))
+
+
+@router.get("/widgets/port_traffic_trend", response_class=HTMLResponse, include_in_schema=False)
+async def widget_port_traffic_trend(dst_port: int = 0, minutes: int = 60):
+    port = _port_arg(dst_port)
+    if not port:
+        return HTMLResponse(_page("Port Traffic Trend", _needs("Select a port")))
+    minutes = _mins(minutes)
+    bucket  = max(1, minutes // 60)
+    rows = await asyncio.to_thread(_ch, f"""
+        SELECT toStartOfInterval(timestamp, INTERVAL {bucket} MINUTE) AS b, sum(bytes), count()
+        FROM flows
+        WHERE timestamp >= now() - INTERVAL {int(minutes)} MINUTE AND dst_port = {port}
+        GROUP BY b ORDER BY b ASC
+    """)
+    if not rows:
+        return HTMLResponse(_page("Port Traffic Trend", _empty(f"No flows to port {port} in window")))
+    content = (
+        "<div style='display:flex;flex-direction:column;gap:10px;height:100%'>"
+        f"<div style='flex:1;min-height:0'>{_line_chart([('Bytes', [r[1] for r in rows])], fmt=_fmt_bytes)}</div>"
+        f"<div style='flex:1;min-height:0'>{_line_chart([('Flows', [r[2] for r in rows])])}</div>"
+        "</div>"
+    )
+    return HTMLResponse(_page("Port Traffic Trend",
+                              _shell(f"Port {port} — last {_win_label(minutes)}", content)))
 
 
 # ── Protocol Trend (chart) ────────────────────────────────────────────────────

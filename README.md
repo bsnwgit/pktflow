@@ -768,6 +768,10 @@ which resolves against the parent's height — and collapses to zero against an
 auto-height parent, rendering blank. Maps and canvases hit this first.
 
 
+#### Widgets scoped to one exporter or port
+
+The Traffic by Port and Device pages chart a single exporter or destination port, which the window-only widgets could not. The NOC Builder now also offers **Device Traffic Trend**, **Device Protocol Mix** (pick an exporter) and **Port Traffic Trend** (pick a port). The exporter and port come from a saved widget config, so each is parsed first — an IP address through `ipaddress`, a port through a range-checked integer — before it is placed in the ClickHouse query; anything that does not parse is treated as "not chosen".
+
 ### WebSocket
 
 | Endpoint | Auth | Description |
