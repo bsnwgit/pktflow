@@ -31,6 +31,21 @@ Open the app port in your firewall (`sudo ufw allow 8766/tcp`), then log in with
 
 `admin` (full access), `analyst` (read + export), `viewer` (read-only). Manage at Settings → Security → Users (admin-only) — create, reset password, toggle active, assign role. The ★ next to a user marks them the **default admin**: if you ever disable *both* Local auth and SAML on the Auth sub-tab, the app skips the login page and auto-signs everyone in as that account instead of dead-ending — only appropriate on a trusted, access-controlled network. Only one user can hold the ★ at a time.
 
+**Failed-login lockout.** A local account is locked for 30 minutes after a set number of failed logins in a row (Settings → Security → Auth → *Failed logins before lockout*, default 3). Failures never expire; only a successful login resets the count. If it then fails that many times again it stays locked until an admin clicks the unlock icon beside it on the Users tab. While locked, even the right password is refused. A wrong current password when changing a password counts as a failed login too, so a signed-in session cannot be used to guess it. A successful login clears the failure count and any earlier lockout. If the only admin is locked, unlock it from the server, in the install directory with the app's own Python:
+
+```bash
+python3 scripts/unlock_user.py <username>
+```
+
+**Per-address throttle.** Separately from the account lockout, an address that keeps failing to sign in is blocked. Failed credential checks are counted by the address they came from, whatever username was tried, at the sign-in form and at the change-password form: after *Failed sign-ins per address* (default 10) within *Counted over* (default 15 minutes), that address is refused for *Address blocked for* (default 15 minutes), even with correct credentials. All three are under Settings → Security → Auth. A successful sign-in does not reset the count, and failures stop counting when the window ends. Other addresses are unaffected, and the block ends by itself.
+
+The address is the one the connection came from. If pktFlow sits behind a proxy on another host (pktHub, for example), every user arrives from the proxy's address and shares one count, so one person guessing could block everyone behind it. In that setup raise the limit well above normal use, or throttle at the proxy. pktFlow does not read `X-Forwarded-For`, because any client can send it.
+
+
+### Okta SAML SSO
+
+Settings → Security → Auth: paste Okta's IdP metadata XML (auto-fills SSO URL/Entity ID/certificate) or enter by hand. ACS URL and SP metadata link are derived from **Base URL** — set that first.
+
 ### Okta SAML SSO
 
 Settings → Security → Auth: enable SAML, then either paste Okta's IdP metadata XML (auto-fills SSO URL/Entity ID/certificate) or enter them by hand. The ACS URL to register in Okta is shown read-only on the same tab, derived from **Base URL** — set that first. Local auth and SAML aren't mutually exclusive; both can be on at once. (Okta OIDC was deliberately dropped in favor of SAML — not a bug.)
