@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="docs/screenshots/social-preview.png" alt="pktFlow — See where your traffic actually goes" width="900">
+</p>
+
+<p align="center">
   <img src="assets/logos/lockup-256h.png" alt="pktFlow" height="80"/>
 </p>
 
@@ -19,6 +23,14 @@ Part of the **[pkt suite](#the-pkt-suite)** — ten self-hosted apps for network
 security operations that share one architecture and one sign-in.
 
 ---
+
+## Why pktFlow
+
+- **Live NetFlow v9.** Receives flows from your network samplers through goflow2 and Vector and stores them in ClickHouse.
+- **Explore it.** Real-time traffic analytics, a flow explorer and a geo map in one React dashboard.
+- **Alerting built in.** A visualization and alerting platform, not just a flow store.
+- **Part of a suite.** One of ten self-hosted pkt apps that share one architecture (FastAPI + React), `admin` / `analyst` / `viewer` roles and a suite token. pktFlow installs and runs standalone, so take only what you need.
+- **Self-hosted, source-available.** An installer script that sets up ClickHouse and a systemd service on Ubuntu Server 22.04/24.04 LTS. Sign in with local accounts or SAML 2.0 SSO. Free for noncommercial use under the [PolyForm Noncommercial License](LICENSE).
 
 ## Quick Start
 
