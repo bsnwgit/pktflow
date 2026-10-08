@@ -3,19 +3,12 @@
 </p>
 
 <p align="center">
+  <a href="docs/SCREENSHOTS.md"><strong>View screenshots</strong></a>
+</p>
+
+<p align="center">
   <img src="assets/logos/lockup-256h.png" alt="pktFlow" height="80"/>
 </p>
-
-<p align="center">
-  <img src="docs/screenshots/analytics.webp" alt="pktFlow — Traffic analytics" width="900">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/flow-explorer.webp" alt="pktFlow — Flow explorer" width="430">
-  <img src="docs/screenshots/geo-map.webp" alt="pktFlow — Geo map" width="430">
-</p>
-
-<p align="center"><sub>Traffic analytics &middot; Flow explorer &middot; Geo map</sub></p>
 
 A production NetFlow visualization and alerting platform. Receives live NetFlow v9 data from network samplers via [goflow2](https://github.com/netsampler/goflow2) + [Vector](https://vector.dev/), stores flows in ClickHouse, and serves a React dashboard for real-time traffic analysis.
 
